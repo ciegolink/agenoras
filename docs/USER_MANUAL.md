@@ -1,0 +1,378 @@
+# Agenoras User Manual
+
+Agenoras brings mail, calendar, contacts and tasks together in one desktop app for Windows, Linux and macOS. It uses open standards (IMAP, SMTP, CalDAV, CardDAV), so it works with Nextcloud, iCloud, Gmail, your own mail server and most other providers.
+
+This manual explains how to use the app. If you want to build or change Agenoras itself, see [DEVELOPMENT.md](DEVELOPMENT.md).
+
+## Contents
+
+1. [Installation](#1-installation)
+2. [First start: adding accounts](#2-first-start-adding-accounts)
+3. [The main window](#3-the-main-window)
+4. [Mail](#4-mail)
+5. [Writing emails](#5-writing-emails)
+6. [Rules](#6-rules)
+7. [Calendar](#7-calendar)
+8. [Tasks](#8-tasks)
+9. [Contacts](#9-contacts)
+10. [Settings](#10-settings)
+11. [Keyboard shortcuts](#11-keyboard-shortcuts)
+12. [Your data and privacy](#12-your-data-and-privacy)
+13. [Troubleshooting](#13-troubleshooting)
+
+---
+
+## 1. Installation
+
+Download the right file for your system from the [latest release](https://github.com/ciegolink/agenoras/releases/latest).
+
+| System | File | How to install |
+|---|---|---|
+| Windows | `Agenoras-Setup.exe` | Run the installer. If SmartScreen warns about an unknown publisher, click **More info → Run anyway**. |
+| Windows (no install) | `Agenoras-Portable.exe` | Start the file directly. |
+| Ubuntu / Debian | `agenoras_amd64.deb` | `sudo apt install ./agenoras_amd64.deb` |
+| Other Linux | `Agenoras-x86_64.AppImage` | `chmod +x Agenoras-x86_64.AppImage`, then start it. |
+| macOS | `Agenoras.dmg` | Open it and drag Agenoras to **Applications**. The app is not signed: on first start, right-click it and choose **Open**, or run `xattr -cr /Applications/Agenoras.app`. |
+
+The macOS version runs on both Intel and Apple Silicon Macs.
+
+## 2. First start: adding accounts
+
+On first start, open **Settings → Accounts**. Agenoras has three kinds of accounts. Add only the ones you need.
+
+### Email account (IMAP/SMTP)
+
+Click **+ Email account** and fill in:
+
+- **Display name**: the name others see as the sender (e.g. your name or company)
+- **Email** and **Password**
+- **IMAP server** and **SMTP server** with ports
+- **SSL/TLS**: on for port 465, off for STARTTLS on port 587
+
+Click **Connect →**. Agenoras checks the login right away and loads your folders.
+
+### Calendar account (CalDAV)
+
+Click **+ CalDAV account**, enter a name, the **Server URL**, your username and password. All calendars and task lists on that server appear automatically.
+
+### Contacts account (CardDAV)
+
+Click **+ CardDAV account** and fill in the same fields as for CalDAV.
+
+### Server addresses for common providers
+
+| Provider | Settings |
+|---|---|
+| Gmail | IMAP `imap.gmail.com`, SMTP `smtp.gmail.com`. Use an [app password](https://myaccount.google.com/apppasswords), not your normal password. |
+| Nextcloud | CalDAV and CardDAV: `https://<your-server>/remote.php/dav` |
+| iCloud | CalDAV `https://caldav.icloud.com`, CardDAV `https://contacts.icloud.com`. Use an app password from your Apple ID settings. |
+
+> **Not supported yet:** Microsoft 365 / Outlook.com and Google Calendar/Contacts need OAuth2 sign-in, which Agenoras doesn't support yet.
+
+To change an account later, click **Edit** next to it. Leave the password field empty to keep the current password.
+
+## 3. The main window
+
+The bar on the left switches between **Mail**, **Calendar**, **Tasks**, **Contacts** and **Settings**.
+
+- **Columns** can be resized by dragging their edges. Double-click an edge to reset it. Agenoras remembers window size, position and column widths.
+- **My day** is a side panel with a small month calendar, today's and tomorrow's events and your tasks. Open or close it with the panel button in the toolbar. Use **+ Event** and **+ Task for today** to add items quickly.
+- **Tray icon**: if background mode is on (see [Notifications](#notifications)), closing the window keeps Agenoras running in the tray. Right-click the tray icon to open the app, write a new email or quit.
+- **About**: gear menu → **About Agenoras** shows the version and links to the wiki and bug reports.
+
+## 4. Mail
+
+### Folders and inboxes
+
+The sidebar shows **All inboxes** (a unified inbox for all accounts) and below it a folder tree for each account, with unread counts. Click the arrow next to a folder to expand or collapse it; Agenoras remembers your choice.
+
+New mail arrives live without refreshing. To check manually, press **F5** or **Ctrl+R**.
+
+### Reading mail
+
+Click an email to show it in the reading pane. **Double-click** opens it in its own window.
+
+Buttons in the email header: **Reply**, **Reply all**, **Forward**, **Archive**, **Delete**.
+
+Click on a sender or recipient name for more options: write an email, copy the address or name, or **Add as contact**.
+
+### Selecting several emails
+
+- **Ctrl+click** (Cmd+click on macOS): add or remove single emails
+- **Shift+click**: select a range
+- **Ctrl+A**: select all emails in the list
+- **Esc**: clear the selection
+
+You can then drag the selected emails onto a folder or category, or use the right-click menu.
+
+### Right-click menu
+
+Right-click an email (or a selection) to:
+
+- Mark as read / unread
+- **Mark as important** (star) or remove the star
+- Assign or remove a **category**
+- **Move to spam** or **Not spam – move to inbox**
+- Archive, move or delete
+- Open in a new window
+- **Create rule …** from this email (see [Rules](#6-rules))
+
+### Deleting
+
+**Delete** (or the **Del** key) moves emails to the trash. In the **Trash** folder, deleting removes them permanently after you confirm.
+
+### Search and filters
+
+Type into the search field at the top of the list and press **Enter**. Agenoras searches sender, subject and the full message text on the server. Choose **This folder** or **Everywhere** to set the scope. Press **Esc** to end the search.
+
+The filter buttons above the list show only:
+
+- **Unread** emails
+- emails with an **Attachment**
+- **Important** (starred) emails
+
+### Categories
+
+Categories are colored labels for your emails, such as "Customer" or "Invoice".
+
+- Create and edit them under **Settings → Categories**.
+- Assign one by right-clicking an email or dragging emails onto the category in the sidebar.
+- A category appears in the sidebar under **All inboxes** as soon as it contains emails. Click it to see all emails in that category.
+
+### Attachments
+
+Click an attachment to open it, or use **Save** to store it. For your safety, executable files (such as `.exe`) are never opened directly; save them instead.
+
+### External images
+
+Images from the internet are blocked by default, because they can tell the sender that you opened the email. Click **Load images** to show them for this email, or **Always load from …** to trust this sender permanently.
+
+### External senders
+
+If you turn on **Mark external senders** (Settings → Appearance), emails from outside your own domains get an **External** tag in the list and a warning in the email. You can add more internal domains there.
+
+## 5. Writing emails
+
+Click **New email** in the toolbar. The compose window opens.
+
+### Recipients
+
+Type a name or address into **To**, **Cc** or **Bcc**. Agenoras suggests addresses from your contacts and people you have emailed before. Use the arrow keys and **Enter** or **Tab** to pick one. Separate several recipients with **Enter**, a comma or a semicolon. **Backspace** in an empty field removes the last recipient.
+
+### Sender
+
+Choose the sender address under **From**. When you reply, Agenoras automatically picks the address the email was sent to. Aliases are set up under **Settings → Senders & signatures**.
+
+### Text and formatting
+
+The editor works like a word processor: paragraph styles, **bold** (Ctrl+B), *italic* (Ctrl+I), underline (Ctrl+U), strikethrough, text color, lists, links (Ctrl+K) and **Clear formatting**. Text you paste from other programs is cleaned up automatically.
+
+**Images** can be inserted with the image button or by dragging them onto the text (max. 5 MB each).
+
+### Attachments
+
+Click **Attach file** or simply drag files into the window. All attachments together can be up to 25 MB.
+
+### Priority
+
+Set the priority to **High**, **Normal** or **Low**. Recipients see high-priority emails marked as important.
+
+### Templates
+
+Click the template button to insert a saved template, or **Save as template** to save the current email for later. Templates are managed under **Settings → Templates**.
+
+### Sending to many people individually: placeholders
+
+You can write one email and send a personal copy to each recipient:
+
+1. Add all recipients in **To**.
+2. Insert placeholders with the placeholder button, for example `Hello {{FirstName}},`.
+3. Click the arrow next to **Send** and choose **Send individually**.
+
+Each recipient then gets their own email with the placeholders filled in from your contacts. Cc and Bcc are ignored in this mode.
+
+| Placeholder | Is replaced by |
+|---|---|
+| `{{FirstName}}` | First name |
+| `{{LastName}}` | Last name |
+| `{{Name}}` | Full name |
+| `{{Company}}` | Company |
+| `{{Email}}` | Email address |
+| `{{Date}}` | Today's date |
+
+The German placeholders (`{{Vorname}}` etc.) work as well.
+
+### Sending and undo
+
+Click **Send →** or press **Ctrl+Enter**. If an undo delay is set (Settings → Senders & signatures → **Sending**, 0–5 seconds), you can click **Undo** (or press Esc / Ctrl+Z) during that time to stop the email and keep editing.
+
+If you close the compose window without sending, Agenoras asks whether you want to discard the draft.
+
+## 6. Rules
+
+Rules sort incoming mail automatically. Open **Settings → Rules** and click **New rule**, or right-click an email and choose **Create rule …** to start with its sender already filled in.
+
+A rule has:
+
+- **Conditions**: *From*, *To*, *Subject* or *Anywhere* — *contains*, *is*, *starts with* or *ends with* a text. Optionally **only with attachment**.
+- **If all / any** of the conditions match.
+- **Actions**: **Move to** a folder, **Mark as read**, **Add star**, set a **Category**, **Move to spam** or **Delete**.
+- **Stop processing more rules**: later rules are skipped for this email.
+- The account the rule applies to, or **All accounts**.
+
+Rules run from top to bottom for every new email in the inbox, including emails that arrived while Agenoras was closed. Use **Apply to inbox now** to run a rule on existing emails.
+
+## 7. Calendar
+
+The calendar shows a week view with a month overview. Use **Today**, **Previous week** and **Next week** to move around. Tick or untick calendars in the sidebar to show or hide them.
+
+### Creating and changing events
+
+- **New event**: click **New event**, or drag across an empty time slot.
+- **Move**: drag the event to another time or day.
+- **Change length**: drag the bottom edge of the event.
+- **Edit**: click the event to open it. You can change title, time, location, notes, the calendar it belongs to, and set **All day**.
+
+### Recurring events
+
+Under **Repeat**, choose *Daily*, *Weekdays (Mon–Fri)*, *Weekly*, *Monthly* or *Yearly*, how often (**Every** …) and when it **Ends** (never, on a date, or after a number of times).
+
+When you change, move or delete a recurring event, Agenoras asks whether this applies to **This event only** or the **Whole series**. Rules created in other apps that Agenoras can't edit are kept unchanged.
+
+### Invitations
+
+Add people under **Attendees** and turn on **Send invitations by email**. They receive a normal invitation that works with Outlook, Gmail, Apple Calendar and others. When you move or cancel the event, Agenoras offers to inform them.
+
+When you receive an invitation, the email shows a card with **Accept**, **Maybe** and **Decline**. Your answer is sent to the organizer and the event is added to your calendar. Replies from your attendees can be applied with **Update calendar**.
+
+### More
+
+- **Search events** with the search field in the calendar.
+- **Send by email** sends an event as an `.ics` file.
+
+## 8. Tasks
+
+Tasks are stored on your CalDAV server (e.g. Nextcloud Tasks or Apple Reminders lists), so they stay in sync with your other devices.
+
+- Type into the quick field at the top and press **Enter** to add a task.
+- Click a task to edit it: title, **List**, **Due** date and optional time, priority and notes.
+- Click the checkbox to mark a task as done. **Show completed** shows finished tasks again.
+- Tasks are grouped into **Overdue**, **Today**, **Upcoming** and **No date**.
+
+Today's tasks also appear in the **My day** side panel.
+
+If no task list appears, your CalDAV server needs a calendar that supports tasks (VTODO).
+
+## 9. Contacts
+
+The contacts view lists all address books from your CardDAV accounts. Search by name, company, email or phone.
+
+- **New contact**: first and last name, company, job title, emails and phone numbers (one per line), birthday, note and address book.
+- **Photo**: drop an image onto the photo area or click it. It is cropped to a square automatically. Contact photos are also shown next to emails from that person.
+- **Write email** starts a new email to the contact. **Recent emails** shows your latest correspondence.
+- To create a contact from an email, click the sender's name and choose **Add as contact**.
+
+## 10. Settings
+
+### Senders & signatures
+
+For each account you can set the sender name, add **aliases** (other addresses you send from) and give each address its own **signature**, as plain text or HTML. Click **Load HTML file …** to import a ready-made HTML signature; images in it are embedded and sent along.
+
+Your mail server must allow you to send from an alias address. The **Sending** delay for undo (0–5 seconds) is also set here.
+
+### Templates
+
+Create, rename and delete email templates. A template saved from the compose window keeps its formatting; editing it here turns it into plain text.
+
+### Accounts
+
+Add, edit and remove email, CalDAV and CardDAV accounts (see [section 2](#2-first-start-adding-accounts)).
+
+### Categories
+
+Create categories, choose their colors, rename or delete them. Deleting a category keeps the emails.
+
+### Rules
+
+See [section 6](#6-rules).
+
+### Notifications
+
+- **Play a sound for new email**, with a default sound, volume and a sound per account
+- **Sound when sent**
+- **Desktop notification for new email** (when the window isn't in front), also per account
+- **Keep running in the background when closed** (tray icon)
+
+To use your own sounds, click **Open folder for your own sounds**, put `.ogg`, `.mp3` or `.wav` files into it and reopen the settings.
+
+### Appearance
+
+- **Colour scheme**: Dark, Light or Match system
+- **Text size**: Small, Medium or Large
+- **Language**: English, German or Match system (applies after a restart)
+- **Week starts on**
+- **Show mailboxes as** name or email address
+- **External emails**: mark external senders, additional internal domains
+
+## 11. Keyboard shortcuts
+
+On macOS, use **Cmd** instead of **Ctrl**.
+
+| Where | Shortcut | Action |
+|---|---|---|
+| Mail | **F5** / **Ctrl+R** | Refresh |
+| Mail | **Del** | Delete selected emails |
+| Mail | **Ctrl+A** | Select all emails in the list |
+| Mail | **Ctrl+click** / **Shift+click** | Select single emails / a range |
+| Mail | **Esc** | Clear selection, close menus |
+| Mail | Double-click | Open email in its own window |
+| Search | **Enter** / **Esc** | Start / end search |
+| Compose | **Ctrl+Enter** | Send |
+| Compose | **Ctrl+B / I / U** | Bold / italic / underline |
+| Compose | **Ctrl+K** | Insert link |
+| Compose | **Esc** / **Ctrl+Z** | Undo sending (during the delay) |
+| Mail window | **Esc** | Close window |
+
+## 12. Your data and privacy
+
+Agenoras talks only to your own mail, calendar and contacts servers. There is no Agenoras cloud and no tracking.
+
+Your data is stored here:
+
+| System | Folder |
+|---|---|
+| Linux | `~/.config/agenoras/` |
+| Windows | `%APPDATA%\agenoras\` |
+| macOS | `~/Library/Application Support/agenoras/` |
+
+- **Passwords** are encrypted with your system's keychain.
+- `settings.json` contains signatures, templates, rules and preferences. Back it up if you want to keep them.
+- `cache.db` is a local copy of your mail for fast start and offline reading. You can delete it at any time; it is rebuilt from the server.
+
+HTML emails are shown in a protected area where scripts can't run. External content is only loaded when you allow it.
+
+## 13. Troubleshooting
+
+**"Sign-in failed (check username/password)"**
+Check the address and password. For Gmail and iCloud you need an app password. Some providers require you to enable IMAP access in their web settings first.
+
+**"No calendars found" / "No address books found"**
+Check the server URL. For Nextcloud it must end in `/remote.php/dav`.
+
+**"The stored password can no longer be decrypted"**
+This can happen after a system change or a new keyring. Enter the password again under **Settings → Accounts → Edit**.
+
+**"The event/contact was changed elsewhere in the meantime"**
+Someone or another device changed it at the same time. Refresh and make your change again.
+
+**An email shows no images**
+External images are blocked on purpose. Click **Load images**.
+
+**The app looks blurry or doesn't start on Linux (Wayland)**
+Start it with `AGENORAS_WAYLAND=1` to use native Wayland. `AGENORAS_GPU=1` turns on hardware acceleration, which is off by default on Linux.
+
+**Mail list looks wrong or outdated**
+Quit Agenoras, delete `cache.db` in your data folder (see [section 12](#12-your-data-and-privacy)) and start again.
+
+**Still stuck?**
+Check the [Wiki](https://github.com/ciegolink/agenoras/wiki) or [report a bug](https://github.com/ciegolink/agenoras/issues). Please include your Agenoras version (gear menu → **About Agenoras**) and your operating system.
