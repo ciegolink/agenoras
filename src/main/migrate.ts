@@ -6,6 +6,10 @@ import path from 'node:path';
 
 const OLD_NAME = 'ciegolink-mail';
 
+// Fixed data folder "agenoras" – the packaged app is called "Agenoras" (productName), which would
+// otherwise change the folder name.
+app.setPath('userData', path.join(app.getPath('appData'), 'agenoras'));
+
 export function migrateUserData(): void {
   try {
     const target = app.getPath('userData');

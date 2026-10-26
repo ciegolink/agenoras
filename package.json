@@ -24,11 +24,16 @@
     "contacts"
   ],
   "main": "dist/main/main.js",
+  "desktopName": "agenoras.desktop",
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch",
     "start": "tsc && electron . --ozone-platform=x11",
-    "icons": "electron scripts/make-icons.js"
+    "icons": "electron scripts/make-icons.js",
+    "dist": "tsc && electron-builder",
+    "dist:linux": "tsc && electron-builder --linux",
+    "dist:win": "tsc && electron-builder --win",
+    "dist:mac": "tsc && electron-builder --mac"
   },
   "dependencies": {
     "ical.js": "^2.2.1",
@@ -43,9 +48,91 @@
     "@types/node": "^26.6.5",
     "@types/nodemailer": "^8.0.2",
     "electron": "^45.0.0",
+    "electron-builder": "^26.18.0",
     "typescript": "^7.0.2"
   },
   "engines": {
     "node": ">=22"
+  },
+  "build": {
+    "appId": "ch.ciegolink.agenoras",
+    "productName": "Agenoras",
+    "copyright": "Copyright © 2026 CiegoLink GmbH",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "src/renderer/**/*.html",
+      "src/renderer/**/*.css",
+      "lang/*.json",
+      "build/**/*",
+      "sounds/**/*",
+      "package.json",
+      "!**/*.map"
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "build/icons",
+      "category": "Office",
+      "executableName": "agenoras",
+      "maintainer": "CiegoLink GmbH <info@ciegolink.com>",
+      "synopsis": "Mail, calendar, contacts and tasks",
+      "syncDesktopName": true
+    },
+    "appImage": {
+      "artifactName": "${productName}-x86_64.${ext}"
+    },
+    "deb": {
+      "artifactName": "agenoras_amd64.${ext}"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "artifactName": "${productName}-Setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable.${ext}"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "category": "public.app-category.productivity",
+      "identity": null,
+      "artifactName": "${productName}-mac.${ext}"
+    },
+    "dmg": {
+      "artifactName": "${productName}.${ext}"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "ciegolink",
+      "repo": "agenoras"
+    }
   }
 }

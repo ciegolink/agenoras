@@ -6,6 +6,24 @@ Agenoras is an Electron + TypeScript client for standard protocols: IMAP/SMTP fo
 
 [Wiki](https://github.com/ciegolink/agenoras/wiki) · [Issues](https://github.com/ciegolink/agenoras/issues) · [ciegolink.com](https://ciegolink.com)
 
+## Download
+
+[![Latest release](https://img.shields.io/github/v/release/ciegolink/agenoras?label=release)](https://github.com/ciegolink/agenoras/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-2BA89F)](LICENSE)
+
+| Platform | Download |
+|---|---|
+| Windows | [Installer (.exe)](https://github.com/ciegolink/agenoras/releases/latest/download/Agenoras-Setup.exe) · [Portable (.exe)](https://github.com/ciegolink/agenoras/releases/latest/download/Agenoras-Portable.exe) |
+| Linux | [Debian/Ubuntu (.deb)](https://github.com/ciegolink/agenoras/releases/latest/download/agenoras_amd64.deb) · [AppImage](https://github.com/ciegolink/agenoras/releases/latest/download/Agenoras-x86_64.AppImage) |
+| macOS | [Disk image (.dmg)](https://github.com/ciegolink/agenoras/releases/latest/download/Agenoras.dmg) · [Zip](https://github.com/ciegolink/agenoras/releases/latest/download/Agenoras-mac.zip) (Intel + Apple Silicon) |
+
+All versions and release notes: [Releases](https://github.com/ciegolink/agenoras/releases).
+
+- **Windows:** run the installer; SmartScreen may warn about an unknown publisher → **More info → Run anyway**.
+- **Ubuntu/Debian:** `sudo apt install ./agenoras_amd64.deb`
+- **AppImage:** `chmod +x Agenoras-x86_64.AppImage`, then start it.
+- **macOS:** open the `.dmg` and drag Agenoras to Applications. The app is not signed: on first start right-click it → **Open**, or run `xattr -cr /Applications/Agenoras.app`.
+
 ## Features
 
 **Mail**
@@ -64,6 +82,20 @@ See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for a full setup guide (Ubuntu an
 | `npm run build` | Compile TypeScript to `dist/` |
 | `npm run watch` | Compile on every save |
 | `npm run icons` | Generate app and tray icons from `build/logo.png` |
+| `npm run dist:linux` | Build Linux packages (AppImage, .deb) into `release/` |
+| `npm run dist:win` | Build Windows installer and portable `.exe` into `release/` |
+| `npm run dist:mac` | Build macOS `.dmg` and `.zip` (universal: Intel + Apple Silicon), run on a Mac |
+
+### Releases
+
+Pushing a version tag builds Linux, Windows and macOS packages with GitHub Actions and attaches them to a draft release:
+
+```bash
+npm version patch        # or minor / major
+git push --follow-tags
+```
+
+The workflow can also be started manually under **Actions → Build → Run workflow**; the packages are then available as run artifacts.
 
 ## Configuration
 
