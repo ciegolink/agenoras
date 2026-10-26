@@ -86,7 +86,7 @@ export interface NotifySettings {
   sentSound: string; // sound when a mail was sent ('none' = silent)
 }
 
-const DEFAULT_NOTIFY: NotifySettings = { enabled: true, sound: 'builtin', volume: 0.7, perAccount: {}, desktop: true, desktopOff: [], background: true, sentSound: 'app:sentMail_Ding.wav' };
+const DEFAULT_NOTIFY: NotifySettings = { enabled: true, sound: 'app:newMail_Arcade.wav', volume: 0.7, perAccount: {}, desktop: true, desktopOff: [], background: true, sentSound: 'app:sentMail_Ding.wav' };
 
 const THEMES: Theme[] = ['dark', 'light', 'system'];
 
@@ -220,7 +220,7 @@ export function allowImages(key: string): void {
 export function saveNotify(n: NotifySettings): NotifySettings {
   const clean: NotifySettings = {
     enabled: !!n?.enabled,
-    sound: String(n?.sound ?? 'builtin'),
+    sound: String(n?.sound ?? DEFAULT_NOTIFY.sound),
     volume: Math.min(1, Math.max(0, Number(n?.volume ?? 0.7))),
     perAccount: Object.fromEntries(Object.entries(n?.perAccount ?? {}).filter(([, v]) => typeof v === 'string' && v).map(([k, v]) => [k, String(v)])),
     desktop: n?.desktop !== false,

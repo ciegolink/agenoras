@@ -1156,7 +1156,7 @@ document.addEventListener('keydown', (e) => {
 
 // ---------- Sound for new mail (default or per account, see Settings → Sounds) ----------
 
-let notify: NotifySettings = { enabled: true, sound: 'builtin', volume: 0.7, perAccount: {} };
+let notify: NotifySettings = { enabled: true, sound: 'app:newMail_Arcade.wav', volume: 0.7, perAccount: {} };
 const soundCache = new Map<string, string | null>();
 let audioCtx: AudioContext | null = null;
 
