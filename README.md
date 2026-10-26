@@ -184,9 +184,10 @@ HTML mail is rendered in a sandboxed frame without scripts under a strict Conten
 ```
 ### Screenshots
 
-|---|---|---|
-|  |  |  |
-|  |  |  |
+| Home | Settings | Compose | Calendar |
+|:---:|:---:|:---:|:---:|
+| <img width="100%" alt="screen1_light" src="https://github.com/user-attachments/assets/35a0fbe8-f872-47b6-8314-9d973183fc0d" /> | <img width="100%" alt="ini_light" src="https://github.com/user-attachments/assets/102be99f-70c7-4bcc-adae-583b4b761ca4" /> | <img width="100%" alt="compose_light" src="https://github.com/user-attachments/assets/eb7a953b-2194-4317-883b-400573c99b94" /> | <img width="100%" alt="calendar_light" src="https://github.com/user-attachments/assets/d851303d-b599-43c3-b456-30683a02758c" /> |
+| <img width="100%" alt="screen1_dark" src="https://github.com/user-attachments/assets/52a8e09c-91a1-428c-94c6-eaa49267ad47" /> | <img width="100%" alt="ini_dark" src="https://github.com/user-attachments/assets/7d9f91b0-27d4-43c6-9820-8688cf5628a1" /> | <img width="100%" alt="compose_dark" src="https://github.com/user-attachments/assets/6dc98699-0eb2-49ed-ab0b-ab10579f35a6" /> | <img width="100%" alt="calendar_dark" src="https://github.com/user-attachments/assets/d1efb03c-09ff-48f2-8fde-68996b9009f8" /> |
 
 ## Translations
 
