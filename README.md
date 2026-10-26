@@ -1,10 +1,12 @@
 # Agenoras
-
 Desktop mail, calendar, contacts and tasks in one app, built by [CiegoLink](https://ciegolink.com).
+
+<img width="100%" alt="main" src="https://github.com/user-attachments/assets/f3f7d210-952f-4684-8ad4-0bbd9f2e5ba0" />
+
 
 Agenoras is an Electron + TypeScript client for standard protocols: IMAP/SMTP for mail, CalDAV for calendars and tasks, CardDAV for contacts. It works with Nextcloud, iCloud, Gmail (app password), Dovecot/Postfix hosting and most other providers. The user interface is available in German and English.
 
-[User manual](docs/USER_MANUAL.md) · [Wiki](https://github.com/ciegolink/agenoras/wiki) · [Issues](https://github.com/ciegolink/agenoras/issues) · [ciegolink.com](https://ciegolink.com)
+[User manual](docs/USER_MANUAL.md) · [Wiki](https://github.com/ciegolink/agenoras/wiki) · [Issues](https://github.com/ciegolink/agenoras/issues) · [ciegolink.com](https://ciegolink.com) · [agenoras.com](https://agenoras.com)
 
 ## Download
 
@@ -180,6 +182,11 @@ HTML mail is rendered in a sandboxed frame without scripts under a strict Conten
       ├─ settings.ts     Settings dialog
       └─ types.d.ts
 ```
+### Screenshots
+
+|---|---|---|
+|  |  |  |
+|  |  |  |
 
 ## Translations
 
