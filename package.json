@@ -1,6 +1,6 @@
 {
   "name": "agenoras",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Desktop mail, calendar, contacts and tasks (IMAP/SMTP, CalDAV, CardDAV)",
   "author": "CiegoLink GmbH (https://ciegolink.com)",
