@@ -1,0 +1,21 @@
+{
+  // Ctrl+Shift+B = run TypeScript in the background (compiles on every save)
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build",
+      "type": "npm",
+      "script": "build",
+      "problemMatcher": ["$tsc"],
+      "presentation": { "reveal": "silent" }
+    },
+    {
+      "label": "Watch (compiles on save)",
+      "type": "npm",
+      "script": "watch",
+      "isBackground": true,
+      "problemMatcher": ["$tsc-watch"],
+      "group": { "kind": "build", "isDefault": true }
+    }
+  ]
+}

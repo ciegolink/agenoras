@@ -1,0 +1,493 @@
+// Mail display, shared by the reading pane (main window) and the separate mail window (mailview.html):
+// icons, sender pictures, header, body with image banner, attachments, reply/forward.
+
+const svgIco = (paths: string, size = 15, sw = 2) =>
+  `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+
+const ACT_ICONS = {
+  reply: svgIco('<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>'),
+  replyAll: svgIco('<path d="M8 14 3 9l5-5"/><path d="M13 14 8 9l5-5"/><path d="M8 9h7.5a5.5 5.5 0 0 1 0 11H13"/>'),
+  forward: svgIco('<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>'),
+  window: svgIco('<rect x="3" y="5" width="18" height="15" rx="2"/><path d="M3 9h18"/>'),
+  read: svgIco('<path d="M3 8l9 6 9-6"/><rect x="3" y="5" width="18" height="14" rx="2"/>'),
+  unread: svgIco('<path d="M3 8l9 6 9-6"/><path d="M21 12V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h9"/><circle cx="19" cy="18" r="3" fill="currentColor"/>'),
+  image: svgIco('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5L5 20"/>'),
+  spam: svgIco('<path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6Z"/><path d="m9 9 6 6M15 9l-6 6"/>'),
+  notSpam: svgIco('<path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6Z"/><path d="m8.5 12 2.5 2.5 4.5-5"/>'),
+  archive: svgIco('<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9"/><path d="M10 13h4"/>'),
+  trash: svgIco('<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/>'),
+  refresh: svgIco('<path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 4v5h-5"/>', 16),
+  newMail: svgIco('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>', 16),
+  newEvent: svgIco('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M12 13v5M9.5 15.5h5"/>', 16),
+  newTask: svgIco('<rect x="3" y="3" width="18" height="18" rx="4"/><path d="m8 12 3 3 5-6"/>', 16),
+  newContact: svgIco('<circle cx="10" cy="8" r="4"/><path d="M3 20a7 7 0 0 1 12.5-4.3"/><path d="M19 14v6M16 17h6"/>', 16),
+};
+
+// ---------- Sender picture: contact photo → website icon → initials ----------
+
+const avatarCache = new Map<string, string | null>();
+const avatarQueue = new Set<string>();
+let avatarTimer: number | undefined;
+
+// Contact photos come with a "photo:" prefix (round, filling), website icons without (fitted)
+const avatarSrc = (v: string) => (v.startsWith('photo:') ? v.slice(6) : v);
+const avatarCls = (v: string | null | undefined) => (v ? ' has-img' + (v.startsWith('photo:') ? ' photo' : '') : '');
+
+function avatarHtml(email: string, name: string, cls = 'avatar'): string {
+  const key = (email || '').toLowerCase();
+  const img = avatarCache.get(key);
+  if (key && img === undefined) queueAvatar(key);
+  const inner = img ? `<img src="${esc(avatarSrc(img))}" alt="">` : esc(initials(name || email || '?'));
+  return `<span class="${cls}${avatarCls(img)}" data-avatar="${esc(key)}" data-name="${esc(name || email || '?')}">${inner}</span>`;
+}
+
+// After a contact photo changes: reload (existing displays are replaced directly)
+function refreshAvatars(emails: string[]): void {
+  for (const e of emails) {
+    const key = e.toLowerCase();
+    avatarCache.delete(key);
+    document.querySelectorAll<HTMLElement>(`[data-avatar="${CSS.escape(key)}"]`).forEach((n) => {
+      if (!n.classList.contains('has-img')) return;
+      n.classList.remove('has-img', 'photo');
+      n.textContent = initials(n.dataset.name || key);
+    });
+    queueAvatar(key);
+  }
+}
+
+function queueAvatar(email: string): void {
+  avatarQueue.add(email);
+  clearTimeout(avatarTimer);
+  avatarTimer = window.setTimeout(flushAvatars, 60);
+}
+
+async function flushAvatars(): Promise<void> {
+  const list = [...avatarQueue].filter((e) => !avatarCache.has(e));
+  avatarQueue.clear();
+  if (!list.length) return;
+  for (const e of list) avatarCache.set(e, null); // do not request twice
+  try {
+    const res = await window.api.avatars(list);
+    for (const [email, data] of Object.entries(res)) {
+      avatarCache.set(email, data);
+      if (!data) continue;
+      document.querySelectorAll<HTMLElement>(`[data-avatar="${CSS.escape(email)}"]`).forEach((n) => {
+        n.innerHTML = `<img src="${esc(avatarSrc(data))}" alt="">`;
+        n.classList.add('has-img');
+        n.classList.toggle('photo', data.startsWith('photo:'));
+      });
+    }
+  } catch {
+    /* offline: initials stay */
+  }
+}
+
+// ---------- Body ----------
+
+function wrapHtml(html: string): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><base target="_blank">
+<style>body{margin:18px;font-family:Manrope,system-ui,sans-serif;font-size:14px;line-height:1.5;color:#1F2126;background:#fff;overflow-wrap:anywhere}img{max-width:100%;height:auto}</style>
+</head><body>${html}</body></html>`;
+}
+
+function priorityBadge(p?: Priority): string {
+  if (p === 'high') return `<span class="prio-badge high">${esc(t('prio.highBadge'))}</span>`;
+  if (p === 'low') return `<span class="prio-badge low">${esc(t('prio.lowBadge'))}</span>`;
+  return '';
+}
+
+function attachmentsHtml(msg: MailDetail): string {
+  if (!msg.attachments.length) return '';
+  return `<div class="tiles">${msg.attachments
+    .map(
+      (a, i) => `<div class="tile">
+        <button class="tile-main" data-att-open="${i}" title="${esc(t('att.openTip', { name: a.filename, size: fmtSize(a.size) }))}">
+          ${fileIcon(a.filename)}<span class="tname">${esc(a.filename)}</span><span class="tsize">${fmtSize(a.size)}</span>
+        </button>
+        <button class="tile-act" data-att-save="${i}" aria-label="${esc(t('att.saveAria', { name: a.filename }))}" title="${esc(t('att.save'))}">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12"></path><path d="m7 11 5 5 5-5"></path><path d="M5 20h14"></path></svg>
+        </button>
+      </div>`,
+    )
+    .join('')}</div>`;
+}
+
+// Header: account · folder, subject, sender with picture
+function metaHtml(msg: MailDetail, accLine: string, accColor: string, extra = ''): string {
+  return `<div class="meta">
+      <div class="acc" style="color:${accColor}">${esc(accLine)}${extra ? ` <span class="lbls">${extra}</span>` : ''}</div>
+      <h2>${esc(msg.subject || t('mail.noSubject'))} ${priorityBadge(msg.priority)}</h2>
+      <div class="who-row">
+        ${avatarHtml(msg.fromAddress, msg.fromName)}
+        <span class="who"><b><button type="button" class="person-link" data-person="${esc(msg.fromAddress)}" data-pname="${esc(msg.fromName)}">${esc(msg.fromName || msg.fromAddress)}</button></b><span>${esc(msg.fromAddress)}</span></span>
+        <span class="when">${fmtLong(msg.date)}</span>
+      </div>
+      ${recipientsHtml(msg)}
+    </div>`;
+}
+
+// ---------- Recipients: clickable, each with its own menu (e.g. write to everyone in Cc individually) ----------
+
+let readerOwn = new Set<string>(); // own addresses (accounts + aliases) – do not suggest as recipients
+// Mark external senders (Settings → Appearance); only active when switched on
+// Show mailboxes by name or address (Settings → Appearance)
+let accLabelMode: 'name' | 'email' = 'email';
+const accLabel = (a?: { name: string; email: string } | null) => (!a ? '' : accLabelMode === 'name' && a.name ? a.name : a.email);
+let extMarkOn = false;
+let extDomains = new Set<string>(); // own domains + additionally entered ones
+const FREEMAIL = /^(gmail|googlemail|gmx|web|bluewin|outlook|hotmail|live|msn|yahoo|icloud|me|mac|sunrise|hispeed|proton|protonmail|pm|aol|t-online|freenet|yandex|mail|zoho)\./i;
+function setExternalPrefs(on: boolean, extra: string[]): void {
+  extMarkOn = on;
+  const own = [...readerOwn].map((a) => a.split('@')[1] ?? '').filter((d) => d && !FREEMAIL.test(d)); // never treat Gmail & co. as a whole internal domain
+  extDomains = new Set([...own, ...extra.map((d) => d.toLowerCase())]);
+}
+function isExternal(addr: string): boolean {
+  if (!extMarkOn || !addr) return false;
+  const a = addr.toLowerCase();
+  if (readerOwn.has(a)) return false;
+  const dom = a.split('@')[1] ?? '';
+  return ![...extDomains].some((d) => dom === d || dom.endsWith('.' + d));
+}
+Promise.all([window.api.listAccounts(), window.api.settings.get()])
+  .then(([accs, s]) => {
+    readerOwn = new Set([...accs.map((a) => a.email), ...s.identities.map((i) => i.email)].map((x) => x.toLowerCase()));
+    accLabelMode = s.accountLabel === 'name' ? 'name' : 'email';
+    setExternalPrefs(!!s.externalMark, s.internalDomains ?? []);
+    document.dispatchEvent(new Event('externalprefs'));
+  })
+  .catch(() => {});
+
+// Names from the header "Name <address>, …"
+function namesFrom(header: string): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const part of header.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)) {
+    const x = /^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/.exec(part);
+    if (x) m.set(x[2].toLowerCase(), x[1].trim());
+  }
+  return m;
+}
+
+function recipientsHtml(msg: MailDetail): string {
+  const names = namesFrom(msg.to);
+  const chip = (a: string) => `<button type="button" class="person-chip" data-person="${esc(a)}" data-pname="${esc(names.get(a.toLowerCase()) ?? '')}">${esc(names.get(a.toLowerCase()) || a)}</button>`;
+  const others = [...new Set([msg.fromAddress, ...msg.toList, ...msg.ccList].filter(Boolean))];
+  return `<div class="who-to">
+      <span class="wt-label">${esc(t('compose.to'))}</span>${msg.toList.map(chip).join('') || '–'}
+      ${msg.ccList.length ? `<span class="wt-label">CC</span>${msg.ccList.map(chip).join('')}` : ''}
+      ${others.length > 1 ? `<button type="button" class="link wt-pick" data-action="pick-people">${esc(t('people.pick', { n: others.length }))}</button>` : ''}
+    </div>
+    <div class="people-pick" id="people-pick" hidden>
+      ${others
+        .map((a) => {
+          const own = readerOwn.has(a.toLowerCase());
+          const role = a === msg.fromAddress ? t('people.sender') : msg.ccList.includes(a) ? 'Cc' : t('compose.to');
+          const name = names.get(a.toLowerCase()) ?? (a === msg.fromAddress ? msg.fromName : '');
+          // Each person clickable on their own → menu (write, contact, copy address/name)
+          return `<button type="button" class="pp-row${own ? ' own' : ''}" data-person="${esc(a)}" data-pname="${esc(name)}" data-own="${own ? 1 : ''}">
+            ${avatarHtml(a, name || a)}<span class="pp-who"><b>${esc(name || a)}</b><small>${esc(a)}</small></span><span class="pp-role">${esc(role)}${own ? ` · ${esc(t('people.you'))}` : ''}</span><span class="pp-chev">›</span></button>`;
+        })
+        .join('')}
+      <div class="pp-actions">
+        <button type="button" class="btn ghost sm" data-pp="mail">${esc(t('people.mailAll'))}</button>
+        <button type="button" class="btn primary sm" data-pp="each">${esc(t('people.mailEach'))}</button>
+      </div>
+    </div>`;
+}
+
+// Click on a person: small menu (write, add contact, copy address)
+const personPop = document.createElement('div');
+personPop.className = 'ctx-menu person-pop';
+personPop.hidden = true;
+document.body.appendChild(personPop);
+
+const COPY_ICO = svgIco('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>');
+
+// Set by the window: create a new contact (not available in the mail window)
+let readerCreateContact: ((name: string, email: string) => void) | null = null;
+
+async function showPersonPop(anchor: HTMLElement): Promise<void> {
+  const email = anchor.dataset.person!;
+  const name = anchor.dataset.pname || '';
+  let known = false;
+  try {
+    known = (await window.api.contacts.cached()).contacts.some((c) => c.emails.some((e) => e.value.toLowerCase() === email.toLowerCase()));
+  } catch {
+    /* without an address book */
+  }
+  personPop.innerHTML = `
+    <div class="pp-head">${avatarHtml(email, name || email)}<span><b>${esc(name || email)}</b><small>${esc(email)}</small></span></div>
+    <button type="button" data-pop="mail">${ACT_ICONS.newMail}<span>${esc(t('people.write'))}</span></button>
+    ${readerCreateContact && !known ? `<button type="button" data-pop="contact">${ACT_ICONS.newContact}<span>${esc(t('people.addContact'))}</span></button>` : ''}
+    ${known ? `<div class="pp-known">✓ ${esc(t('people.inBook'))}</div>` : ''}
+    <hr>
+    <button type="button" data-pop="copy">${COPY_ICO}<span>${esc(t('people.copy'))}</span></button>
+    ${name && name !== email ? `<button type="button" data-pop="copyName">${COPY_ICO}<span>${esc(t('people.copyName'))}</span></button>` : ''}
+    <button type="button" data-pop="copyFull">${COPY_ICO}<span>${esc(t('people.copyFull'))}</span></button>`;
+  personPop.dataset.email = email;
+  personPop.dataset.name = name;
+  personPop.hidden = false;
+  const r = anchor.getBoundingClientRect();
+  personPop.style.top = `${Math.min(r.bottom + 4, innerHeight - personPop.offsetHeight - 8)}px`;
+  personPop.style.left = `${Math.min(r.left, innerWidth - personPop.offsetWidth - 8)}px`;
+}
+
+personPop.addEventListener('click', async (e) => {
+  const what = (e.target as HTMLElement).closest<HTMLElement>('[data-pop]')?.dataset.pop;
+  if (!what) return;
+  const email = personPop.dataset.email!;
+  const name = personPop.dataset.name || '';
+  personPop.hidden = true;
+  if (what === 'mail') window.api.compose.open({ to: [name ? `${name} <${email}>` : email] });
+  else if (what === 'contact') readerCreateContact?.(name, email);
+  else if (what === 'copy') await navigator.clipboard.writeText(email).catch(() => {});
+  else if (what === 'copyName') await navigator.clipboard.writeText(name).catch(() => {});
+  else if (what === 'copyFull') await navigator.clipboard.writeText(name ? `${name} <${email}>` : email).catch(() => {});
+});
+
+document.addEventListener('mousedown', (e) => {
+  if (!personPop.hidden && !personPop.contains(e.target as Node)) personPop.hidden = true;
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') personPop.hidden = true;
+});
+
+document.addEventListener('click', (e) => {
+  const tgt = e.target as HTMLElement;
+  const person = tgt.closest<HTMLElement>('.meta [data-person]');
+  if (person) return void showPersonPop(person);
+  if (tgt.closest('[data-action="pick-people"]')) {
+    const p = document.querySelector<HTMLElement>('#people-pick');
+    if (p) p.hidden = !p.hidden;
+    return;
+  }
+  const pp = tgt.closest<HTMLElement>('[data-pp]')?.dataset.pp;
+  if (pp) {
+    // to all participants except myself
+    const picked = [...document.querySelectorAll<HTMLElement>('#people-pick .pp-row:not(.own)')].map((b) => (b.dataset.pname ? `${b.dataset.pname} <${b.dataset.person}>` : b.dataset.person!));
+    if (!picked.length) return;
+    window.api.compose.open({ to: picked, sendMode: pp === 'each' ? 'each' : 'all' });
+  }
+});
+
+// Insert the body. External images are blocked → banner with "Load images" / "Always load from …".
+function mountMailBody(box: HTMLElement, msg: MailDetail, reload: () => void): void {
+  box.innerHTML = '';
+  if (isExternal(msg.fromAddress)) {
+    const ext = document.createElement('div');
+    ext.className = 'ext-banner';
+    ext.innerHTML = `<span class="ext-tag">${esc(t('ext.tag'))}</span><span>${esc(t('ext.banner'))}</span>`;
+    box.appendChild(ext);
+  }
+  if (msg.remoteImages && !msg.imagesLoaded) {
+    const bar = document.createElement('div');
+    bar.className = 'img-banner';
+    bar.innerHTML = `${ACT_ICONS.image}<span>${esc(t('img.blocked'))}</span>
+      <button type="button" class="btn ghost sm" data-img="load">${esc(t('img.load'))}</button>
+      <button type="button" class="link" data-img="trust">${esc(t('img.always', { email: msg.fromAddress }))}</button>`;
+    bar.addEventListener('click', async (e) => {
+      const what = (e.target as HTMLElement).closest<HTMLElement>('[data-img]')?.dataset.img;
+      if (!what) return;
+      bar.querySelectorAll('button').forEach((b) => ((b as HTMLButtonElement).disabled = true));
+      if (what === 'trust') await window.api.settings.trustSender(msg.fromAddress).catch(() => {});
+      reload();
+    });
+    box.appendChild(bar);
+  }
+  if (msg.html) {
+    // Sandbox without scripts; the CSP only allows data: images (the main process fetches external ones on request)
+    const frame = document.createElement('iframe');
+    frame.className = 'mail-frame';
+    frame.setAttribute('sandbox', 'allow-same-origin allow-popups allow-popups-to-escape-sandbox');
+    frame.srcdoc = wrapHtml(msg.html);
+    frame.onload = () => {
+      const fit = () => (frame.style.height = (frame.contentDocument?.documentElement.scrollHeight ?? 600) + 'px');
+      fit();
+      frame.contentDocument?.querySelectorAll('img').forEach((img) => img.addEventListener('load', fit));
+    };
+    box.appendChild(frame);
+  } else {
+    const div = document.createElement('div');
+    div.className = 'text-body';
+    div.textContent = msg.text;
+    box.appendChild(div);
+  }
+}
+
+async function attachmentAction(msg: MailDetail, target: HTMLElement, status: (s: string) => void): Promise<boolean> {
+  const openI = target.closest<HTMLElement>('[data-att-open]')?.dataset.attOpen;
+  const saveI = target.closest<HTMLElement>('[data-att-save]')?.dataset.attSave;
+  if (openI === undefined && saveI === undefined) return false;
+  try {
+    if (openI !== undefined) {
+      status(t('att.opening'));
+      await window.api.openAttachment(msg.accountId, msg.folder, msg.uid, Number(openI));
+      status('');
+    } else {
+      const saved = await window.api.saveAttachment(msg.accountId, msg.folder, msg.uid, Number(saveI));
+      if (saved) status(t('att.saved', { path: saved }));
+    }
+  } catch (err) {
+    status(errMsg(err));
+  }
+  return true;
+}
+
+// ---------- Reply / forward ----------
+
+function plainText(msg: MailDetail): string {
+  if (msg.text.trim()) return msg.text;
+  if (!msg.html) return '';
+  return new DOMParser().parseFromString(msg.html, 'text/html').body.textContent ?? '';
+}
+
+function withPrefix(prefix: 'Re' | 'Fwd', subject: string): string {
+  const already = prefix === 'Re' ? /^(re|aw|antw):/i : /^(fwd?|wg):/i;
+  return already.test(subject.trim()) ? subject : `${prefix}: ${subject}`;
+}
+
+// Always quote the original as text – foreign HTML never goes into the editor
+function quoteHtml(msg: MailDetail): string {
+  return `<p>${esc(t('quote.header', { date: fmtLong(msg.date), name: msg.fromName, email: msg.fromAddress }))}</p><blockquote style="margin: 0 0 0 4px; padding-left: 10px; border-left: 2px solid #C1C8BE; color: #555">${textToHtml(plainText(msg))}</blockquote>`;
+}
+
+function replyOpts(msg: MailDetail, all: boolean): ComposeOpts {
+  const to = msg.replyTo || msg.fromAddress;
+  // The compose window filters out own addresses (it knows all aliases)
+  const cc = all ? [...new Set([...msg.toList, ...msg.ccList])].filter((a) => a.toLowerCase() !== to.toLowerCase()) : [];
+  return {
+    accountId: msg.accountId,
+    matchAddresses: [...msg.toList, ...msg.ccList],
+    to: [to],
+    cc,
+    subject: withPrefix('Re', msg.subject),
+    quoteHtml: quoteHtml(msg),
+    inReplyTo: msg.messageId,
+    references: [...msg.references, msg.messageId].filter(Boolean),
+    mode: all ? 'replyAll' : 'reply',
+  };
+}
+
+function forwardOpts(msg: MailDetail): ComposeOpts {
+  const header = [
+    t('fwd.header'),
+    `${t('fwd.from')}: ${msg.fromName} <${msg.fromAddress}>`,
+    `${t('fwd.date')}: ${fmtLong(msg.date)}`,
+    `${t('fwd.subject')}: ${msg.subject}`,
+    `${t('fwd.to')}: ${msg.to}`,
+  ]
+    .map(esc)
+    .join('<br>');
+  return {
+    accountId: msg.accountId,
+    matchAddresses: [...msg.toList, ...msg.ccList],
+    subject: withPrefix('Fwd', msg.subject),
+    quoteHtml: `<p>${header}</p>${textToHtml(plainText(msg))}`,
+    mode: 'forward',
+    forward: { accountId: msg.accountId, folder: msg.folder, uid: msg.uid, attachments: msg.attachments.map((a) => ({ filename: a.filename, size: a.size })) },
+  };
+}
+
+const replyButtonsHtml = () => `
+  <button class="btn primary with-ico" data-action="reply">${ACT_ICONS.reply}${esc(t('mail.reply'))}</button>
+  <button class="btn ghost with-ico" data-action="replyAll">${ACT_ICONS.replyAll}${esc(t('mail.replyAll'))}</button>
+  <button class="btn ghost with-ico" data-action="forward">${ACT_ICONS.forward}${esc(t('mail.forward'))}</button>`;
+
+// ---------- Meeting invitations in mails (accept / maybe / decline) ----------
+
+let inviteMsg: MailDetail | null = null;
+
+function inviteWhen(inv: InviteInfo): string {
+  if (inv.allDay) return new Date(`${inv.start}T12:00`).toLocaleDateString(LOCALE, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const s = new Date(inv.start);
+  const e = new Date(inv.end);
+  return `${s.toLocaleDateString(LOCALE, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · ${s.toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' })}–${e.toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' })}`;
+}
+
+function inviteCardHtml(msg: MailDetail): string {
+  const inv = msg.invite;
+  inviteMsg = inv ? msg : null;
+  if (!inv) return '';
+  const head = (label: string, cls = '') => `<div class="inv-top ${cls}">${svgIco('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>', 16)}<span>${esc(label)}</span></div>`;
+  const facts = `<div class="inv-title">${inv.recurring ? '↻ ' : ''}${esc(inv.summary || t('cal.untitled'))}</div>
+    <div class="inv-when">${esc(inviteWhen(inv))}</div>
+    ${inv.location ? `<div class="inv-loc">${esc(inv.location)}</div>` : ''}`;
+  if (inv.method === 'REQUEST') {
+    const others = inv.attendees.filter((a) => a.email.toLowerCase() !== inv.organizer?.email.toLowerCase());
+    const mine = inv.attendees.find((a) => readerOwn.has(a.email.toLowerCase()));
+    return `<div class="invite-card">${head(t('invite.cardRequest'))}${facts}
+      <div class="inv-meta">${esc(t('invite.organizer'))}: <b>${esc(inv.organizer?.name || inv.organizer?.email || '–')}</b>${others.length ? ` · ${esc(t('invite.nParticipants', { n: others.length }))}` : ''}${mine && mine.partstat && mine.partstat !== 'NEEDS-ACTION' ? ` · ${esc(t(`invite.ps.${mine.partstat}`))}` : ''}</div>
+      <div class="inv-actions">
+        <select class="inv-cal" data-inv-cal aria-label="${esc(t('cal.calendar'))}"><option value="">${esc(t('invite.loadingCals'))}</option></select>
+        <button type="button" class="btn primary sm" data-inv="ACCEPTED">✓ ${esc(t('invite.accept'))}</button>
+        <button type="button" class="btn ghost sm" data-inv="TENTATIVE">? ${esc(t('invite.tentative'))}</button>
+        <button type="button" class="btn ghost sm danger-text" data-inv="DECLINED">✗ ${esc(t('invite.decline'))}</button>
+      </div>
+      <p class="hint inv-status" data-inv-status></p></div>`;
+  }
+  if (inv.method === 'REPLY') {
+    const a = inv.attendees[0];
+    const ps = a?.partstat ?? 'NEEDS-ACTION';
+    return `<div class="invite-card reply ps-${ps.toLowerCase()}">${head(t(`invite.replied.${ps}`, { name: a?.name || a?.email || '' }), `ps-${ps.toLowerCase()}`)}${facts}
+      <div class="inv-actions"><button type="button" class="btn ghost sm" data-inv-apply>${esc(t('invite.applyReply'))}</button></div>
+      <p class="hint inv-status" data-inv-status></p></div>`;
+  }
+  if (inv.method === 'CANCEL') {
+    return `<div class="invite-card cancel">${head(t('invite.cardCancel'), 'ps-declined')}${facts}
+      <div class="inv-actions"><button type="button" class="btn ghost sm danger-text" data-inv-apply>${esc(t('invite.removeFromCal'))}</button></div>
+      <p class="hint inv-status" data-inv-status></p></div>`;
+  }
+  return `<div class="invite-card">${head(t('invite.cardPublish'))}${facts}</div>`;
+}
+
+// Fill the calendar picker (from the cache; current in the main window)
+async function fillInviteCalendars(): Promise<void> {
+  const sel = document.querySelector<HTMLSelectElement>('[data-inv-cal]');
+  if (!sel) return;
+  let cals: CalendarInfo[] = [];
+  try {
+    cals = (await window.api.cal.cached([], new Date().toISOString())).calendars;
+    if (!cals.length) cals = (await window.api.cal.listCalendars()).calendars;
+  } catch {
+    /* no calendar */
+  }
+  let last = '';
+  try {
+    last = localStorage.getItem('invite.calendar') ?? '';
+  } catch {
+    /* ignore */
+  }
+  sel.innerHTML = cals.length
+    ? cals.map((c) => `<option value="${esc(c.id)}"${c.id === last ? ' selected' : ''}>${esc(c.name)} · ${esc(c.accountName)}</option>`).join('')
+    : `<option value="">${esc(t('invite.noCalendar'))}</option>`;
+}
+
+document.addEventListener('click', async (e) => {
+  const tgt = e.target as HTMLElement;
+  const ps = tgt.closest<HTMLElement>('[data-inv]')?.dataset.inv as 'ACCEPTED' | 'TENTATIVE' | 'DECLINED' | undefined;
+  const apply = tgt.closest('[data-inv-apply]');
+  if ((!ps && !apply) || !inviteMsg) return;
+  const card = tgt.closest<HTMLElement>('.invite-card')!;
+  const status = card.querySelector<HTMLElement>('[data-inv-status]')!;
+  card.querySelectorAll('button').forEach((b) => ((b as HTMLButtonElement).disabled = true));
+  status.textContent = t('status.saving');
+  const m = inviteMsg;
+  try {
+    if (ps) {
+      const calId = card.querySelector<HTMLSelectElement>('[data-inv-cal]')?.value || null;
+      try {
+        if (calId) localStorage.setItem('invite.calendar', calId);
+      } catch {
+        /* ignore */
+      }
+      await window.api.invite.respond(m.accountId, m.folder, m.uid, ps, ps === 'DECLINED' ? null : calId);
+      status.textContent = t(`invite.done.${ps}`) + (ps !== 'DECLINED' && calId ? ` ${t('invite.addedToCal')}` : '');
+      card.classList.add(`answered`, `ps-${ps.toLowerCase()}`);
+    } else {
+      const ok = await window.api.invite.apply(m.accountId, m.folder, m.uid);
+      status.textContent = ok ? t('invite.applied') : t('invite.notInCal');
+    }
+  } catch (err) {
+    status.textContent = errMsg(err);
+    card.querySelectorAll('button').forEach((b) => ((b as HTMLButtonElement).disabled = false));
+  }
+});

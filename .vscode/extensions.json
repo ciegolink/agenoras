@@ -1,0 +1,4 @@
+{
+  // i18n Ally shows the strings from lang/de.json right in the code and helps with translating
+  "recommendations": ["lokalise.i18n-ally"]
+}

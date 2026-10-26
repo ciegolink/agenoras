@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; media-src 'self' data:">
+<title>Agenoras</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=JetBrains+Mono:wght@500;700&family=Manrope:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body class="view-page">
+<header class="titlebar">
+  <div class="brand"><img class="brand-logo" alt="" hidden><span class="logo">Agenoras<span class="dot">.</span></span></div>
+  <div class="tb-fill"></div>
+  <div class="win-ctls"></div>
+</header>
+<article class="reader solo" id="reader">
+  <div class="empty" data-i18n="status.loading"></div>
+</article>
+<div class="status solo-status" id="status"></div>
+<script src="../../dist/renderer/common.js"></script>
+<script src="../../dist/renderer/reader.js"></script>
+<script src="../../dist/renderer/mailview.js"></script>
+</body>
+</html>

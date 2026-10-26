@@ -1,0 +1,51 @@
+{
+  "name": "agenoras",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Desktop mail, calendar, contacts and tasks (IMAP/SMTP, CalDAV, CardDAV)",
+  "author": "CiegoLink GmbH (https://ciegolink.com)",
+  "homepage": "https://github.com/ciegolink/agenoras#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ciegolink/agenoras.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ciegolink/agenoras/issues"
+  },
+  "license": "MIT",
+  "keywords": [
+    "electron",
+    "email",
+    "imap",
+    "smtp",
+    "caldav",
+    "carddav",
+    "calendar",
+    "contacts"
+  ],
+  "main": "dist/main/main.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "start": "tsc && electron . --ozone-platform=x11",
+    "icons": "electron scripts/make-icons.js"
+  },
+  "dependencies": {
+    "ical.js": "^2.2.1",
+    "imapflow": "^2.9.1",
+    "mailparser": "^3.12.4",
+    "nodemailer": "^10.2.1",
+    "tsdav": "^2.5.0"
+  },
+  "devDependencies": {
+    "@types/imapflow": "^1.0.23",
+    "@types/mailparser": "^3.9.0",
+    "@types/node": "^26.6.5",
+    "@types/nodemailer": "^8.0.2",
+    "electron": "^45.0.0",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

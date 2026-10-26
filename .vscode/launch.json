@@ -1,0 +1,37 @@
+{
+  // F5 = build the app and start it with the debugger (breakpoints in the main process: src/main/*.ts)
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Start Agenoras",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "runtimeExecutable": "${workspaceFolder}/node_modules/.bin/electron",
+      "windows": {
+        "runtimeExecutable": "${workspaceFolder}/node_modules/.bin/electron.cmd"
+      },
+      "args": [".", "--ozone-platform=x11"],
+      "outputCapture": "std",
+      "sourceMaps": true,
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "preLaunchTask": "Build"
+    },
+    {
+      "name": "Start Agenoras (English)",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "runtimeExecutable": "${workspaceFolder}/node_modules/.bin/electron",
+      "windows": {
+        "runtimeExecutable": "${workspaceFolder}/node_modules/.bin/electron.cmd"
+      },
+      "args": [".", "--ozone-platform=x11"],
+      "env": { "AGENORAS_LANG": "en" },
+      "outputCapture": "std",
+      "sourceMaps": true,
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "preLaunchTask": "Build"
+    }
+  ]
+}
