@@ -82,7 +82,10 @@
       "executableName": "agenoras",
       "maintainer": "CiegoLink GmbH <info@ciegolink.com>",
       "synopsis": "Mail, calendar, contacts and tasks",
-      "syncDesktopName": true
+      "syncDesktopName": true,
+      "executableArgs": [
+        "--ozone-platform=x11"
+      ]
     },
     "appImage": {
       "artifactName": "${productName}-x86_64.${ext}"
@@ -134,5 +137,6 @@
       "owner": "ciegolink",
       "repo": "agenoras"
     }
-  }
+  },
+  "productName": "Agenoras"
 }

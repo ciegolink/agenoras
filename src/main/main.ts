@@ -65,8 +65,11 @@ import { availableLanguages, i18nData, initI18n, t } from './i18n';
 // Linux/Wayland: GNOME draws no title bar for native Wayland windows of Electron
 // (no moving/resizing). So start via XWayland – then the normal title bar is there.
 // To use native Wayland anyway: set the environment variable AGENORAS_WAYLAND=1.
-if (process.platform === 'linux' && !process.env.AGENORAS_WAYLAND) {
-  app.commandLine.appendSwitch('ozone-platform', 'x11');
+// The switch only takes effect on the command line (too late from here), so the packaged app
+// restarts itself once with it; the .desktop entry and `npm start` already pass it.
+if (process.platform === 'linux' && !process.env.AGENORAS_WAYLAND && !process.argv.some((a) => a.startsWith('--ozone-platform'))) {
+  app.relaunch({ args: [...process.argv.slice(1), '--ozone-platform=x11'] });
+  app.exit(0);
 }
 
 // Single instance: a second start brings the existing window to the front (important with the tray icon)
