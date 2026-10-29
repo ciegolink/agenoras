@@ -349,6 +349,26 @@ const calAddField = (n: string) => calAddForm.elements.namedItem(n) as HTMLInput
 
 // Opened from Settings → Accounts
 let editingCalAcc: string | null = null; // set = edit login
+const LOCAL_DAV = 'local:';
+
+// "Only on this computer": server fields away (and not required); used by the contacts dialog too
+function syncLocalDav(form: HTMLFormElement, edit: boolean, saveBtn: HTMLElement): void {
+  const local = (form.elements.namedItem('local') as HTMLInputElement).checked;
+  form.querySelector<HTMLElement>('.dav-server')!.hidden = local;
+  form.querySelector<HTMLElement>('.dav-local-hint')!.hidden = !local;
+  for (const n of ['serverUrl', 'username']) (form.elements.namedItem(n) as HTMLInputElement).required = !local;
+  (form.elements.namedItem('password') as HTMLInputElement).required = !local && !edit;
+  (form.elements.namedItem('local') as HTMLInputElement).disabled = edit; // local ↔ server can't be switched later
+  saveBtn.textContent = t(local ? (edit ? 'btn.save' : 'dav.create') : edit ? 'btn.saveConnect' : 'btn.connect');
+}
+
+function fillLocalDav(form: HTMLFormElement, acc: CalAccount | null, edit: boolean, saveBtn: HTMLElement): void {
+  (form.elements.namedItem('local') as HTMLInputElement).checked = acc?.serverUrl === LOCAL_DAV;
+  if (acc?.serverUrl === LOCAL_DAV) (form.elements.namedItem('serverUrl') as HTMLInputElement).value = '';
+  syncLocalDav(form, edit, saveBtn);
+}
+
+calAddField('local').addEventListener('change', () => syncLocalDav(calAddForm, !!editingCalAcc, el('#btn-cal-add-save')));
 
 function setCalDialogMode(edit: boolean): void {
   calAddDlg.querySelector('h2')!.innerHTML = t(edit ? 'dav.editTitle' : 'cal.connectTitle');
@@ -361,6 +381,7 @@ function openAddCalAccount(): void {
   editingCalAcc = null;
   calAddForm.reset();
   setCalDialogMode(false);
+  fillLocalDav(calAddForm, null, false, el('#btn-cal-add-save'));
   el('#cal-add-error').textContent = '';
   calAddDlg.showModal();
 }
@@ -372,6 +393,7 @@ function openEditCalAccount(acc: CalAccount): void {
   calAddField('name').value = acc.name;
   calAddField('serverUrl').value = acc.serverUrl;
   calAddField('username').value = acc.username;
+  fillLocalDav(calAddForm, acc, true, el('#btn-cal-add-save'));
   el('#cal-add-error').textContent = '';
   calAddDlg.showModal();
 }
@@ -391,6 +413,7 @@ calAddForm.addEventListener('submit', async (e) => {
       password: calAddField('password').value,
     };
     if (editingCalAcc) await window.api.cal.updateAccount(editingCalAcc, input);
+    else if (calAddField('local').checked) await window.api.cal.addLocalAccount(input.name);
     else await window.api.cal.addAccount(input);
     calAddDlg.close();
     await loadCalendars();
@@ -398,7 +421,7 @@ calAddForm.addEventListener('submit', async (e) => {
     el('#cal-add-error').textContent = errMsg(err);
   } finally {
     btn.disabled = false;
-    btn.textContent = t(editingCalAcc ? 'btn.saveConnect' : 'btn.connect');
+    syncLocalDav(calAddForm, !!editingCalAcc, btn);
   }
 });
 
@@ -1001,16 +1024,23 @@ el('#btn-event-mail').addEventListener('click', async () => {
 let calSearchTimer: number | undefined;
 let calSearchSeq = 0;
 
+const setCalSearchBusy = (on: boolean): void => void el('.cal-search').classList.toggle('busy', on);
+
 async function runCalSearch(): Promise<void> {
   const q = el<HTMLInputElement>('#cal-search').value.trim();
   const box = el('#cal-results');
   const seq = ++calSearchSeq;
-  if (q.length < 2) return void (box.hidden = true);
+  if (q.length < 2) {
+    setCalSearchBusy(false);
+    return void (box.hidden = true);
+  }
+  setCalSearchBusy(true);
   box.hidden = false;
   box.innerHTML = `<p class="hint">${esc(t('search.running'))}</p>`;
   await ensureCalendars();
   const res = await window.api.cal.search(q, visibleCalIds()).catch(() => [] as CalEvent[]);
   if (seq !== calSearchSeq) return;
+  setCalSearchBusy(false);
   calSearchResults = res;
   box.innerHTML = res.length
     ? res
@@ -1030,6 +1060,7 @@ let calSearchResults: CalEvent[] = [];
 
 el('#cal-search').addEventListener('input', () => {
   clearTimeout(calSearchTimer);
+  setCalSearchBusy(el<HTMLInputElement>('#cal-search').value.trim().length >= 2);
   calSearchTimer = window.setTimeout(runCalSearch, 400);
 });
 el('#cal-search').addEventListener('keydown', (e) => {
@@ -1037,18 +1068,27 @@ el('#cal-search').addEventListener('keydown', (e) => {
     clearTimeout(calSearchTimer);
     runCalSearch();
   } else if (e.key === 'Escape') {
+    clearTimeout(calSearchTimer);
+    calSearchSeq++;
+    setCalSearchBusy(false);
     el<HTMLInputElement>('#cal-search').value = '';
     el('#cal-results').hidden = true;
   }
 });
+// Jump to the week of a search hit and open it (also used by the mail search)
+async function openEventAt(ev: CalEvent): Promise<void> {
+  await ensureCalendars();
+  weekStart = weekStartOf(ev.allDay ? parseYmd(ev.start) : new Date(ev.start));
+  await loadEvents();
+  openEventDialog(calEvents.find((x) => x.id === ev.id) ?? ev);
+}
+
 el('#cal-results').addEventListener('click', async (e) => {
   const i = (e.target as HTMLElement).closest<HTMLElement>('[data-hit]')?.dataset.hit;
   const ev = i !== undefined ? calSearchResults[Number(i)] : undefined;
   if (!ev) return;
   el('#cal-results').hidden = true;
-  weekStart = weekStartOf(ev.allDay ? parseYmd(ev.start) : new Date(ev.start));
-  await loadEvents();
-  openEventDialog(calEvents.find((x) => x.id === ev.id) ?? ev);
+  await openEventAt(ev);
 });
 document.addEventListener('mousedown', (e) => {
   if (!(e.target as HTMLElement).closest('.cal-search')) el('#cal-results').hidden = true;

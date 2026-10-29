@@ -1,8 +1,14 @@
 import { ImapFlow, MessageStructureObject } from 'imapflow';
-import { AddressObject, ParsedMail, simpleParser } from 'mailparser';
+import { simpleParser } from 'mailparser';
 import { Account, getAccount, getPassword } from './accounts';
 import { t } from './i18n';
-import { InviteInfo, parseInvite } from './invites';
+import { log } from './log';
+import type { InviteInfo } from './invites';
+import * as pop from './pop3';
+import { AttachmentFile, buildDetail, inviteIcs, parsePriority, splitAttachments } from './mailparse';
+
+export { parsePriority };
+export type { AttachmentFile };
 
 export interface MailSummary {
   accountId: string;
@@ -17,6 +23,7 @@ export interface MailSummary {
   hasAttachments: boolean;
   priority: Priority;
   messageId: string; // for categories (stays the same when moving)
+  inReplyTo?: string; // Message-ID of the mail this one answers – for conversations
   flagged: boolean; // star / "important" (\Flagged)
   toAddress: string; // address of the first recipient (address book suggestions)
   rcpt?: string; // all recipients (To + Cc), for mail rules
@@ -55,6 +62,7 @@ export interface FolderInfo {
 }
 
 interface ConnCfg {
+  protocol?: 'imap' | 'pop3';
   host: string;
   port: number;
   secure: boolean;
@@ -69,6 +77,7 @@ let onNew: (accountId: string, grew: boolean) => void = () => {};
 // grew = really a new message (not just deleted/moved) → sound
 export function setOnNewMail(fn: (accountId: string, grew: boolean) => void): void {
   onNew = fn;
+  pop.setOnNew(fn);
 }
 
 export function friendlyError(err: unknown): string {
@@ -88,6 +97,7 @@ function makeClient(cfg: ConnCfg, pass: string): ImapFlow {
 }
 
 export async function testConnection(cfg: ConnCfg, pass: string): Promise<void> {
+  if (cfg.protocol === 'pop3') return pop.testConnection(cfg, pass);
   const c = makeClient(cfg, pass);
   await c.connect();
   await c.logout();
@@ -98,22 +108,29 @@ async function getClient(acc: Account): Promise<ImapFlow> {
   const existing = clients.get(acc.id);
   if (existing && existing.usable) return existing;
 
-  const c = makeClient(acc, getPassword(acc.id));
+  const c = makeClient(acc, await getPassword(acc.id));
   c.on('exists', (data: { path?: string; count?: number; prevCount?: number }) => {
     if (!data?.path || data.path === 'INBOX') onNew(acc.id, (data?.count ?? 0) > (data?.prevCount ?? 0));
   });
-  c.on('error', (err) => console.error(`[${acc.email}]`, friendlyError(err)));
+  c.on('error', (err) => log('error', 'IMAP', acc.email, friendlyError(err)));
   c.on('close', () => {
-    if (clients.get(acc.id) === c) clients.delete(acc.id);
-    if (!stopping) {
+    const wasActive = clients.get(acc.id) === c;
+    if (wasActive) clients.delete(acc.id);
+    if (!stopping && getAccount(acc.id)) {
+      if (wasActive) log('warn', 'IMAP', acc.email, t('log.connLost'));
       setTimeout(() => {
         const still = getAccount(acc.id);
-        if (still && !stopping) getClient(still).catch(() => {});
+        if (still && !stopping) getClient(still).catch(() => {}); // failure is logged in getClient
       }, 30_000);
     }
   });
 
-  await c.connect();
+  try {
+    await c.connect();
+  } catch (err) {
+    log('error', 'IMAP', acc.email, t('log.connFailed', { host: `${acc.host}:${acc.port}`, msg: friendlyError(err) }));
+    throw err;
+  }
   const box = await c.mailboxOpen('INBOX');
   // From here on everything counts as "new" (for notifications); do not reset on reconnect
   if (!lastUid.has(acc.id)) lastUid.set(acc.id, Math.max(0, Number(box.uidNext ?? 1) - 1));
@@ -122,15 +139,25 @@ async function getClient(acc: Account): Promise<ImapFlow> {
 }
 
 export async function startAccount(acc: Account): Promise<void> {
+  if (pop.isPop(acc)) return pop.start(acc);
   await getClient(acc);
 }
 
 // Works in a folder and then returns to INBOX so IDLE reports new mail
 async function inFolder<T>(acc: Account, folder: string, fn: (c: ImapFlow) => Promise<T>): Promise<T> {
   const c = await getClient(acc);
-  const lock = await c.getMailboxLock(folder);
+  let lock: Awaited<ReturnType<ImapFlow['getMailboxLock']>>;
+  try {
+    lock = await c.getMailboxLock(folder);
+  } catch (err) {
+    log('error', 'IMAP', acc.email, `${folder}: ${friendlyError(err)}`);
+    throw err;
+  }
   try {
     return await fn(c);
+  } catch (err) {
+    log('error', 'IMAP', acc.email, `${folder}: ${friendlyError(err)}`);
+    throw err;
   } finally {
     lock.release();
     if (folder !== 'INBOX') {
@@ -160,6 +187,7 @@ const SPECIAL_NAMES: [string, RegExp][] = [
 // - Non-selectable container folders (e.g. "[Gmail]") are skipped, their children move up.
 // - Top level: Inbox, then special folders in a fixed order, then alphabetical.
 export async function listFolders(acc: Account): Promise<FolderInfo[]> {
+  if (pop.isPop(acc)) return pop.listFolders(acc);
   const c = await getClient(acc);
   const boxes = await c.list({ statusQuery: { unseen: true } });
   const isInbox = (path: string) => path.toUpperCase() === 'INBOX';
@@ -224,6 +252,7 @@ async function findSpecial(c: ImapFlow, use: '\\Sent' | '\\Trash' | '\\Archive' 
 }
 
 export async function appendToSent(acc: Account, raw: Buffer): Promise<void> {
+  if (pop.isPop(acc)) return pop.appendToSent(acc, raw);
   const c = await getClient(acc);
   const sent = await findSpecial(c, '\\Sent', /^(sent|sent items|sent messages|gesendet|gesendete elemente|gesendete objekte)$/i);
   if (sent) await c.append(sent, raw, ['\\Seen']);
@@ -231,26 +260,10 @@ export async function appendToSent(acc: Account, raw: Buffer): Promise<void> {
 
 // ---------- Mails ----------
 
-function addressList(a?: AddressObject | AddressObject[]): string[] {
-  const objs = Array.isArray(a) ? a : a ? [a] : [];
-  return objs.flatMap((o) => o.value.map((v) => v.address || '')).filter(Boolean);
-}
-
 function hasAttachment(node?: MessageStructureObject): boolean {
   if (!node) return false;
   if (node.disposition === 'attachment') return true;
   return (node.childNodes ?? []).some(hasAttachment);
-}
-
-// Priority from X-Priority (1–2 high, 4–5 low), Importance or Priority
-export function parsePriority(headers: string): Priority {
-  const h = headers.toLowerCase();
-  const xp = /^x-priority:\s*(\d)/m.exec(h)?.[1];
-  if (xp) return Number(xp) <= 2 ? 'high' : Number(xp) >= 4 ? 'low' : 'normal';
-  const imp = /^(?:importance|priority):\s*(\w+)/m.exec(h)?.[1] ?? '';
-  if (/^(high|urgent)/.test(imp)) return 'high';
-  if (/^(low|non-urgent)/.test(imp)) return 'low';
-  return 'normal';
 }
 
 const SUMMARY_QUERY = { uid: true, envelope: true, flags: true, bodyStructure: true, headers: ['x-priority', 'importance', 'priority'] };
@@ -276,10 +289,12 @@ function toSummary(acc: Account, folder: string, msg: FetchedMsg): MailSummary {
     hasAttachments: hasAttachment(msg.bodyStructure),
     priority: parsePriority(msg.headers?.toString('utf8') ?? ''),
     messageId: msg.envelope?.messageId || '',
+    inReplyTo: msg.envelope?.inReplyTo || '',
   };
 }
 
 export async function fetchFolder(acc: Account, folder = 'INBOX', limit = 50): Promise<MailSummary[]> {
+  if (pop.isPop(acc)) return pop.fetchFolder(acc, folder);
   return inFolder(acc, folder, async (c) => {
     const mb = c.mailbox;
     if (!mb || !mb.exists) return [];
@@ -303,8 +318,47 @@ export async function searchFolder(acc: Account, folder: string, query: string, 
   });
 }
 
+// Search several folders in one go: no return to INBOX between the folders (halves the round trips),
+// stops as soon as a newer search has started
+export async function searchFolders(acc: Account, folders: string[], query: string, limit: number, cancelled: () => boolean): Promise<MailSummary[]> {
+  if (pop.isPop(acc)) return pop.searchFolders(acc, folders, query, limit);
+  const c = await getClient(acc);
+  const out: MailSummary[] = [];
+  try {
+    for (const folder of folders) {
+      if (cancelled()) break;
+      let lock: Awaited<ReturnType<ImapFlow['getMailboxLock']>>;
+      try {
+        lock = await c.getMailboxLock(folder);
+      } catch (err) {
+        log('warn', 'IMAP', acc.email, t('log.searchFolder', { folder, msg: friendlyError(err) }));
+        continue; // folder not selectable
+      }
+      try {
+        if (!c.mailbox || !c.mailbox.exists || cancelled()) continue;
+        const uids = await c.search({ or: [{ subject: query }, { from: query }, { to: query }, { body: query }] }, { uid: true });
+        if (!uids || !uids.length || cancelled()) continue;
+        const pick = uids.sort((a, b) => a - b).slice(-limit);
+        for await (const msg of c.fetch(pick.join(','), SUMMARY_QUERY, { uid: true })) out.push(toSummary(acc, folder, msg as FetchedMsg));
+      } catch (err) {
+        log('warn', 'IMAP', acc.email, t('log.searchFolder', { folder, msg: friendlyError(err) })); // the other folders go on
+      } finally {
+        lock.release();
+      }
+    }
+  } finally {
+    if (folders.some((f) => f !== 'INBOX')) {
+      c.getMailboxLock('INBOX')
+        .then((l) => l.release())
+        .catch(() => {});
+    }
+  }
+  return out;
+}
+
 // Newly arrived unread mails in the inbox since the last report (for notifications)
 export async function fetchNewSince(acc: Account): Promise<MailSummary[]> {
+  if (pop.isPop(acc)) return pop.fetchNewSince(acc);
   return inFolder(acc, 'INBOX', async (c) => {
     const from = (lastUid.get(acc.id) ?? 0) + 1;
     const out: MailSummary[] = [];
@@ -319,6 +373,7 @@ export async function fetchNewSince(acc: Account): Promise<MailSummary[]> {
 
 // For mail rules: mails of a folder from a UID on (incl. read ones) and the current highest UID
 export async function fetchSinceUid(acc: Account, folder: string, fromUid: number): Promise<MailSummary[]> {
+  if (pop.isPop(acc)) return pop.fetchSinceUid(acc, folder, fromUid);
   return inFolder(acc, folder, async (c) => {
     if (!c.mailbox || !c.mailbox.exists) return [];
     const out: MailSummary[] = [];
@@ -330,6 +385,7 @@ export async function fetchSinceUid(acc: Account, folder: string, fromUid: numbe
 }
 
 export async function maxUid(acc: Account, folder = 'INBOX'): Promise<number> {
+  if (pop.isPop(acc)) return pop.maxUid(acc, folder);
   // highest UID of the newest message (fresh from the server – uidNext of the open mailbox can be stale)
   return inFolder(acc, folder, async (c) => {
     await c.noop().catch(() => {}); // fetch new messages from the server
@@ -341,12 +397,14 @@ export async function maxUid(acc: Account, folder = 'INBOX'): Promise<number> {
 
 // Set / remove star (\Flagged)
 export async function setFlagged(acc: Account, folder: string, uids: number[], flagged: boolean): Promise<void> {
+  if (pop.isPop(acc)) return pop.setFlagged(acc, folder, uids, flagged);
   if (!uids.length) return;
   await inFolder(acc, folder, (c) => (flagged ? c.messageFlagsAdd(uids.join(','), ['\\Flagged'], { uid: true }) : c.messageFlagsRemove(uids.join(','), ['\\Flagged'], { uid: true })));
 }
 
 // All starred mails of an account (without trash, spam, drafts and Gmail collection folders)
 export async function fetchFlagged(acc: Account, perFolder = 50): Promise<MailSummary[]> {
+  if (pop.isPop(acc)) return pop.fetchFlagged(acc);
   const folders = (await listFolders(acc)).filter((f) => f.selectable && !['\\Trash', '\\Junk', '\\Drafts', '\\All', '\\Flagged', '\\Important'].includes(f.specialUse));
   const out: MailSummary[] = [];
   for (const f of folders) {
@@ -370,30 +428,31 @@ export async function fetchFlagged(acc: Account, perFolder = 50): Promise<MailSu
 
 // Mark read / unread (several UIDs in one command)
 export async function setSeen(acc: Account, folder: string, uids: number[], seen: boolean): Promise<void> {
+  if (pop.isPop(acc)) return pop.setSeen(acc, folder, uids, seen);
   if (!uids.length) return;
   await inFolder(acc, folder, (c) => (seen ? c.messageFlagsAdd(uids.join(','), ['\\Seen'], { uid: true }) : c.messageFlagsRemove(uids.join(','), ['\\Seen'], { uid: true })));
 }
 
-export interface AttachmentFile {
-  filename: string;
-  contentType: string;
-  content: Buffer;
+// "1:500,502,510:512" – keeps the IMAP command short even for thousands of UIDs
+function packUids(uids: number[]): string {
+  const sorted = [...new Set(uids)].sort((a, b) => a - b);
+  const parts: string[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const start = sorted[i];
+    while (i + 1 < sorted.length && sorted[i + 1] === sorted[i] + 1) i++;
+    parts.push(start === sorted[i] ? String(start) : `${start}:${sorted[i]}`);
+  }
+  return parts.join(',');
 }
 
-// Embedded images (cid:) go into the HTML as data URIs, everything else is a real attachment.
-// The attachment order is the same everywhere → the index identifies an attachment.
-function splitAttachments(parsed: ParsedMail): { html: string | null; files: AttachmentFile[] } {
-  let html = parsed.html || null;
-  const files: AttachmentFile[] = [];
-  for (const att of parsed.attachments) {
-    if (att.cid && html && html.includes(`cid:${att.cid}`)) {
-      const uri = `data:${att.contentType};base64,${att.content.toString('base64')}`;
-      html = html.split(`cid:${att.cid}`).join(uri);
-    } else {
-      files.push({ filename: att.filename || t('file.attachment'), contentType: att.contentType, content: att.content });
-    }
-  }
-  return { html, files };
+// Mark the whole folder read; returns how many were unread
+export async function markFolderSeen(acc: Account, folder: string): Promise<number> {
+  if (pop.isPop(acc)) return pop.markFolderSeen(acc, folder);
+  return inFolder(acc, folder, async (c) => {
+    const uids = (await c.search({ seen: false }, { uid: true })) || [];
+    if (uids.length) await c.messageFlagsAdd(packUids(uids), ['\\Seen'], { uid: true });
+    return uids.length;
+  });
 }
 
 async function fetchSource(c: ImapFlow, uid: number): Promise<Buffer> {
@@ -402,55 +461,28 @@ async function fetchSource(c: ImapFlow, uid: number): Promise<Buffer> {
   return msg.source;
 }
 
-export async function getMessage(acc: Account, folder: string, uid: number): Promise<MailDetail> {
+export async function getMessage(acc: Account, folder: string, uid: number, markRead = true): Promise<MailDetail> {
+  if (pop.isPop(acc)) return pop.getMessage(acc, folder, uid, markRead);
   return inFolder(acc, folder, async (c) => {
     const source = await fetchSource(c, uid);
-    await c.messageFlagsAdd(String(uid), ['\\Seen'], { uid: true });
-
-    const parsed = await simpleParser(source);
-    const { html, files } = splitAttachments(parsed);
-    const cal = parsed.attachments.find((x) => /^(text\/calendar|application\/ics)/i.test(x.contentType) || /\.ics$/i.test(x.filename ?? ''));
-    const invite = cal ? parseInvite(cal.content.toString('utf8')) : null;
-    const from = parsed.from?.value[0];
-    const to = Array.isArray(parsed.to) ? parsed.to.map((t) => t.text).join(', ') : parsed.to?.text ?? '';
-
-    return {
-      accountId: acc.id,
-      folder,
-      uid,
-      subject: parsed.subject || '',
-      fromName: from?.name || from?.address || '',
-      fromAddress: from?.address || '',
-      to,
-      toList: addressList(parsed.to),
-      ccList: addressList(parsed.cc),
-      replyTo: parsed.replyTo?.value[0]?.address || '',
-      messageId: parsed.messageId || '',
-      references: Array.isArray(parsed.references) ? parsed.references : parsed.references ? [parsed.references] : [],
-      date: (parsed.date ?? new Date()).toISOString(),
-      html,
-      text: parsed.text || '',
-      priority: parsePriority(
-        ['x-priority', 'importance', 'priority']
-          .map((h) => (parsed.headers.has(h) ? `${h}: ${String(parsed.headers.get(h))}` : ''))
-          .join('\n'),
-      ),
-      attachments: files.map((f) => ({ filename: f.filename, size: f.content.length, contentType: f.contentType })),
-      invite,
-    };
+    if (markRead) await c.messageFlagsAdd(String(uid), ['\\Seen'], { uid: true });
+    return buildDetail(acc, folder, uid, await simpleParser(source));
   });
 }
 
 export async function getAttachmentFiles(acc: Account, folder: string, uid: number): Promise<AttachmentFile[]> {
+  if (pop.isPop(acc)) return pop.getAttachmentFiles(acc, folder, uid);
   return inFolder(acc, folder, async (c) => splitAttachments(await simpleParser(await fetchSource(c, uid))).files);
 }
 
 export async function markSeen(acc: Account, folder: string, uid: number): Promise<void> {
+  if (pop.isPop(acc)) return pop.setSeen(acc, folder, [uid], true);
   await inFolder(acc, folder, (c) => c.messageFlagsAdd(String(uid), ['\\Seen'], { uid: true }));
 }
 
 // Move several mails in one IMAP command (UID list "12,15,18")
 export async function moveMessages(acc: Account, folder: string, uids: number[], target: string): Promise<void> {
+  if (pop.isPop(acc)) return pop.moveMessages(acc, folder, uids, target);
   if (target === folder || !uids.length) return;
   await inFolder(acc, folder, async (c) => {
     const ok = await c.messageMove(uids.join(','), target, { uid: true });
@@ -460,6 +492,7 @@ export async function moveMessages(acc: Account, folder: string, uids: number[],
 
 // Delete = move to trash; permanently inside the trash itself
 export async function deleteMessages(acc: Account, folder: string, uids: number[]): Promise<'trash' | 'deleted'> {
+  if (pop.isPop(acc)) return pop.deleteMessages(acc, folder, uids);
   const c = await getClient(acc);
   const trash = await findSpecial(c, '\\Trash', /^(trash|deleted items|deleted messages|papierkorb|gelöschte elemente|gelöschte objekte)$/i);
   if (trash && trash !== folder) {
@@ -470,17 +503,47 @@ export async function deleteMessages(acc: Account, folder: string, uids: number[
   return 'deleted';
 }
 
+export async function trashFolder(acc: Account): Promise<string | null> {
+  if (pop.isPop(acc)) return 'Trash';
+  const c = await getClient(acc);
+  return findSpecial(c, '\\Trash', /^(trash|deleted items|deleted messages|papierkorb|gelöschte elemente|gelöschte objekte)$/i);
+}
+
+// Whole folder at once (1:* = every message): permanently delete …
+export async function emptyFolder(acc: Account, folder: string): Promise<number> {
+  if (pop.isPop(acc)) return pop.emptyFolder(acc, folder);
+  return inFolder(acc, folder, async (c) => {
+    const n = c.mailbox ? c.mailbox.exists : 0;
+    if (n) await c.messageDelete('1:*');
+    return n;
+  });
+}
+
+// … or move everything into another folder
+export async function moveAllMessages(acc: Account, folder: string, target: string): Promise<number> {
+  if (pop.isPop(acc)) return pop.moveAllMessages(acc, folder, target);
+  if (folder === target) return 0;
+  return inFolder(acc, folder, async (c) => {
+    const n = c.mailbox ? c.mailbox.exists : 0;
+    if (n && !(await c.messageMove('1:*', target))) throw new Error(t('err.moveFailed'));
+    return n;
+  });
+}
+
 export async function junkFolder(acc: Account): Promise<string | null> {
+  if (pop.isPop(acc)) return 'Junk';
   const c = await getClient(acc);
   return findSpecial(c, '\\Junk', /^(junk|spam|junk e-mail|junk-e-mail|bulk mail|unerwünscht)$/i);
 }
 
 export async function archiveFolder(acc: Account): Promise<string | null> {
+  if (pop.isPop(acc)) return 'Archive';
   const c = await getClient(acc);
   return findSpecial(c, '\\Archive', /^(archive|archiv)$/i);
 }
 
 export async function closeAccount(id: string): Promise<void> {
+  pop.stop(id);
   const c = clients.get(id);
   clients.delete(id);
   if (c) await c.logout().catch(() => c.close());
@@ -488,14 +551,14 @@ export async function closeAccount(id: string): Promise<void> {
 
 export async function closeAll(): Promise<void> {
   stopping = true;
+  pop.stopAll();
   await Promise.all([...clients.keys()].map(closeAccount));
 }
 
 // Raw text of a mail's invitation (text/calendar)
 export async function getInviteIcs(acc: Account, folder: string, uid: number): Promise<string | null> {
+  if (pop.isPop(acc)) return pop.getInviteIcs(acc, folder, uid);
   return inFolder(acc, folder, async (c) => {
-    const parsed = await simpleParser(await fetchSource(c, uid));
-    const cal = parsed.attachments.find((x) => /^(text\/calendar|application\/ics)/i.test(x.contentType) || /\.ics$/i.test(x.filename ?? ''));
-    return cal ? cal.content.toString('utf8') : null;
+    return inviteIcs(await simpleParser(await fetchSource(c, uid)));
   });
 }

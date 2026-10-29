@@ -3,12 +3,32 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, No
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import { AccountUpdate, addAccount, getAccount, getPassword, listAccounts, NewAccount, removeAccount, updateAccount } from './accounts';
+import { clearLog, flushLog, getLog, log, logState, markLogSeen, setOnLogChange } from './log';
+import {
+  AccountUpdate,
+  addAccount,
+  getAccount,
+  getPassword,
+  listAccounts,
+  listAllAccounts,
+  lockAccounts,
+  NewAccount,
+  privacyState,
+  removeAccount,
+  setAccountColor,
+  setPrivacy,
+  unlockedPrivate,
+  unlockWithPin,
+  updateAccount,
+} from './accounts';
 import {
   closeAccount,
   closeAll,
   archiveFolder,
   junkFolder,
+  trashFolder,
+  emptyFolder,
+  moveAllMessages,
   deleteMessages,
   fetchFolder,
   FolderInfo,
@@ -22,15 +42,19 @@ import {
   markSeen,
   getInviteIcs,
   fetchNewSince,
-  searchFolder,
+  searchFolders,
   setSeen,
   setFlagged,
   fetchFlagged,
   setOnNewMail,
   startAccount,
   testConnection,
+  markFolderSeen,
 } from './imap';
 import { OutgoingMail, sendMail, testSmtp } from './smtp';
+import { closeStore as closePopStore, forgetAccount as forgetPopAccount } from './pop3';
+import { closeLocal, forgetLocal, isLocalDav, renameLocal } from './localdav';
+import { aiState, cancelAiDownload, deleteAiModel, downloadAiModel, proofread, setAiEnabled, setAiLang, setAiModel, setAiTranslateLang, stopWorker as stopAi, suggestSubjects, writeText, translate } from './ai';
 import { allowImages, getIdentity, getSettings, Identity, imagesAllowed, isTrustedSender, MailLabel, MailRule, NotifySettings, saveRules, SCALE_FACTOR, saveIdentities, saveLabels, saveNotify, savePrefs, saveTemplates, saveTheme, savedLanguage, setMailLabel, Template, Theme, trustSender, UiScale } from './settings';
 import { listSounds, openSoundFolder, soundData } from './sounds';
 import { flushWinState, loadWinState, trackWinState } from './winstate';
@@ -38,7 +62,7 @@ import { cachedTasks, deleteTask, listTasks, saveTask, TaskInput } from './tasks
 import { runRulesForNew, runRulesNow } from './rules';
 import { parseInvite, sendInvitations, sendReply } from './invites';
 import { getAvatars, hasRemoteImages, inlineRemoteImages, loadSignatureFile } from './remote';
-import { addDavAccount, DavKind, getDavPassword, listDavAccounts, NewDavAccount, removeDavAccount, updateDavAccount } from './davaccounts';
+import { addDavAccount, addLocalDavAccount, DavKind, getDavAccount, getDavPassword, listDavAccounts, NewDavAccount, removeDavAccount, renameDavAccount, updateDavAccount } from './davaccounts';
 import {
   cachedCalendarView,
   davError,
@@ -57,7 +81,7 @@ import {
   testCalDav,
 } from './caldav';
 import { cachedContacts, ContactInput, deleteContact, forgetCardAccount, listContacts, saveContact, testCardDav } from './carddav';
-import { cachedByMessageIds, knownAddresses, rememberAddresses, cachedBody, cachedMail, closeCache, folderKey, forgetMailAccount, getKv, removeCachedMail, setCachedSeen, setKv, storeBody, storeMail } from './cache';
+import { cachedByMessageIds, knownAddresses, rememberAddresses, cachedBody, cachedMail, closeCache, folderKey, forgetFolder, forgetMailAccount, getKv, removeCachedMail, searchCachedMail, setCachedSeen, setKv, storeBody, storeMail } from './cache';
 import { availableLanguages, i18nData, initI18n, t } from './i18n';
 
 // Language: system language if lang/<code>.json exists – otherwise English.
@@ -160,6 +184,12 @@ function createWindow(): void {
     win?.show();
   });
   win.on('focus', () => setTrayUnread(false));
+  // reload (Ctrl+R) of the main window: darken again if a compose popup is still open
+  win.webContents.on('did-finish-load', () => paintDim());
+  // to the tray and back: the compose popups go along
+  win.on('hide', () => popups.forEach((p) => !p.isDestroyed() && p.hide()));
+  win.on('show', () => popups.forEach((p) => !p.isDestroyed() && p.show()));
+  for (const ev of ['move', 'resize', 'maximize', 'unmaximize'] as const) win.on(ev as 'move', followParent);
   // X: keep running in the background (tray icon), except when quitting
   win.on('close', (e) => {
     if (quitting || !tray || !getSettings().notify.background) return;
@@ -286,9 +316,39 @@ async function notifyNewMail(accountId: string): Promise<void> {
 // ---------- Compose window (one window per mail, like Outlook) ----------
 
 const composeOpts = new Map<number, unknown>();
+// Open popups: the main window darkens behind them (like a modal dialog)
+const popups = new Set<BrowserWindow>();
+function paintDim(): void {
+  win?.webContents.send('compose:dim', popups.size > 0);
+}
+// Size like the settings dialog: centred in the main window, at most 960 × 860
+function popupBounds(p: Electron.Rectangle): Electron.Rectangle {
+  const width = Math.min(960, Math.round(p.width * 0.92));
+  const height = Math.min(860, Math.round(p.height * 0.9));
+  return { width, height, x: p.x + Math.round((p.width - width) / 2), y: p.y + Math.round((p.height - height) / 2) };
+}
+// a small main window: the popup may be smaller than the normal minimum, but never larger than the window
+const popupMin = (b: Electron.Rectangle) => ({ minWidth: Math.min(640, b.width), minHeight: Math.min(520, b.height) });
+// The popups move and resize with the main window
+function followParent(): void {
+  if (!win || !popups.size) return;
+  const b = popupBounds(win.getBounds());
+  const min = popupMin(b);
+  for (const p of popups) {
+    if (p.isDestroyed()) continue;
+    p.setMinimumSize(min.minWidth, min.minHeight);
+    p.setBounds(b);
+  }
+}
+ipcMain.handle('compose:focusPopup', () => {
+  const last = [...popups].pop();
+  last?.focus();
+});
 
 function openComposeWindow(opts: unknown): void {
   const parentBounds = win?.getBounds();
+  // Popup: belongs to the main window (stays above it, no own taskbar entry), centred over it
+  const popup = getSettings().composeMode === 'popup' && !!win && win.isVisible() && !!parentBounds;
   const st = loadWinState('compose', { width: 900, height: 800 });
   const cw = new BrowserWindow({
     width: st.width,
@@ -296,8 +356,13 @@ function openComposeWindow(opts: unknown): void {
     icon: APP_ICON,
     minWidth: 640,
     minHeight: 520,
-    // slightly offset from the main window so both are visible
-    ...(parentBounds ? { x: parentBounds.x + 120 + composeOpts.size * 28, y: parentBounds.y + 50 + composeOpts.size * 28 } : {}),
+    ...(popup
+      ? // like a dialog inside the main window: fixed in the middle, cannot be moved or resized
+        { parent: win!, skipTaskbar: true, minimizable: false, maximizable: false, resizable: false, movable: false, fullscreenable: false, ...popupBounds(parentBounds!), ...popupMin(popupBounds(parentBounds!)) }
+      : // slightly offset from the main window so both are visible
+        parentBounds
+        ? { x: parentBounds.x + 120 + composeOpts.size * 28, y: parentBounds.y + 50 + composeOpts.size * 28 }
+        : {}),
     backgroundColor: bgColor(),
     title: 'Agenoras',
     show: false,
@@ -307,10 +372,10 @@ function openComposeWindow(opts: unknown): void {
   const id = cw.webContents.id;
   composeOpts.set(id, opts ?? {});
   lockDown(cw);
-  trackWinState(cw, 'compose', false);
-  cw.loadFile(path.join(__dirname, '../../src/renderer/compose.html'));
+  if (!popup) trackWinState(cw, 'compose', false);
+  cw.loadFile(path.join(__dirname, '../../src/renderer/compose.html'), popup ? { query: { popup: '1' } } : undefined);
   cw.once('ready-to-show', () => {
-    if (st.maximized) cw.maximize();
+    if (st.maximized && !popup) cw.maximize();
     cw.show();
   });
 
@@ -327,7 +392,14 @@ function openComposeWindow(opts: unknown): void {
     });
     if (choice === 0) e.preventDefault(); // preventDefault = allow closing
   });
-  cw.on('closed', () => composeOpts.delete(id));
+  if (popup) {
+    popups.add(cw);
+    paintDim();
+  }
+  cw.on('closed', () => {
+    composeOpts.delete(id);
+    if (popups.delete(cw)) paintDim();
+  });
 }
 
 // ---------- Mail in its own window (double-click in the list) ----------
@@ -393,14 +465,16 @@ ipcMain.handle('accounts:add', async (_e, input: NewAccount) => {
   try {
     await testConnection(input, input.pass);
   } catch (err) {
+    log('error', 'IMAP', input.email, t('log.testFailed', { msg: friendlyError(err) }));
     throw new Error('IMAP: ' + friendlyError(err));
   }
   try {
     await testSmtp(input, input.pass);
   } catch (err) {
+    log('error', 'SMTP', input.email, t('log.testFailed', { msg: friendlyError(err) }));
     throw new Error('SMTP: ' + friendlyError(err));
   }
-  const acc = addAccount(input);
+  const acc = await addAccount(input);
   startAccount(acc).catch((err) => console.error(friendlyError(err)));
   return acc;
 });
@@ -408,27 +482,93 @@ ipcMain.handle('accounts:add', async (_e, input: NewAccount) => {
 ipcMain.handle('accounts:update', async (_e, id: string, input: AccountUpdate) => {
   if (!getAccount(id)) throw new Error(t('err.accountNotFound'));
   if (!input?.email || !input.host || !input.user) throw new Error(t('err.fillAll'));
-  const pass = input.pass || getPassword(id);
+  const pass = input.pass || (await getPassword(id));
   try {
     await testConnection(input, pass);
   } catch (err) {
+    log('error', 'IMAP', input.email, t('log.testFailed', { msg: friendlyError(err) }));
     throw new Error('IMAP: ' + friendlyError(err));
   }
   try {
     await testSmtp(input, pass);
   } catch (err) {
+    log('error', 'SMTP', input.email, t('log.testFailed', { msg: friendlyError(err) }));
     throw new Error('SMTP: ' + friendlyError(err));
   }
-  const acc = updateAccount(id, input);
+  const acc = await updateAccount(id, input);
   await closeAccount(id); // reconnect with the new settings
   startAccount(acc).catch((err) => console.error(friendlyError(err)));
   return acc;
 });
 
+ipcMain.handle('accounts:color', (_e, id: string, color: string) => setAccountColor(id, color));
+
+// ---------- Private accounts (PIN, auto-lock) ----------
+
+let lastActivity = Date.now();
+
+// Close the connection, wipe the local copies (mails, bodies, starred list) and
+// close single-mail windows – nothing of a locked account stays on screen or on disk
+async function forgetPrivate(id: string): Promise<void> {
+  await closeAccount(id);
+  forgetMailAccount(id);
+  setKv(`flagged:${id}`, []);
+  for (const [wcId, ref] of viewerOpts) {
+    if ((ref as { accountId?: string })?.accountId === id) BrowserWindow.getAllWindows().find((w) => w.webContents.id === wcId)?.destroy();
+  }
+}
+
+const privacyChanged = () => {
+  for (const w of BrowserWindow.getAllWindows()) w.webContents.send('privacy:changed', privacyState());
+};
+
+async function lockPrivate(ids?: string[]): Promise<void> {
+  const closed = lockAccounts(ids);
+  if (!closed.length) return;
+  await Promise.all(closed.map(forgetPrivate));
+  privacyChanged();
+}
+
+ipcMain.handle('privacy:state', () => privacyState());
+ipcMain.handle('privacy:activity', () => void (lastActivity = Date.now()));
+ipcMain.handle('privacy:lock', () => lockPrivate());
+ipcMain.handle('privacy:unlock', (_e, pin: string) => {
+  const opened = unlockWithPin(pin);
+  lastActivity = Date.now();
+  for (const acc of opened) startAccount(acc).catch((err) => console.error(friendlyError(err)));
+  privacyChanged();
+  return opened.length;
+});
+ipcMain.handle('privacy:set', (_e, id: string, pin: string | null, autoLockMin?: number) => {
+  const wasPrivate = !!getAccount(id)?.private;
+  const acc = setPrivacy(id, pin, autoLockMin);
+  lastActivity = Date.now();
+  if (wasPrivate !== !!acc.private) privacyChanged();
+  return acc;
+});
+
+// Auto-lock: each private account after its own number of minutes without any use of the app
+setInterval(() => {
+  const idle = Date.now() - lastActivity;
+  const due = unlockedPrivate().filter((a) => idle >= (a.autoLockMin ?? 5) * 60_000);
+  if (due.length) lockPrivate(due.map((a) => a.id)).catch((err) => console.error('auto-lock:', err));
+}, 15_000);
+
+// ---------- Problem log (warning sign in the title bar) ----------
+
+setOnLogChange((state) => {
+  for (const w of BrowserWindow.getAllWindows()) w.webContents.send('log:changed', state);
+});
+ipcMain.handle('log:state', () => logState());
+ipcMain.handle('log:list', () => getLog());
+ipcMain.handle('log:seen', () => markLogSeen());
+ipcMain.handle('log:clear', () => clearLog());
+
 ipcMain.handle('accounts:remove', async (_e, id: string) => {
   await closeAccount(id);
   removeAccount(id);
   forgetMailAccount(id);
+  forgetPopAccount(id); // POP3: the local mailbox belongs to the account
 });
 
 // ---------- Mail ----------
@@ -498,25 +638,28 @@ async function withImages(detail: MailDetail, loadImages: boolean) {
   return { ...detail, html, remoteImages, imagesLoaded: load };
 }
 
-ipcMain.handle('mail:get', async (_e, accountId: string, folder: string, uid: number, loadImages = false) => {
+// markRead = false: only show (the main window marks it read itself after the chosen delay)
+ipcMain.handle('mail:get', async (_e, accountId: string, folder: string, uid: number, loadImages = false, markRead = true) => {
   const acc = getAccount(accountId);
   if (!acc) throw new Error(t('err.accountNotFound'));
   const key = folderKey(accountId, folder);
 
   const cached = cachedBody<MailDetail>(key, uid);
   if (cached) {
-    setCachedSeen(key, uid);
-    markSeen(acc, folder, uid).catch(() => {}); // in the background, no error when offline
+    if (markRead) {
+      setCachedSeen(key, uid);
+      markSeen(acc, folder, uid).catch(() => {}); // in the background, no error when offline
+    }
     return withImages({ ...cached, priority: cached.priority ?? 'normal', folder }, !!loadImages);
   }
   let detail: MailDetail;
   try {
-    detail = await getMessage(acc, folder, uid);
+    detail = await getMessage(acc, folder, uid, !!markRead);
   } catch (err) {
     throw new Error(friendlyError(err));
   }
   storeBody(key, uid, detail);
-  setCachedSeen(key, uid);
+  if (markRead) setCachedSeen(key, uid);
   return withImages(detail, !!loadImages);
 });
 
@@ -571,28 +714,44 @@ ipcMain.handle('mail:seen', async (_e, accountId: string, folder: string, uids: 
   for (const uid of list) setCachedSeen(folderKey(accountId, folder), uid, !!seen);
 });
 
+// Instant hits from the local cache (before the server search answers)
+ipcMain.handle('mail:search:cached', (_e, accountId: string | null, folder: string | null, query: string) => {
+  const q = String(query ?? '').trim();
+  if (q.length < 2) return [];
+  return searchCachedMail<MailSummary>(accountsFor(accountId).map((a) => a.id), folder || null, q);
+});
+
 // Full-text search on the server: one folder or all folders (without Gmail's "All Mail")
+// A newer search makes the older one stop after its current folder (frees the connection)
+let searchGen = 0;
+// Most likely places first, trash/junk last
+const SEARCH_ORDER = ['', '\\Sent', '\\Archive', '\\Drafts', '\\Junk', '\\Trash'];
+const searchRank = (f: FolderInfo) => (f.path === 'INBOX' ? -1 : SEARCH_ORDER.indexOf(f.specialUse) === -1 ? 0 : SEARCH_ORDER.indexOf(f.specialUse));
+
 ipcMain.handle('mail:search', async (_e, accountId: string | null, folder: string | null, query: string) => {
   const q = String(query ?? '').trim();
+  const gen = ++searchGen;
   if (q.length < 2) return { mails: [], errors: [] };
+  const cancelled = () => gen !== searchGen;
   const accs = accountsFor(accountId);
   const errors: { accountId: string; message: string }[] = [];
   const perAccount = await Promise.all(
     accs.map(async (acc) => {
-      const out: MailSummary[] = [];
       try {
-        const folders = folder ? [folder] : (await listFolders(acc)).filter((f) => f.selectable && f.specialUse !== '\\All').map((f) => f.path);
-        for (const f of folders) {
-          try {
-            out.push(...(await searchFolder(acc, f, q, folder ? 100 : 30)));
-          } catch {
-            /* single folder not searchable */
-          }
-        }
+        // folder list from the cache when possible (saves a LIST round trip)
+        const known = getKv<FolderInfo[]>(`folders:${acc.id}`);
+        const all = known?.length ? known : await listFolders(acc);
+        const folders = folder
+          ? [folder]
+          : all
+              .filter((f) => f.selectable && f.specialUse !== '\\All')
+              .sort((a, b) => searchRank(a) - searchRank(b))
+              .map((f) => f.path);
+        return await searchFolders(acc, folders, q, folder ? 100 : 30, cancelled);
       } catch (err) {
         errors.push({ accountId: acc.id, message: friendlyError(err) });
+        return [];
       }
-      return out;
     }),
   );
   const mails = perAccount.flat().sort((a, b) => b.date.localeCompare(a.date)).slice(0, 300);
@@ -634,6 +793,128 @@ ipcMain.handle('mail:delete', async (_e, accountId: string, folder: string, uids
   } catch (err) {
     throw new Error(friendlyError(err));
   }
+});
+
+// Whole folder read (right-click on a folder)
+ipcMain.handle('mail:markFolderSeen', async (_e, accountId: string, folder: string) => {
+  const acc = getAccount(accountId);
+  if (!acc) throw new Error(t('err.accountNotFound'));
+  try {
+    const n = await markFolderSeen(acc, String(folder));
+    forgetFolder(folderKey(accountId, String(folder)));
+    return n;
+  } catch (err) {
+    throw new Error(friendlyError(err));
+  }
+});
+
+// Empty the trash (permanently). Only the account's real trash folder – never another folder by mistake.
+ipcMain.handle('mail:emptyTrash', async (_e, accountId: string) => {
+  const acc = getAccount(accountId);
+  if (!acc) throw new Error(t('err.accountNotFound'));
+  try {
+    const trash = await trashFolder(acc);
+    if (!trash) throw new Error(t('err.noTrash'));
+    const n = await emptyFolder(acc, trash);
+    forgetFolder(folderKey(accountId, trash));
+    return n;
+  } catch (err) {
+    throw new Error(friendlyError(err));
+  }
+});
+
+// All spam into the trash
+ipcMain.handle('mail:junkToTrash', async (_e, accountId: string) => {
+  const acc = getAccount(accountId);
+  if (!acc) throw new Error(t('err.accountNotFound'));
+  try {
+    const [junk, trash] = await Promise.all([junkFolder(acc), trashFolder(acc)]);
+    if (!junk) throw new Error(t('err.noJunk'));
+    if (!trash) throw new Error(t('err.noTrash'));
+    const n = await moveAllMessages(acc, junk, trash);
+    forgetFolder(folderKey(accountId, junk));
+    return n;
+  } catch (err) {
+    throw new Error(friendlyError(err));
+  }
+});
+
+// ---------- Mini-KI (offline) ----------
+
+ipcMain.handle('ai:state', () => aiState());
+ipcMain.handle('ai:enable', (_e, on: boolean) => setAiEnabled(!!on));
+ipcMain.handle('ai:model', (_e, id: string) => setAiModel(String(id)));
+ipcMain.handle('ai:lang', (_e, lang: string) => setAiLang(String(lang)));
+ipcMain.handle('ai:translateLang', (_e, lang: string) => setAiTranslateLang(String(lang ?? '')));
+ipcMain.handle('ai:download', (_e, id: string) => downloadAiModel(String(id)));
+ipcMain.handle('ai:cancel', () => cancelAiDownload());
+ipcMain.handle('ai:delete', (_e, id: string) => deleteAiModel(String(id)));
+ipcMain.handle('ai:subjects', (_e, text: string) => suggestSubjects(text));
+ipcMain.handle('ai:proofread', (_e, text: string) => proofread(text));
+ipcMain.handle('ai:write', (_e, instruction: string, ctx?: { original?: string; subject?: string }) => writeText(instruction, ctx));
+ipcMain.handle('ai:translate', (_e, text: string, target: string) => translate(String(text ?? ''), String(target)));
+
+// ---------- Reactions: a short reply mail whose content is the emoji ----------
+
+const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🎉'];
+
+// HTML-only mails: rough text for the quote (no DOM in the main process)
+function htmlToText(html: string): string {
+  return html
+    .replace(/<(style|script|head)[\s\S]*?<\/\1>/gi, '')
+    .replace(/<br\s*\/?>|<\/(p|div|li|tr|h\d)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+ipcMain.handle('mail:react', async (_e, accountId: string, folder: string, uid: number, emoji: string) => {
+  const acc = getAccount(accountId);
+  if (!acc) throw new Error(t('err.accountNotFound'));
+  if (!REACTIONS.includes(emoji)) throw new Error('Unknown reaction');
+  const msg = await getMessage(acc, folder, uid, false);
+  const to = msg.replyTo || msg.fromAddress;
+  if (!to) throw new Error(t('err.noRecipient'));
+  // sender: the address the mail went to (alias), otherwise the account's main address
+  const mine = getSettings().identities.filter((i) => i.accountId === accountId);
+  const wanted = new Set([...msg.toList, ...msg.ccList].map((a) => a.toLowerCase()));
+  const identity = mine.find((i) => wanted.has(i.email.toLowerCase())) ?? mine.find((i) => i.primary) ?? mine[0];
+  if (!identity) throw new Error(t('err.senderNotFound'));
+  const subject = /^re:/i.test(msg.subject) ? msg.subject : `Re: ${msg.subject}`;
+  const line = t('react.line', { subject: msg.subject || t('mail.noSubject') });
+  const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+  // Quote the original like a normal reply (as text – foreign HTML never goes into an own mail)
+  const original = (msg.text.trim() || htmlToText(msg.html ?? '')).replace(/\s+$/, '');
+  const when = new Date(msg.date).toLocaleString(i18nData().locale, { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const header = t('quote.header', { date: when, name: msg.fromName, email: msg.fromAddress });
+  const quoteText = original ? `\n\n${header}\n${original.split('\n').map((l) => `> ${l}`).join('\n')}` : '';
+  const quoteHtml = original
+    ? `<p style="color:#555;font-size:13px;margin:16px 0 4px">${esc(header)}</p><blockquote style="margin:0 0 0 4px;padding-left:10px;border-left:2px solid #C1C8BE;color:#555">${esc(original).replace(/\n/g, '<br>')}</blockquote>`
+    : '';
+  try {
+    await sendMail(identity, acc, {
+      identityId: identity.id,
+      to: [to],
+      cc: [],
+      bcc: [],
+      subject,
+      text: `${emoji}\n\n${line}${quoteText}`,
+      html: `<div style="font-size:40px;line-height:1.2">${emoji}</div><div style="color:#888;font-size:12px;margin-top:8px">${esc(line)}</div>${quoteHtml}`,
+      inReplyTo: msg.messageId,
+      references: [...msg.references, msg.messageId].filter(Boolean),
+    }, () => {});
+  } catch (err) {
+    log('error', 'SMTP', acc.email, friendlyError(err));
+    throw new Error(friendlyError(err));
+  }
+  return to;
 });
 
 // ---------- Attachments ----------
@@ -708,6 +989,7 @@ ipcMain.handle('mail:send', async (e, mail: OutgoingMail) => {
     }
     return res;
   } catch (err) {
+    log('error', 'SMTP', acc.email, friendlyError(err));
     throw new Error(friendlyError(err));
   }
 });
@@ -730,7 +1012,7 @@ ipcMain.handle('settings:signatureFile', async (e) => {
 });
 ipcMain.handle('settings:trustSender', (_e, email: string) => trustSender(email));
 ipcMain.handle('settings:notify', (_e, n: NotifySettings) => saveNotify(n));
-ipcMain.handle('settings:prefs', (_e, p: { uiScale?: UiScale; language?: string; weekStart?: number; sendDelay?: number; externalMark?: boolean; internalDomains?: string[]; accountLabel?: 'name' | 'email' }) => {
+ipcMain.handle('settings:prefs', (_e, p: { uiScale?: UiScale; language?: string; weekStart?: number; sendDelay?: number; readDelay?: number; composeMode?: 'window' | 'popup'; externalMark?: boolean; internalDomains?: string[]; accountLabel?: 'name' | 'email' }) => {
   const before = getSettings().language;
   savePrefs(p ?? {});
   if (p?.uiScale) for (const w of BrowserWindow.getAllWindows()) w.webContents.setZoomFactor(zoom());
@@ -789,20 +1071,28 @@ async function addDav(kind: DavKind, input: NewDavAccount) {
 }
 
 async function updateDav(kind: DavKind, id: string, input: NewDavAccount) {
+  if (isLocalDav(getDavAccount(kind, id))) {
+    // local: only the name can change
+    const acc = renameDavAccount(kind, id, input?.name ?? '');
+    renameLocal(id, acc.name);
+    if (kind === 'caldav') forgetCalAccount(id);
+    else forgetCardAccount(id);
+    return acc;
+  }
   if (!input?.serverUrl || !input.username) throw new Error(t('err.fillAll'));
   try {
     new URL(input.serverUrl);
   } catch {
     throw new Error(t('err.invalidUrl'));
   }
-  const password = input.password || getDavPassword(kind, id);
+  const password = input.password || (await getDavPassword(kind, id));
   try {
     if (kind === 'caldav') await testCalDav(input.serverUrl, input.username, password);
     else await testCardDav(input.serverUrl, input.username, password);
   } catch (err) {
     throw new Error(davError(err));
   }
-  const acc = updateDavAccount(kind, id, input);
+  const acc = await updateDavAccount(kind, id, input);
   if (kind === 'caldav') forgetCalAccount(id);
   else forgetCardAccount(id);
   return acc;
@@ -815,8 +1105,10 @@ ipcMain.handle('contacts:accounts:update', (_e, id: string, input: NewDavAccount
 
 ipcMain.handle('cal:accounts:list', () => listDavAccounts('caldav'));
 ipcMain.handle('cal:accounts:add', (_e, input: NewDavAccount) => addDav('caldav', input));
+ipcMain.handle('cal:accounts:addLocal', (_e, name: string) => addLocalDavAccount('caldav', String(name ?? '')));
 ipcMain.handle('cal:accounts:remove', (_e, id: string) => {
   forgetCalAccount(id);
+  if (isLocalDav(getDavAccount('caldav', id))) forgetLocal(id);
   removeDavAccount('caldav', id);
 });
 
@@ -921,8 +1213,10 @@ ipcMain.handle('tasks:delete', async (_e, id: string) => {
 
 ipcMain.handle('contacts:accounts:list', () => listDavAccounts('carddav'));
 ipcMain.handle('contacts:accounts:add', (_e, input: NewDavAccount) => addDav('carddav', input));
+ipcMain.handle('contacts:accounts:addLocal', (_e, name: string) => addLocalDavAccount('carddav', String(name ?? '')));
 ipcMain.handle('contacts:accounts:remove', (_e, id: string) => {
   forgetCardAccount(id);
+  if (isLocalDav(getDavAccount('carddav', id))) forgetLocal(id);
   removeDavAccount('carddav', id);
 });
 
@@ -983,6 +1277,13 @@ app.whenReady().then(() => {
   nativeTheme.themeSource = getSettings().theme;
   createWindow();
   createTray();
+  // Private accounts start locked: remove whatever copies a crash may have left behind
+  for (const acc of listAllAccounts()) {
+    if (acc.private) {
+      forgetMailAccount(acc.id);
+      setKv(`flagged:${acc.id}`, []);
+    }
+  }
   for (const acc of listAccounts()) {
     startAccount(acc)
       .then(() => rulesFor(acc.id)) // Mails that arrived while the app was closed
@@ -1000,8 +1301,12 @@ app.on('before-quit', (e) => {
   e.preventDefault();
   closing = true;
   flushWinState();
+  flushLog();
   closeAll().finally(() => {
     closeCache();
+    closePopStore();
+    closeLocal();
+    stopAi();
     app.quit();
   });
 });

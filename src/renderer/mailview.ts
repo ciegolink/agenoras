@@ -33,6 +33,7 @@ el('#reader').addEventListener('click', async (e) => {
   if (!msg) return;
   if (action === 'reply' || action === 'replyAll') return void window.api.compose.open(replyOpts(msg, action === 'replyAll'));
   if (action === 'forward') return void window.api.compose.open(forwardOpts(msg));
+  if (await reactionAction(msg, tgt, setViewStatus)) return;
   await attachmentAction(msg, tgt, setViewStatus);
 });
 

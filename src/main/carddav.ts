@@ -4,6 +4,8 @@ import crypto from 'node:crypto';
 import { DavAccount, getDavAccount, getDavPassword, listDavAccounts } from './davaccounts';
 import { getKv, setKv } from './cache';
 import { t } from './i18n';
+import { log } from './log';
+import { isLocalDav, localClient } from './localdav';
 
 export interface AddressBookInfo {
   id: string; // = address book URL
@@ -71,7 +73,7 @@ export async function testCardDav(serverUrl: string, username: string, password:
 async function getConn(acc: DavAccount, refresh = false): Promise<Conn> {
   const existing = conns.get(acc.id);
   if (existing && !refresh) return existing;
-  const client = davClient(acc.serverUrl, acc.username, getDavPassword('carddav', acc.id));
+  const client = isLocalDav(acc) ? (localClient(acc.id, acc.name) as DAVClient) : davClient(acc.serverUrl, acc.username, await getDavPassword('carddav', acc.id));
   await client.login();
   const conn = { client, books: await client.fetchAddressBooks() };
   conns.set(acc.id, conn);
@@ -240,6 +242,7 @@ export async function listContacts(): Promise<{
       }
     } catch (err) {
       errors.push({ accountId: acc.id, message: (err as Error)?.message ?? String(err) });
+      log('error', 'CardDAV', acc.name, errors[errors.length - 1].message);
       books.push(...cached.books.filter((b) => b.accountId === acc.id)); // offline: cache
       contacts.push(...cached.contacts.filter((c) => c.accountId === acc.id));
     }

@@ -119,6 +119,18 @@ function renderContacts(): void {
 
 el('#contact-search').addEventListener('input', renderContacts);
 
+// Show one contact (from the mail search): all books, no filter, scrolled into view
+async function showContact(id: string): Promise<void> {
+  await ensureContacts();
+  if (!contacts.some((c) => c.id === id)) return;
+  currentBook = null;
+  el<HTMLInputElement>('#contact-search').value = '';
+  selectedContact = id;
+  renderBooks();
+  renderContacts();
+  document.querySelector(`#contact-list [data-contact="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'center' });
+}
+
 el('#contact-list').addEventListener('click', (e) => {
   const id = (e.target as HTMLElement).closest<HTMLElement>('[data-contact]')?.dataset.contact;
   if (!id) return;
@@ -389,6 +401,7 @@ function openAddCardAccount(): void {
   editingCardAcc = null;
   cardForm.reset();
   setCardDialogMode(false);
+  fillLocalDav(cardForm, null, false, el('#btn-card-add-save'));
   el('#card-add-error').textContent = '';
   cardDlg.showModal();
 }
@@ -400,10 +413,12 @@ function openEditCardAccount(acc: CalAccount): void {
   cardField('name').value = acc.name;
   cardField('serverUrl').value = acc.serverUrl;
   cardField('username').value = acc.username;
+  fillLocalDav(cardForm, acc, true, el('#btn-card-add-save'));
   el('#card-add-error').textContent = '';
   cardDlg.showModal();
 }
 el('#btn-card-add-cancel').addEventListener('click', () => cardDlg.close());
+cardField('local').addEventListener('change', () => syncLocalDav(cardForm, !!editingCardAcc, el('#btn-card-add-save')));
 
 cardForm.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -419,6 +434,7 @@ cardForm.addEventListener('submit', async (e) => {
       password: cardField('password').value,
     };
     if (editingCardAcc) await window.api.contacts.updateAccount(editingCardAcc, input);
+    else if (cardField('local').checked) await window.api.contacts.addLocalAccount(input.name);
     else await window.api.contacts.addAccount(input);
     cardDlg.close();
     await loadContacts();
@@ -426,7 +442,7 @@ cardForm.addEventListener('submit', async (e) => {
     el('#card-add-error').textContent = errMsg(err);
   } finally {
     btn.disabled = false;
-    btn.textContent = t(editingCardAcc ? 'btn.saveConnect' : 'btn.connect');
+    syncLocalDav(cardForm, !!editingCardAcc, btn);
   }
 });
 

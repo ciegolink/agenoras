@@ -39,6 +39,7 @@
     "ical.js": "^2.2.1",
     "imapflow": "^2.9.1",
     "mailparser": "^3.12.4",
+    "node-llama-cpp": "^3.22.2",
     "nodemailer": "^10.2.1",
     "tsdav": "^2.5.0"
   },
@@ -70,7 +71,14 @@
       "build/**/*",
       "sounds/**/*",
       "package.json",
-      "!**/*.map"
+      "!**/*.map",
+      "!node_modules/@node-llama-cpp/*-cuda*/**",
+      "!node_modules/@node-llama-cpp/*-vulkan/**"
+    ],
+    "asarUnpack": [
+      "node_modules/node-llama-cpp/bins/**",
+      "node_modules/node-llama-cpp/llama/localBuilds/**",
+      "node_modules/@node-llama-cpp/**"
     ],
     "linux": {
       "target": [

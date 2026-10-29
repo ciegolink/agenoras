@@ -4,6 +4,7 @@ import { listDavAccounts, getDavAccount } from './davaccounts';
 import { calEntry, davError, getConn, hasTodos, registerTz } from './caldav';
 import { getKv, setKv } from './cache';
 import { t } from './i18n';
+import { log } from './log';
 
 // Tasks (CalDAV VTODO): lists = calendar collections that support tasks
 
@@ -92,6 +93,7 @@ export async function listTasks(): Promise<{ lists: TaskList[]; tasks: Task[]; e
       }
     } catch (err) {
       errors.push({ accountId: acc.id, message: davError(err) });
+      log('error', 'CalDAV', acc.name, errors[errors.length - 1].message);
       lists.push(...cached.lists.filter((l) => l.accountId === acc.id)); // offline: last state
       const ids = new Set(cached.lists.filter((l) => l.accountId === acc.id).map((l) => l.id));
       tasks.push(...cached.tasks.filter((x) => ids.has(x.listId)));

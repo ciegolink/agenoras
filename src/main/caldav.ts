@@ -5,6 +5,8 @@ import { DavAccount, getDavAccount, getDavPassword, listDavAccounts } from './da
 import { cachedWeek, getKv, setKv, storeWeek } from './cache';
 import { t } from './i18n';
 import { Person, readPeople } from './invites';
+import { log } from './log';
+import { isLocalDav, localClient } from './localdav';
 
 type CalAccount = DavAccount;
 const getCalAccount = (id: string) => getDavAccount('caldav', id);
@@ -109,7 +111,7 @@ export async function testCalDav(serverUrl: string, username: string, password: 
 export async function getConn(acc: CalAccount, refresh = false): Promise<Conn> {
   const existing = conns.get(acc.id);
   if (existing && !refresh) return existing;
-  const client = davClient(acc.serverUrl, acc.username, getCalPassword(acc.id));
+  const client = isLocalDav(acc) ? (localClient(acc.id, acc.name) as DAVClient) : davClient(acc.serverUrl, acc.username, await getCalPassword(acc.id));
   await client.login();
   const conn = { client, calendars: await loadCalendars(client) };
   conns.set(acc.id, conn);
@@ -138,6 +140,7 @@ export async function listCalendars(): Promise<{ calendars: CalendarInfo[]; erro
       }
     } catch (err) {
       errors.push({ accountId: acc.id, message: davError(err) });
+      log('error', 'CalDAV', acc.name, errors[errors.length - 1].message);
       calendars.push(...cached.filter((c) => c.accountId === acc.id)); // offline: last known calendars
     }
   }
@@ -421,6 +424,7 @@ async function connFor(calendarId: string) {
 }
 
 export async function saveEvent(input: EventInput): Promise<SaveResult> {
+  searchObjs.clear(); // calendar changes → search reloads
   if (!input.title.trim()) throw new Error(t('err.titleRequired'));
   if (input.end <= input.start) throw new Error(t('err.endBeforeStart'));
   const { entry, client } = await connFor(input.calendarId);
@@ -560,6 +564,7 @@ function origMs(input: EventInput, base: ICAL.Time | null): number {
 
 // occurrence set = delete only this occurrence of a series (EXDATE), otherwise whole event/series
 export async function deleteEvent(url: string, occurrence?: string): Promise<void> {
+  searchObjs.clear(); // calendar changes → search reloads
   const raw = rawObjects.get(url);
   if (!raw) throw new Error(t('err.eventNotLoaded'));
   const { client } = await connFor(raw.calendarId);
@@ -630,6 +635,7 @@ export async function findByUid(uid: string): Promise<{ url: string; data: strin
 
 // Import an invitation into a calendar (own participation status set); an existing UID is updated
 export async function importInvite(calendarId: string, ics: string, myEmail: string, partstat: string): Promise<void> {
+  searchObjs.clear(); // calendar changes → search reloads
   const comp = new ICAL.Component(ICAL.parse(ics));
   comp.removeAllProperties('method');
   comp.updatePropertyWithValue('prodid', '-//Agenoras//Agenoras//DE');
@@ -659,6 +665,7 @@ export async function importInvite(calendarId: string, ics: string, myEmail: str
 
 // Apply an attendee's reply to the own event (organizer side)
 export async function applyReply(uid: string, email: string, partstat: string): Promise<boolean> {
+  searchObjs.clear(); // calendar changes → search reloads
   const hit = await findByUid(uid);
   if (!hit) return false;
   const comp = new ICAL.Component(ICAL.parse(hit.data));
@@ -679,6 +686,7 @@ export async function applyReply(uid: string, email: string, partstat: string): 
 }
 
 export async function deleteByUid(uid: string): Promise<boolean> {
+  searchObjs.clear(); // calendar changes → search reloads
   const hit = await findByUid(uid);
   if (!hit) return false;
   const { client } = await connFor(hit.calendarId);
@@ -688,6 +696,9 @@ export async function deleteByUid(uid: string): Promise<boolean> {
 }
 
 // Search events (title, location, notes, attendees) – one year back to one year ahead
+const SEARCH_TTL = 2 * 60_000;
+const searchObjs = new Map<string, { at: number; objs: { url: string; data?: unknown; etag?: string }[] }>();
+
 export async function searchEvents(query: string, calendarIds: string[]): Promise<CalEvent[]> {
   const q = query.trim().toLowerCase();
   if (q.length < 2) return [];
@@ -700,8 +711,14 @@ export async function searchEvents(query: string, calendarIds: string[]): Promis
       const acc = entry && getCalAccount(entry.accountId);
       if (!entry || !acc) return;
       try {
-        const { client } = await getConn(acc);
-        const objs = await client.fetchCalendarObjects({ calendar: entry.cal, timeRange: { start: from.toISOString(), end: to.toISOString() } });
+        // the two-year range of a calendar is kept for a short time: typing on doesn't reload everything
+        let hit = searchObjs.get(id);
+        if (!hit || Date.now() - hit.at > SEARCH_TTL) {
+          const { client } = await getConn(acc);
+          hit = { at: Date.now(), objs: await client.fetchCalendarObjects({ calendar: entry.cal, timeRange: { start: from.toISOString(), end: to.toISOString() } }) };
+          searchObjs.set(id, hit);
+        }
+        const objs = hit.objs;
         for (const o of objs) {
           if (typeof o.data !== 'string' || !o.data.toLowerCase().includes(q)) continue;
           rawObjects.set(o.url, { data: o.data, etag: o.etag ?? '', calendarId: id });

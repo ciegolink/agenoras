@@ -712,7 +712,10 @@ const prioInput = () => cform.elements.namedItem('priority') as HTMLInputElement
 
 function paintPriority(): void {
   const p = prioInput().value as Priority;
-  el('#prio-label').textContent = t(`prio.${p}`);
+  // icon only: the current level is in the tooltip
+  const tip = `${t('compose.priority')}: ${t(`prio.${p}`)}`;
+  el('#btn-prio').title = tip;
+  el('#btn-prio').setAttribute('aria-label', tip);
   el('#btn-prio').classList.toggle('prio-high', p === 'high');
   el('#btn-prio').classList.toggle('prio-low', p === 'low');
   const flag = el('#prio-flag');

@@ -10,6 +10,41 @@ interface Account {
   smtpPort: number;
   smtpSecure: boolean;
   color: string;
+  private?: boolean; // protected by a PIN
+  autoLockMin?: number;
+  protocol?: 'imap' | 'pop3'; // incoming mail (missing = IMAP)
+  leaveOnServer?: boolean; // POP3: keep a copy on the server
+  deleteAfterDays?: number; // POP3: delete the server copy after N days (0 = never)
+}
+
+interface AiState {
+  enabled: boolean;
+  model: string;
+  lang: string; // output language: auto | de-CH | de-DE | en | fr | it
+  translateLang: string; // default translation target, '' = app language
+  ready: boolean; // enabled and the active model is downloaded
+  models: { id: string; name: string; size: number; downloaded: boolean }[];
+  download: { id: string; received: number; total: number } | null;
+}
+
+interface LogEntry {
+  id: number;
+  time: string;
+  level: 'error' | 'warn';
+  source: string;
+  account: string;
+  message: string;
+  count: number;
+}
+
+interface LogState {
+  total: number;
+  unseen: number;
+}
+
+interface PrivacyState {
+  locked: number; // private accounts currently locked
+  unlocked: number; // private accounts currently open
 }
 
 interface NewAccountInput {
@@ -23,6 +58,12 @@ interface NewAccountInput {
   smtpPort: number;
   smtpSecure: boolean;
   pass: string;
+  color?: string;
+  pin?: string;
+  autoLockMin?: number;
+  protocol?: 'imap' | 'pop3';
+  leaveOnServer?: boolean;
+  deleteAfterDays?: number;
 }
 
 interface OutgoingMail {
@@ -110,6 +151,7 @@ interface MailSummary {
   hasAttachments: boolean;
   priority?: Priority;
   messageId?: string;
+  inReplyTo?: string;
   flagged?: boolean;
   toAddress?: string;
 }
@@ -349,13 +391,48 @@ interface Window {
     addAccount(input: NewAccountInput): Promise<Account>;
     removeAccount(id: string): Promise<void>;
     updateAccount(id: string, input: Omit<NewAccountInput, 'pass'> & { pass?: string }): Promise<Account>;
+    setAccountColor(id: string, color: string): Promise<Account>;
+    ai: {
+      state(): Promise<AiState>;
+      enable(on: boolean): Promise<AiState>;
+      setModel(id: string): Promise<AiState>;
+      setLang(lang: string): Promise<AiState>;
+      setTranslateLang(lang: string): Promise<AiState>;
+      download(id: string): Promise<AiState>;
+      cancel(): Promise<void>;
+      remove(id: string): Promise<AiState>;
+      subjects(text: string): Promise<string[]>;
+      proofread(text: string): Promise<string>;
+      write(instruction: string, ctx?: { original?: string; subject?: string }): Promise<string>;
+      translate(text: string, target: string): Promise<string>;
+      onState(cb: (state: AiState) => void): void;
+    };
+    log: {
+      state(): Promise<LogState>;
+      list(): Promise<LogEntry[]>;
+      seen(): Promise<LogState>;
+      clear(): Promise<LogState>;
+      onChanged(cb: (state: LogState) => void): void;
+    };
+    privacy: {
+      state(): Promise<PrivacyState>;
+      unlock(pin: string): Promise<number>;
+      lock(): Promise<void>;
+      set(id: string, pin: string | null, autoLockMin?: number): Promise<Account>;
+      activity(): Promise<void>;
+      onChanged(cb: (state: PrivacyState) => void): void;
+    };
     listFolders(accountId: string): Promise<FolderInfo[]>;
     cachedFolders(accountId: string): Promise<FolderInfo[]>;
     moveMails(accountId: string, folder: string, uids: number[], target: string): Promise<void>;
     deleteMails(accountId: string, folder: string, uids: number[]): Promise<'trash' | 'deleted'>;
+    emptyTrash(accountId: string): Promise<number>;
+    markFolderSeen(accountId: string, folder: string): Promise<number>;
+    react(accountId: string, folder: string, uid: number, emoji: string): Promise<string>;
+    junkToTrash(accountId: string): Promise<number>;
     cachedMail(accountId: string | null, folder?: string): Promise<MailSummary[]>;
     listMail(accountId: string | null, folder?: string): Promise<{ mails: MailSummary[]; errors: { accountId: string; message: string }[] }>;
-    getMail(accountId: string, folder: string, uid: number, loadImages?: boolean): Promise<MailDetail>;
+    getMail(accountId: string, folder: string, uid: number, loadImages?: boolean, markRead?: boolean): Promise<MailDetail>;
     setSeen(accountId: string, folder: string, uids: number[], seen: boolean): Promise<void>;
     setFlagged(accountId: string, folder: string, uids: number[], flagged: boolean): Promise<void>;
     flaggedMails(): Promise<{ mails: MailSummary[]; errors: { accountId: string; message: string }[] }>;
@@ -363,6 +440,7 @@ interface Window {
     mailsByMessageIds(ids: string[]): Promise<MailSummary[]>;
     knownAddresses(): Promise<{ name: string; address: string }[]>;
     searchMail(accountId: string | null, folder: string | null, query: string): Promise<{ mails: MailSummary[]; errors: { accountId: string; message: string }[] }>;
+    searchCachedMail(accountId: string | null, folder: string | null, query: string): Promise<MailSummary[]>;
     avatars(emails: string[]): Promise<Record<string, string | null>>;
     invite: {
       respond(accountId: string, folder: string, uid: number, partstat: 'ACCEPTED' | 'TENTATIVE' | 'DECLINED', calendarId: string | null): Promise<boolean>;
@@ -380,11 +458,13 @@ interface Window {
       init(): Promise<ComposeOpts>;
       done(status: string): Promise<void>;
       sent(): Promise<void>;
+      focusPopup(): Promise<void>;
+      onDim(cb: (on: boolean) => void): void;
     };
     settings: {
-      get(): Promise<{ identities: Identity[]; templates: Template[]; theme: 'dark' | 'light' | 'system'; notify?: NotifySettings; labels?: MailLabel[]; mailLabels?: Record<string, string[]>; uiScale?: 'small' | 'medium' | 'large'; language?: string; weekStart?: number; sendDelay?: number; externalMark?: boolean; internalDomains?: string[]; accountLabel?: 'name' | 'email'; rules?: MailRule[] }>;
+      get(): Promise<{ identities: Identity[]; templates: Template[]; theme: 'dark' | 'light' | 'system'; notify?: NotifySettings; labels?: MailLabel[]; mailLabels?: Record<string, string[]>; uiScale?: 'small' | 'medium' | 'large'; language?: string; weekStart?: number; sendDelay?: number; readDelay?: number; composeMode?: 'window' | 'popup'; externalMark?: boolean; internalDomains?: string[]; accountLabel?: 'name' | 'email'; rules?: MailRule[] }>;
       saveLabels(list: MailLabel[]): Promise<MailLabel[]>;
-      savePrefs(p: { uiScale?: 'small' | 'medium' | 'large'; language?: string; weekStart?: number; sendDelay?: number; externalMark?: boolean; internalDomains?: string[]; accountLabel?: 'name' | 'email' }): Promise<{ restartNeeded: boolean }>;
+      savePrefs(p: { uiScale?: 'small' | 'medium' | 'large'; language?: string; weekStart?: number; sendDelay?: number; readDelay?: number; composeMode?: 'window' | 'popup'; externalMark?: boolean; internalDomains?: string[]; accountLabel?: 'name' | 'email' }): Promise<{ restartNeeded: boolean }>;
       saveRules(list: MailRule[]): Promise<MailRule[]>;
       runRules(accountId: string | null): Promise<{ matched: number; moved: number }>;
       languages(): Promise<string[]>;
@@ -406,6 +486,7 @@ interface Window {
     cal: {
       listAccounts(): Promise<CalAccount[]>;
       addAccount(input: DavAccountInput): Promise<CalAccount>;
+      addLocalAccount(name: string): Promise<CalAccount>;
       removeAccount(id: string): Promise<void>;
       updateAccount(id: string, input: DavAccountInput): Promise<CalAccount>;
       cached(calendarIds: string[], start: string): Promise<{ calendars: CalendarInfo[]; events: CalEvent[] }>;
@@ -425,6 +506,7 @@ interface Window {
     contacts: {
       listAccounts(): Promise<CalAccount[]>;
       addAccount(input: DavAccountInput): Promise<CalAccount>;
+      addLocalAccount(name: string): Promise<CalAccount>;
       removeAccount(id: string): Promise<void>;
       updateAccount(id: string, input: DavAccountInput): Promise<CalAccount>;
       cached(): Promise<{ books: AddressBookInfo[]; contacts: Contact[] }>;

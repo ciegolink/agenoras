@@ -46,6 +46,8 @@
     <div class="env-row subject-row">
       <span class="recip-label" data-i18n="compose.subject"></span>
       <input name="subject" class="env-subject" data-i18n-aria="compose.subject" data-i18n-ph="compose.subjectPh">
+      <button type="button" class="ai-btn" id="btn-ai-subject" data-i18n-aria="ai.subjects" data-i18n-title="ai.subjects" hidden><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg></button>
+      <ul class="ai-subjects" id="ai-subjects" role="listbox" hidden></ul>
     </div>
   </div>
 
@@ -69,12 +71,15 @@
       <span class="tsep"></span>
       <button type="button" id="btn-link" data-i18n-aria="ed.link" data-i18n-title="ed.linkTip"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></button>
       <button type="button" id="btn-image" data-i18n-aria="ed.image" data-i18n-title="ed.imageTip"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5L5 20"/></svg></button>
-      <button type="button" class="tb-text" id="btn-ph" aria-haspopup="menu" data-i18n-aria="compose.placeholders" data-i18n-title="ed.phTip"><span class="ph-curly">{{ }}</span><span data-i18n="ed.ph"></span><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+      <button type="button" id="btn-ph" aria-haspopup="menu" data-i18n-aria="compose.placeholders" data-i18n-title="ed.phTip"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4H7a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2 2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1"/><path d="M16 4h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2 2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-1"/></svg></button>
       <input type="file" id="image-input" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
       <button type="button" data-cmd="removeFormat" data-i18n-aria="ed.clear" data-i18n-title="ed.clear"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7V5h14v2"/><path d="M11 5 8 19"/><path d="m15 15 5 5M20 15l-5 5"/></svg></button>
+      <button type="button" id="btn-ai-write" data-i18n-aria="ai.write" data-i18n-title="ai.writeTip" hidden><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg></button>
+      <button type="button" id="btn-ai-proof" data-i18n-aria="ai.proofread" data-i18n-title="ai.proofread" hidden><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 16 7.5 6 11 16M5.2 12.5h4.6"/><path d="m13 15 3 3 6-7"/></svg></button>
+      <button type="button" id="btn-ai-translate" data-i18n-aria="tr.translate" data-i18n-title="tr.composeTip" hidden><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h8M8 3v2M5.5 5c.7 2.8 2.7 5 5.5 6.2M10.5 5c-.8 3.4-3 6-6.5 7.5"/><path d="m12 21 4.5-10 4.5 10M13.6 17.5h5.8"/></svg></button>
       <span class="tspacer"></span>
-      <button type="button" class="tb-text" id="btn-tpl" aria-haspopup="menu" data-i18n-aria="compose.template" data-i18n-title="compose.templateTip"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><span data-i18n="compose.template"></span><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
-      <button type="button" class="tb-text" id="btn-prio" aria-haspopup="menu" data-i18n-aria="compose.priority" data-i18n-title="compose.priority"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 21V4"/><path d="M5 4h12l-2 4 2 4H5"/></svg><span id="prio-label"></span><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+      <button type="button" id="btn-tpl" aria-haspopup="menu" data-i18n-aria="compose.template" data-i18n-title="compose.templateTip"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></button>
+      <button type="button" id="btn-prio" aria-haspopup="menu" data-i18n-aria="compose.priority" data-i18n-title="compose.priority"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 21V4"/><path d="M5 4h12l-2 4 2 4H5"/></svg></button>
       <span class="tsep"></span>
       <button type="button" id="btn-attach" class="attach-icon" data-i18n-aria="compose.attach" data-i18n-title="compose.attachTip"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 12-8.5 8.5a5 5 0 0 1-7-7L14 5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4L15.5 8"/></svg></button>
     </div>
@@ -82,6 +87,23 @@
       <input id="link-url" data-i18n-ph="ed.linkPh" data-i18n-aria="ed.linkAria">
       <button type="button" class="btn ghost" id="link-cancel" data-i18n="btn.cancel"></button>
       <button type="button" class="btn primary" id="link-ok" data-i18n="ed.linkSet"></button>
+    </div>
+    <div class="ai-write" id="ai-write" hidden>
+      <div class="ai-write-head"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg><b data-i18n="ai.writeTitle"></b><span class="hint" id="ai-write-ctx"></span></div>
+      <textarea id="ai-write-input" rows="2" data-i18n-ph="ai.writePh" data-i18n-aria="ai.write"></textarea>
+      <div class="ai-write-row">
+        <span class="hint" data-i18n="ai.writeKeys"></span>
+        <button type="button" class="btn ghost sm" id="btn-ai-write-close" data-i18n="btn.cancel"></button>
+        <button type="button" class="btn primary sm" id="btn-ai-write-go" data-i18n="ai.writeGo"></button>
+      </div>
+      <div class="ai-busy" id="ai-busy" hidden><span class="ai-spin" aria-hidden="true"></span><span data-i18n="ai.writing"></span></div>
+      <div class="ai-draft-label" id="ai-draft-label" hidden data-i18n="ai.draftLabel"></div>
+      <div class="ai-draft" id="ai-draft" hidden></div>
+      <div class="ai-write-row" id="ai-draft-actions" hidden>
+        <span class="hint" data-i18n="ai.draftHint"></span>
+        <button type="button" class="btn ghost sm" id="btn-ai-redo" data-i18n="ai.redo"></button>
+        <button type="button" class="btn primary sm" id="btn-ai-insert" data-i18n="ai.insert"></button>
+      </div>
     </div>
     <div class="editor" id="editor" contenteditable="true" role="textbox" aria-multiline="true" data-i18n-aria="compose.message" spellcheck="true"></div>
   </div>
@@ -122,5 +144,6 @@
 
 <script src="../../dist/renderer/common.js"></script>
 <script src="../../dist/renderer/compose.js"></script>
+<script src="../../dist/renderer/compose-ai.js"></script>
 </body>
 </html>

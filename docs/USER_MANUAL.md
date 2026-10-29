@@ -1,6 +1,6 @@
 # Agenoras User Manual
 
-Agenoras brings mail, calendar, contacts and tasks together in one desktop app for Windows, Linux and macOS. It uses open standards (IMAP, SMTP, CalDAV, CardDAV), so it works with Nextcloud, iCloud, Gmail, your own mail server and most other providers.
+Agenoras brings mail, calendar, contacts and tasks together in one desktop app for Windows, Linux and macOS. It uses open standards (IMAP, POP3, SMTP, CalDAV, CardDAV), so it works with Nextcloud, iCloud, Gmail, your own mail server and most other providers. Calendars, tasks and contacts can also be kept on your computer without a server, and an optional offline AI helps you write, proofread and translate emails without sending your texts anywhere.
 
 This manual explains how to use the app. If you want to build or change Agenoras itself, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
@@ -40,16 +40,28 @@ The macOS version runs on both Intel and Apple Silicon Macs.
 
 On first start, open **Settings → Accounts**. Agenoras has three kinds of accounts. Add only the ones you need.
 
-### Email account (IMAP/SMTP)
+### Email account (IMAP or POP3)
 
 Click **+ Email account** and fill in:
 
 - **Display name**: the name others see as the sender (e.g. your name or company)
 - **Email** and **Password**
-- **IMAP server** and **SMTP server** with ports
+- **Incoming**: **IMAP** (recommended) or **POP3**, with server and port
+- **SMTP server** with port
 - **SSL/TLS**: on for port 465, off for STARTTLS on port 587
+- **Colour**: pick one of the colours or a custom colour. The account is marked with it in the sidebar and the mail list.
 
 Click **Connect →**. Agenoras checks the login right away and loads your folders.
+
+**POP3** only fetches the inbox, every 2 minutes. Folders, read status, stars and sent mail then exist only on this computer. Choose whether to **Leave a copy on the server** and whether to delete the server copy after a number of days. If you also read your mail on other devices, use IMAP instead.
+
+### Private account with a PIN
+
+Tick **Private account – visible only with a PIN** and enter a PIN of 4–8 digits. While the account is locked it is invisible: no mails, no search hits, no notifications.
+
+- Unlock it with **Unlock private** in the sidebar and your PIN; **Lock private** locks it again.
+- **Lock automatically** locks it after a few minutes without use.
+- After a restart every private account starts locked. Locking removes the mails stored on this computer; they are loaded again after unlocking.
 
 ### Calendar account (CalDAV)
 
@@ -58,6 +70,10 @@ Click **+ CalDAV account**, enter a name, the **Server URL**, your username and 
 ### Contacts account (CardDAV)
 
 Click **+ CardDAV account** and fill in the same fields as for CalDAV.
+
+### Calendar, tasks and contacts without a server
+
+Don't have a CalDAV or CardDAV server? Choose **Only on this computer (no server)** when adding the account. Events, tasks or contacts are then stored only on this computer (file `local.db`, see [Your data and privacy](#12-your-data-and-privacy)). They are not synced to other devices, so include the file in your backup.
 
 ### Server addresses for common providers
 
@@ -73,12 +89,13 @@ To change an account later, click **Edit** next to it. Leave the password field 
 
 ## 3. The main window
 
-The bar on the left switches between **Mail**, **Calendar**, **Tasks**, **Contacts** and **Settings**.
+The buttons at the bottom of the sidebar switch between **Mail**, **Calendar**, **Contacts** and **Tasks**; they always stay in place, only the list above them scrolls. **Settings** are in the gear menu at the top right.
 
 - **Columns** can be resized by dragging their edges. Double-click an edge to reset it. Agenoras remembers window size, position and column widths.
 - **My day** is a side panel with a small month calendar, today's and tomorrow's events and your tasks. Open or close it with the panel button in the toolbar. Use **+ Event** and **+ Task for today** to add items quickly.
 - **Tray icon**: if background mode is on (see [Notifications](#notifications)), closing the window keeps Agenoras running in the tray. Right-click the tray icon to open the app, write a new email or quit.
 - **About**: gear menu → **About Agenoras** shows the version and links to the wiki and bug reports.
+- **Problems**: when a connection to a mail, calendar or contacts server fails, a warning sign appears in the title bar, with the number of new problems. Click it to see what went wrong. The log contains errors only; you can **Copy** it (e.g. for a bug report) or **Clear** it. See also [Troubleshooting](#13-troubleshooting).
 
 ## 4. Mail
 
@@ -88,11 +105,34 @@ The sidebar shows **All inboxes** (a unified inbox for all accounts) and below i
 
 New mail arrives live without refreshing. To check manually, press **F5** or **Ctrl+R**.
 
+Right-click a folder for:
+
+- **Mark all as read** – every folder
+- **Empty trash** – the trash folder, after you confirm; this deletes the mails permanently
+- **Move all to trash** – the spam folder, after you confirm
+
 ### Reading mail
 
 Click an email to show it in the reading pane. **Double-click** opens it in its own window.
 
-Buttons in the email header: **Reply**, **Reply all**, **Forward**, **Archive**, **Delete**.
+An opened email counts as read after 3 seconds, so quickly clicking through the list doesn't mark everything as read. You can change this to **Immediately**, another delay or **Only by hand** under **Settings → Senders & signatures → Mark as read**.
+
+Buttons in the email header: **Reply**, **Reply all**, **Forward**, a reaction button (😊), **Archive**, **Delete**.
+
+### Right-click inside an email
+
+Right-click anywhere in the text of an email for:
+
+- **Reply** and **Reply all**
+- **Reply only to** a single person in the conversation (sender, To or Cc)
+- A row of **reactions** (👍 ❤️ 😂 😮 😢 🙏 🎉)
+- With selected text: **Copy**, and **Translate → *language*** if the offline AI is on (see [Writing emails](#5-writing-emails))
+
+The translation opens in a small panel next to the text, with a **Copy** button. The target language is set under **Settings → AI → Default translation**.
+
+### Reactions
+
+Hover over the 😊 button (or right-click in the email) and pick an emoji. Agenoras sends it right away as a short reply mail to the sender, with the original message quoted below, so it works with every mail program.
 
 Click on a sender or recipient name for more options: write an email, copy the address or name, or **Add as contact**.
 
@@ -103,7 +143,7 @@ Click on a sender or recipient name for more options: write an email, copy the a
 - **Ctrl+A**: select all emails in the list
 - **Esc**: clear the selection
 
-You can then drag the selected emails onto a folder or category, or use the right-click menu.
+Selected emails are highlighted, unread ones too. You can then drag them onto a folder or category, or use the right-click menu.
 
 ### Right-click menu
 
@@ -117,13 +157,27 @@ Right-click an email (or a selection) to:
 - Open in a new window
 - **Create rule …** from this email (see [Rules](#6-rules))
 
+### Conversations
+
+Click the conversation button in the list header (next to the filters) to group replies for the open account. The button is shown when a single account or folder is open and is switched on or off per account.
+
+- A conversation shows as one row with its newest email and a counter. Click the counter to expand or collapse the older emails; an open conversation is lightly highlighted.
+- The row is bold when its newest email is unread; unread older emails colour the counter instead.
+- Dragging a collapsed conversation onto a folder moves all its emails.
+
+Emails belong together when one answers another. Conversations are grouped per folder, so your own replies (in **Sent**) are not shown in the inbox. During a search and in **Important** and categories the list is not grouped.
+
 ### Deleting
 
 **Delete** (or the **Del** key) moves emails to the trash. In the **Trash** folder, deleting removes them permanently after you confirm.
 
 ### Search and filters
 
-Type into the search field at the top of the list and press **Enter**. Agenoras searches sender, subject and the full message text on the server. Choose **This folder** or **Everywhere** to set the scope. Press **Esc** to end the search.
+Type into the search field at the top of the list and press **Enter**. Agenoras searches sender, subject and the full message text on the server, and also your **appointments**, **contacts** and **tasks**. A ring in the search field shows that the search is still running; the number of results appears when it is finished.
+
+- **This folder** or **Everywhere** sets the scope for emails.
+- **All**, **Mails**, **Appointments**, **Contacts** and **Tasks** show only one kind of result. Appointments, contacts and tasks are marked so you can tell them apart; click one to open it.
+- Press **Esc** or click **×** to end the search.
 
 The filter buttons above the list show only:
 
@@ -153,7 +207,9 @@ If you turn on **Mark external senders** (Settings → Appearance), emails from 
 
 ## 5. Writing emails
 
-Click **New email** in the toolbar. The compose window opens.
+Click **New email** in the sidebar. The compose window opens: by default as a separate window, or as a fixed popup over the main window (Settings → Appearance → **Compose**). The popup can't be moved; it stays in the middle of the main window, which is darkened behind it.
+
+The toolbar shows icons only; hover over an icon to see what it does.
 
 ### Recipients
 
@@ -180,6 +236,17 @@ Set the priority to **High**, **Normal** or **Low**. Recipients see high-priorit
 ### Templates
 
 Click the template button to insert a saved template, or **Save as template** to save the current email for later. Templates are managed under **Settings → Templates**.
+
+### Writing with the offline AI
+
+If the offline AI is switched on (**Settings → AI**), the compose window has these extra buttons:
+
+- **Generate text** (✦): describe in a few words what the email should say, e.g. "accept, Tuesday 10 am works, ask about parking", and press **Generate text** or **Ctrl+Enter**. The AI writes a draft that you can **Insert into mail** or **Regenerate**. When replying, it knows the email you are answering and writes in its language, even if your description is in another language. If a signature is in the email, the AI leaves out the closing and your name.
+- **Suggest a subject** (✦ next to the subject): three suggestions based on your text.
+- **Proofread**: corrects spelling, grammar and punctuation of your own text (not the signature or the quoted email). With a selection only the selection is checked. **Ctrl+Z** undoes the changes.
+- **Translate**: select text and click the translate button. It is replaced by its translation into your default language (Settings → AI). **Ctrl+Z** undoes it.
+
+Generating takes about 5–20 seconds. The AI is small and can make mistakes – always read the text before sending.
 
 ### Sending to many people individually: placeholders
 
@@ -252,7 +319,7 @@ When you receive an invitation, the email shows a card with **Accept**, **Maybe*
 
 ## 8. Tasks
 
-Tasks are stored on your CalDAV server (e.g. Nextcloud Tasks or Apple Reminders lists), so they stay in sync with your other devices.
+Tasks are stored on your CalDAV server (e.g. Nextcloud Tasks or Apple Reminders lists), so they stay in sync with your other devices. Without a server, use a local account (see [First start](#2-first-start-adding-accounts)).
 
 - Type into the quick field at the top and press **Enter** to add a task.
 - Click a task to edit it: title, **List**, **Due** date and optional time, priority and notes.
@@ -265,7 +332,7 @@ If no task list appears, your CalDAV server needs a calendar that supports tasks
 
 ## 9. Contacts
 
-The contacts view lists all address books from your CardDAV accounts. Search by name, company, email or phone.
+The contacts view lists all address books from your CardDAV accounts and local address books. Search by name, company, email or phone.
 
 - **New contact**: first and last name, company, job title, emails and phone numbers (one per line), birthday, note and address book.
 - **Photo**: drop an image onto the photo area or click it. It is cropped to a square automatically. Contact photos are also shown next to emails from that person.
@@ -278,7 +345,12 @@ The contacts view lists all address books from your CardDAV accounts. Search by 
 
 For each account you can set the sender name, add **aliases** (other addresses you send from) and give each address its own **signature**, as plain text or HTML. Click **Load HTML file …** to import a ready-made HTML signature; images in it are embedded and sent along.
 
-Your mail server must allow you to send from an alias address. The **Sending** delay for undo (0–5 seconds) is also set here.
+With many senders the list stays compact: only one signature is open for editing at a time, each account can be collapsed, and from five senders on a search field finds a sender or signature quickly.
+
+Your mail server must allow you to send from an alias address. Also set here, under **Sending & reading**:
+
+- **Sending**: delay for undo (0–5 seconds)
+- **Mark as read**: when an opened email counts as read (immediately, after 1–10 seconds, or only by hand)
 
 ### Templates
 
@@ -286,7 +358,7 @@ Create, rename and delete email templates. A template saved from the compose win
 
 ### Accounts
 
-Add, edit and remove email, CalDAV and CardDAV accounts (see [section 2](#2-first-start-adding-accounts)).
+Add, edit and remove email, CalDAV and CardDAV accounts (see [First start](#2-first-start-adding-accounts)). Under **Edit** you can also change an account's colour and make it private with a PIN.
 
 ### Categories
 
@@ -312,7 +384,17 @@ To use your own sounds, click **Open folder for your own sounds**, put `.ogg`, `
 - **Language**: English, German or Match system (applies after a restart)
 - **Week starts on**
 - **Show mailboxes as** name or email address
+- **Compose**: **Separate window** (default) or **Popup over the main window**
 - **External emails**: mark external senders, additional internal domains
+
+### AI
+
+The optional offline AI writes email drafts, suggests subjects, proofreads and translates. It runs entirely on your computer – no cloud, your texts never leave the device.
+
+- **Enable mini AI (offline)** and click **Download** next to the model. The model is [Ministral 3 3B](https://huggingface.co/mistralai/Ministral-3-3B-Instruct-2512) by Mistral AI (Apache 2.0), about 2 GB, downloaded once and checked with SHA-256. You can cancel the download or delete the model again here.
+- While working it needs about 3 GB of RAM; after 5 minutes without use the memory is freed again.
+- **AI language**: the language for generated texts and subject suggestions, independent of the app language – *Same as the mail*, German (Switzerland, with "ss"), German (Germany), English, French or Italian. Replies are always written in the language of the email you answer; for German, the spelling chosen here applies.
+- **Default translation**: the target language for **Translate** (right-click in an email, translate button when writing). All languages the model supports are available: German, English, French, Italian, Spanish, Portuguese, Dutch, Chinese, Japanese, Korean and Arabic.
 
 ## 11. Keyboard shortcuts
 
@@ -331,6 +413,11 @@ On macOS, use **Cmd** instead of **Ctrl**.
 | Compose | **Ctrl+B / I / U** | Bold / italic / underline |
 | Compose | **Ctrl+K** | Insert link |
 | Compose | **Esc** / **Ctrl+Z** | Undo sending (during the delay) |
+| Compose (Generate text) | **Ctrl+Enter** | Generate the text |
+| Compose | **Ctrl+Z** | Undo proofreading or translation |
+| Mail | Right-click in an email | Reply, reply to one person, reactions, copy, translate |
+| Mail | Right-click on a folder | Mark all as read, empty trash, move spam to trash |
+| Translation panel | **Esc** | Close |
 | Mail window | **Esc** | Close window |
 
 ## 12. Your data and privacy
@@ -345,11 +432,16 @@ Your data is stored here:
 | Windows | `%APPDATA%\agenoras\` |
 | macOS | `~/Library/Application Support/agenoras/` |
 
-- **Passwords** are encrypted with your system's keychain.
+- **Passwords** are encrypted with your system's keychain. PINs of private accounts are stored only as a protected hash.
 - `settings.json` contains signatures, templates, rules and preferences. Back it up if you want to keep them.
 - `cache.db` is a local copy of your mail for fast start and offline reading. You can delete it at any time; it is rebuilt from the server.
+- `pop3.db` holds the mail of POP3 accounts. If the copy on the server is deleted, this is the only copy – back it up.
+- `local.db` holds local calendars, tasks and address books (accounts without a server). This is the only copy – back it up.
+- `ai.json` and the folder `ai-models` hold the AI settings and the downloaded model. Delete the model under **Settings → AI**.
 
 HTML emails are shown in a protected area where scripts can't run. External content is only loaded when you allow it.
+
+The offline AI runs only on your computer. Your texts are never sent anywhere; its only internet access is the one-time download of the model file from Hugging Face.
 
 ## 13. Troubleshooting
 
@@ -364,6 +456,15 @@ This can happen after a system change or a new keyring. Enter the password again
 
 **"The event/contact was changed elsewhere in the meantime"**
 Someone or another device changed it at the same time. Refresh and make your change again.
+
+**Something doesn't load, or a warning sign appears in the title bar**
+Click the warning sign. The problem log shows which server failed and why (e.g. wrong password, server not reachable). **Copy** puts the log on the clipboard for a bug report.
+
+**The AI buttons are missing in the compose window**
+The AI is off or its model isn't downloaded yet. Open **Settings → AI**, turn it on and click **Download**.
+
+**The AI is slow or the text is wrong**
+The first request after a pause takes longer because the model is loaded first. The AI is small: check its texts before sending, and click **Regenerate** for another version.
 
 **An email shows no images**
 External images are blocked on purpose. Click **Load images**.

@@ -7,6 +7,8 @@ const svgIco = (paths: string, size = 15, sw = 2) =>
 const ACT_ICONS = {
   reply: svgIco('<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>'),
   replyAll: svgIco('<path d="M8 14 3 9l5-5"/><path d="M13 14 8 9l5-5"/><path d="M8 9h7.5a5.5 5.5 0 0 1 0 11H13"/>'),
+  copy: svgIco('<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>'),
+  translate: svgIco('<path d="M4 5h8M8 3v2M5.5 5c.7 2.8 2.7 5 5.5 6.2M10.5 5c-.8 3.4-3 6-6.5 7.5"/><path d="m12 21 4.5-10 4.5 10M13.6 17.5h5.8"/>'),
   forward: svgIco('<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>'),
   window: svgIco('<rect x="3" y="5" width="18" height="15" rx="2"/><path d="M3 9h18"/>'),
   read: svgIco('<path d="M3 8l9 6 9-6"/><rect x="3" y="5" width="18" height="14" rx="2"/>'),
@@ -271,6 +273,11 @@ document.addEventListener('click', (e) => {
 
 // Insert the body. External images are blocked → banner with "Load images" / "Always load from …".
 function mountMailBody(box: HTMLElement, msg: MailDetail, reload: () => void): void {
+  bodyMsg = msg;
+  // another mail: menu and translation of the previous one go away; own addresses may have changed
+  trMenu.hidden = true;
+  trPop.hidden = true;
+  loadOwnAddrs();
   box.innerHTML = '';
   if (isExternal(msg.fromAddress)) {
     const ext = document.createElement('div');
@@ -303,6 +310,7 @@ function mountMailBody(box: HTMLElement, msg: MailDetail, reload: () => void): v
       const fit = () => (frame.style.height = (frame.contentDocument?.documentElement.scrollHeight ?? 600) + 'px');
       fit();
       frame.contentDocument?.querySelectorAll('img').forEach((img) => img.addEventListener('load', fit));
+      hookTranslate(frame);
     };
     box.appendChild(frame);
   } else {
@@ -387,10 +395,53 @@ function forwardOpts(msg: MailDetail): ComposeOpts {
   };
 }
 
+const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🎉'];
+
 const replyButtonsHtml = () => `
   <button class="btn primary with-ico" data-action="reply">${ACT_ICONS.reply}${esc(t('mail.reply'))}</button>
   <button class="btn ghost with-ico" data-action="replyAll">${ACT_ICONS.replyAll}${esc(t('mail.replyAll'))}</button>
-  <button class="btn ghost with-ico" data-action="forward">${ACT_ICONS.forward}${esc(t('mail.forward'))}</button>`;
+  <button class="btn ghost with-ico" data-action="forward">${ACT_ICONS.forward}${esc(t('mail.forward'))}</button>
+  <span class="react-wrap">
+    <button type="button" class="btn ghost react-btn" data-react-menu title="${esc(t('react.tip'))}" aria-label="${esc(t('react.tip'))}" aria-haspopup="true">😊</button>
+    <span class="react-pop" role="menu" hidden>${REACTIONS.map((r) => `<button type="button" role="menuitem" data-react="${r}">${r}</button>`).join('')}</span>
+  </span>`;
+
+// Reaction: emoji menu open/close, one click sends it right away as a short reply mail
+async function reactionAction(msg: MailDetail, target: HTMLElement, status: (s: string) => void): Promise<boolean> {
+  const pop = target.closest('.react-wrap')?.querySelector<HTMLElement>('.react-pop');
+  if (target.closest('[data-react-menu]') && pop) {
+    pop.hidden = !pop.hidden;
+    return true;
+  }
+  const emoji = target.closest<HTMLElement>('[data-react]')?.dataset.react;
+  if (!emoji || !pop) return false;
+  pop.hidden = true;
+  // keep the bar closed while the mouse is still over it (otherwise hover would reopen it at once)
+  const wrap = target.closest<HTMLElement>('.react-wrap')!;
+  wrap.classList.add('no-hover');
+  wrap.addEventListener('mouseleave', () => wrap.classList.remove('no-hover'), { once: true });
+  const btn = target.closest('.react-wrap')!.querySelector<HTMLButtonElement>('[data-react-menu]')!;
+  btn.disabled = true;
+  await sendReaction(msg, emoji, status);
+  btn.disabled = false;
+  return true;
+}
+
+// Also used by the right-click menu in the mail body; the 😊 button shows what was sent
+async function sendReaction(msg: MailDetail, emoji: string, status: (s: string) => void): Promise<void> {
+  status(t('react.sending'));
+  try {
+    const to = await window.api.react(msg.accountId, msg.folder, msg.uid, emoji);
+    document.querySelectorAll<HTMLElement>('[data-react-menu]').forEach((b) => (b.textContent = emoji));
+    status(t('react.sent', { emoji, to }));
+  } catch (err) {
+    status(errMsg(err));
+  }
+}
+
+document.addEventListener('mousedown', (e) => {
+  if (!(e.target as HTMLElement).closest('.react-wrap')) document.querySelectorAll<HTMLElement>('.react-pop').forEach((p) => (p.hidden = true));
+});
 
 // ---------- Meeting invitations in mails (accept / maybe / decline) ----------
 
@@ -491,3 +542,151 @@ document.addEventListener('click', async (e) => {
     card.querySelectorAll('button').forEach((b) => ((b as HTMLButtonElement).disabled = false));
   }
 });
+
+// ---------- Right-click menu in the mail body ----------
+// Always: reply, reply all, reply to one participant, reactions. With selected text also "Copy" and
+// "Translate → <default language>" (mini AI); the translation opens in a panel with "Copy".
+// Works in the HTML frame and in plain-text mails.
+
+let bodyMsg: MailDetail | null = null; // the mail shown in the body (set by mountMailBody)
+const bodyStatus = (s: string) => {
+  const st = document.querySelector('#status');
+  if (st) st.textContent = s;
+};
+
+let trAi: AiState | null = null;
+window.api.ai.state().then((s) => (trAi = s)).catch(() => {});
+window.api.ai.onState((s) => (trAi = s));
+// own addresses never show up as "reply only to …" (reloaded with every mail: senders can be added)
+let ownAddrs = new Set<string>();
+function loadOwnAddrs(): void {
+  window.api.settings
+    .get()
+    .then((s) => (ownAddrs = new Set(s.identities.map((i) => i.email.toLowerCase()))))
+    .catch(() => {});
+}
+
+const trMenu = document.createElement('div');
+trMenu.className = 'ctx-menu';
+trMenu.setAttribute('role', 'menu');
+trMenu.hidden = true;
+const trPop = document.createElement('div');
+trPop.className = 'tr-pop';
+trPop.hidden = true;
+document.body.append(trMenu, trPop);
+let trText = '';
+let trAt = { x: 0, y: 0 }; // where the menu opened, in window coordinates
+
+function placeFixed(box: HTMLElement, x: number, y: number): void {
+  box.style.left = `${Math.max(8, Math.min(x, innerWidth - box.offsetWidth - 8))}px`;
+  box.style.top = `${Math.max(8, Math.min(y, innerHeight - box.offsetHeight - 8))}px`;
+}
+
+// Everyone in the conversation except yourself; the sender (or Reply-To) first
+function participants(msg: MailDetail): { addr: string; name: string }[] {
+  const seen = new Set<string>();
+  const list = [{ addr: msg.replyTo || msg.fromAddress, name: msg.fromName }, ...[...msg.toList, ...msg.ccList].map((a) => ({ addr: a, name: '' }))];
+  return list.filter((p) => {
+    const k = p.addr.toLowerCase();
+    if (!k || seen.has(k) || ownAddrs.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
+// frame = the HTML mail's iframe, if any
+function openBodyMenu(e: MouseEvent, sel: Selection | null, frame?: HTMLIFrameElement): void {
+  const msg = bodyMsg;
+  if (!msg) return;
+  e.preventDefault();
+  const off = frame?.getBoundingClientRect() ?? { left: 0, top: 0 };
+  trText = sel && !sel.isCollapsed ? sel.toString().trim() : '';
+  trAt = { x: off.left + e.clientX, y: off.top + e.clientY };
+  const item = (attr: string, ico: string, label: string) => `<button type="button" role="menuitem" ${attr}>${ico}<span>${esc(label)}</span></button>`;
+  const people = participants(msg);
+  const def = translateTarget(trAi);
+  trMenu.innerHTML = [
+    trText ? item('data-bm="copy"', ACT_ICONS.copy, t('tr.copy')) : '',
+    trText && trAi?.ready ? item(`data-tr-lang="${def}"`, ACT_ICONS.translate, t('tr.translateDefault', { lang: trLangName(def) })) : '',
+    trText ? '<hr>' : '',
+    item('data-bm="reply"', ACT_ICONS.reply, t('mail.reply')),
+    people.length > 1 ? item('data-bm="replyAll"', ACT_ICONS.replyAll, t('mail.replyAll')) : '',
+    people.length > 1
+      ? `<hr><div class="ctx-head">${esc(t('bm.replyOnly').toUpperCase())}</div>` +
+        people.map((p, i) => `<button type="button" role="menuitem" data-bm-to="${i}" title="${esc(p.addr)}">${ACT_ICONS.reply}<span>${esc(p.name ? `${p.name} <${p.addr}>` : p.addr)}</span></button>`).join('')
+      : '',
+    `<hr><div class="ctx-react" role="group" aria-label="${esc(t('react.tip'))}">${REACTIONS.map((r) => `<button type="button" data-bm-react="${r}" title="${esc(t('react.tip'))}">${r}</button>`).join('')}</div>`,
+  ].join('');
+  trMenu.dataset.people = JSON.stringify(people.map((p) => p.addr));
+  trMenu.hidden = false;
+  placeFixed(trMenu, trAt.x, trAt.y);
+}
+
+async function runTranslate(target: string): Promise<void> {
+  const head = `<div class="tr-head"><span>${ACT_ICONS.translate}${esc(t('tr.title', { lang: trLangName(target) }))}</span><button type="button" class="icon-btn sm" data-tr-close aria-label="${esc(t('win.close'))}">✕</button></div>`;
+  trPop.innerHTML = `${head}<div class="tr-busy"><span class="ai-spin" aria-hidden="true"></span>${esc(t('tr.working'))}</div>`;
+  trPop.hidden = false;
+  placeFixed(trPop, trAt.x, trAt.y + 12);
+  const source = trText;
+  try {
+    const out = await window.api.ai.translate(source, target);
+    if (trPop.hidden || source !== trText) return; // closed or replaced meanwhile
+    trPop.innerHTML = `${head}<div class="tr-text"></div><div class="tr-foot"><button type="button" class="btn ghost sm" data-tr-copy>${esc(t('tr.copy'))}</button></div>`;
+    trPop.querySelector('.tr-text')!.textContent = out;
+  } catch (err) {
+    if (trPop.hidden) return;
+    trPop.innerHTML = `${head}<div class="tr-text error"></div>`;
+    trPop.querySelector('.tr-text')!.textContent = errMsg(err);
+  }
+  placeFixed(trPop, trAt.x, trAt.y + 12);
+}
+
+trMenu.addEventListener('click', (e) => {
+  const tgt = e.target as HTMLElement;
+  const msg = bodyMsg;
+  const btn = tgt.closest<HTMLElement>('button');
+  if (!btn || !msg) return;
+  trMenu.hidden = true;
+  const d = btn.dataset;
+  if (d.trLang) return void runTranslate(d.trLang);
+  if (d.bmReact) return void sendReaction(msg, d.bmReact, bodyStatus);
+  if (d.bm === 'copy') return void navigator.clipboard.writeText(trText).catch(() => {});
+  if (d.bm === 'reply' || d.bm === 'replyAll') return void window.api.compose.open(replyOpts(msg, d.bm === 'replyAll'));
+  if (d.bmTo !== undefined) {
+    const addr = (JSON.parse(trMenu.dataset.people || '[]') as string[])[Number(d.bmTo)];
+    if (addr) window.api.compose.open({ ...replyOpts(msg, false), to: [addr], matchAddresses: [...msg.toList, ...msg.ccList] });
+  }
+});
+trPop.addEventListener('click', async (e) => {
+  const tgt = e.target as HTMLElement;
+  if (tgt.closest('[data-tr-close]')) trPop.hidden = true;
+  else if (tgt.closest('[data-tr-copy]')) {
+    await navigator.clipboard.writeText(trPop.querySelector('.tr-text')?.textContent ?? '').catch(() => {});
+    tgt.closest('button')!.textContent = t('tr.copied');
+  }
+});
+
+// Plain-text mails live in the page itself; HTML mails are hooked up in mountMailBody
+document.addEventListener('contextmenu', (e) => {
+  if ((e.target as HTMLElement).closest('.text-body')) openBodyMenu(e, getSelection());
+});
+document.addEventListener('mousedown', (e) => {
+  if (!(e.target as HTMLElement).closest('.ctx-menu')) trMenu.hidden = true;
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    trMenu.hidden = true;
+    trPop.hidden = true;
+  }
+});
+document.addEventListener('scroll', () => (trMenu.hidden = true), true);
+
+function hookTranslate(frame: HTMLIFrameElement): void {
+  const doc = frame.contentDocument;
+  if (!doc) return;
+  doc.addEventListener('contextmenu', (e) => openBodyMenu(e, frame.contentWindow!.getSelection(), frame));
+  doc.addEventListener('mousedown', () => (trMenu.hidden = true));
+  doc.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') trMenu.hidden = trPop.hidden = true;
+  });
+}

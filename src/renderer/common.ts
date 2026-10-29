@@ -54,6 +54,13 @@ function setupTitlebar(): void {
   document.body.classList.add(`platform-${window.api.platform}`);
   const ctl = document.querySelector<HTMLElement>('.win-ctls');
   if (!ctl) return;
+  // Compose as popup: fixed like a dialog – no moving, only closing
+  if (new URLSearchParams(location.search).has('popup')) {
+    document.body.classList.add('is-popup');
+    ctl.innerHTML = `<button type="button" class="win-btn close" data-win="close" aria-label="${esc(t('win.close'))}" title="${esc(t('win.close'))}">${WIN_ICONS.close}</button>`;
+    ctl.addEventListener('click', () => window.api.win.close());
+    return;
+  }
   ctl.innerHTML = `
     <button type="button" class="win-btn" data-win="min" aria-label="${esc(t('win.minimize'))}" title="${esc(t('win.minimize'))}">${WIN_ICONS.min}</button>
     <button type="button" class="win-btn" data-win="max" aria-label="${esc(t('win.maximize'))}" title="${esc(t('win.maximize'))}">${WIN_ICONS.max}</button>
@@ -216,3 +223,21 @@ function sanitizeHtml(html: string, keepMarkers = false): string {
   return doc.body.innerHTML;
 }
 
+
+// Output languages of the mini AI (settings and compose window), independent of the UI language
+const AI_LANG_CODES = ['auto', 'de-CH', 'de-DE', 'en', 'fr', 'it'];
+
+// Translation targets: every language the AI model supports, without regional variants (see ai.ts)
+const TR_LANGS = ['de', 'en', 'fr', 'it', 'es', 'pt', 'nl', 'zh', 'ja', 'ko', 'ar'];
+// Language name in the app language ("Deutsch", "Englisch" …)
+const langNames = new Intl.DisplayNames([LOCALE], { type: 'language' });
+const trLangName = (code: string) => {
+  const n = langNames.of(code) ?? code;
+  return n.charAt(0).toLocaleUpperCase(LOCALE) + n.slice(1);
+};
+// Default target: Settings → AI, otherwise the app language
+function translateTarget(state?: AiState | null): string {
+  if (state?.translateLang && TR_LANGS.includes(state.translateLang)) return state.translateLang;
+  const l = LOCALE.slice(0, 2).toLowerCase();
+  return TR_LANGS.includes(l) ? l : 'en';
+}

@@ -13,6 +13,17 @@ let listFilter: 'all' | 'unread' | 'attach' | 'flagged' = 'all'; // filter above
 let searchScope: 'folder' | 'all' = 'folder'; // search: current folder or everywhere
 let searchResults: MailSummary[] | null = null; // hits of the server search (full text)
 let searchSeq = 0;
+let searchKind: 'all' | 'mail' | 'event' | 'contact' | 'task' = 'all'; // search: which kind of hits is shown
+let eventHits: CalEvent[] = []; // search hits from the calendars
+let contactHits: Contact[] = []; // search hits from the address books
+let taskHits: Task[] = []; // search hits from the task lists
+let readDelay = 3; // seconds until an opened mail counts as read (0 = at once, -1 = only by hand); Settings → Accounts
+let readTimer: number | undefined;
+// typing = waiting for the first (local) hits · server = mails are still being searched on the server
+let searchPhase: 'idle' | 'typing' | 'server' = 'idle';
+let privacy: PrivacyState = { locked: 0, unlocked: 0 }; // private accounts (PIN), see below
+const LOCK_ICO = '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>';
+const UNLOCK_ICO = '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/>';
 // categories (local, per mail via Message-ID) – managed in labels.ts
 let labels: MailLabel[] = [];
 let mailLabels: Record<string, string[]> = {};
@@ -86,6 +97,8 @@ function parseKey(key: string): { accountId: string; folder: string; uid: number
 
 async function loadAccounts(): Promise<void> {
   accounts = await window.api.listAccounts();
+  privacy = await window.api.privacy.state().catch(() => privacy);
+  renderPrivacy();
   renderAccounts();
   for (const a of accounts) if (expandedAccs.has(a.id)) loadFolders(a.id);
 }
@@ -157,6 +170,7 @@ function renderAccounts(): void {
           <span class="tw${open ? ' open' : ''}" data-tw-acc="${a.id}" role="button" aria-expanded="${open}">›</span>
           <span class="dot" style="background:${a.color}"></span>
           <span class="name" title="${esc(a.email)}">${esc(accLabel(a))}</span>
+          ${a.private ? `<span class="priv-ico" title="${esc(t('account.privateTag'))}">${svgIco(UNLOCK_ICO, 11)}</span>` : ''}
           <span class="count" data-count="${a.id}">${inboxUnseen || ''}</span>
         </button>${tree}`;
     })
@@ -294,6 +308,131 @@ document.addEventListener('externalprefs', () => {
   renderList();
 });
 
+// ---------- Conversations (threads), switchable per account ----------
+// Mails belong together when one answers the other (In-Reply-To). Older cached mails do not know that
+// yet, so a "Re:/AW:/Fwd:/WG:" subject also joins the mails with the same subject.
+
+const THREADS_KEY = 'agenoras.threadAccounts';
+const threadAccounts = new Set<string>(JSON.parse(localStorage.getItem(THREADS_KEY) || '[]') as string[]);
+const expandedThreads = new Set<string>();
+// key of a closed conversation's head → keys of all its mails (dragging the head moves the whole conversation)
+const closedThreads = new Map<string, string[]>();
+interface MailThread {
+  id: string; // key of the oldest mail – stays the same when new replies arrive
+  mails: MailSummary[]; // newest first
+}
+const isThread = (row: MailSummary | MailThread): row is MailThread => 'mails' in row;
+const REPLY_PREFIX = /^\s*((re|aw|antw|wg|fwd?|tr|sv|rif)(\[\d+\])?\s*:\s*)+/i;
+const baseSubject = (s: string) => s.replace(REPLY_PREFIX, '').trim().toLowerCase();
+
+function buildThreads(list: MailSummary[]): (MailSummary | MailThread)[] {
+  const parent = list.map((_, i) => i);
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  const join = (a: number, b: number) => (parent[find(a)] = find(b));
+  const byId = new Map<string, number>();
+  const bySubject = new Map<string, number[]>();
+  list.forEach((m, i) => {
+    if (!threadAccounts.has(m.accountId)) return;
+    if (m.messageId) byId.set(`${m.accountId}|${m.messageId}`, i);
+    const base = baseSubject(m.subject);
+    if (base) bySubject.set(`${m.accountId}|${base}`, [...(bySubject.get(`${m.accountId}|${base}`) ?? []), i]);
+  });
+  list.forEach((m, i) => {
+    const p = m.inReplyTo ? byId.get(`${m.accountId}|${m.inReplyTo}`) : undefined;
+    if (p !== undefined) join(i, p);
+  });
+  for (const ids of bySubject.values()) if (ids.length > 1 && ids.some((i) => REPLY_PREFIX.test(list[i].subject))) ids.forEach((i) => join(i, ids[0]));
+  // list is newest first → the first mail met of a group is its newest
+  const groups = new Map<number, MailSummary[]>();
+  list.forEach((m, i) => groups.set(find(i), [...(groups.get(find(i)) ?? []), m]));
+  const out: (MailSummary | MailThread)[] = [];
+  const done = new Set<number>();
+  list.forEach((m, i) => {
+    const root = find(i);
+    if (done.has(root)) return;
+    done.add(root);
+    const mails = groups.get(root)!;
+    out.push(mails.length > 1 ? { id: mailKey(mails[mails.length - 1]), mails } : m);
+  });
+  return out;
+}
+
+function threadRowsHtml(th: MailThread, o: { showTo: boolean; listFolder: string; animateNew: boolean }): string {
+  const open = expandedThreads.has(th.id);
+  if (!open) closedThreads.set(mailKey(th.mails[0]), th.mails.map(mailKey));
+  // the head is bold only for its own mail; unread older mails light up the counter instead
+  const head = mailRowHtml(th.mails[0], { ...o, thread: { id: th.id, n: th.mails.length, open, unread: th.mails.slice(1).some((m) => !m.seen) } });
+  return head + (open ? th.mails.slice(1).map((m) => mailRowHtml(m, { ...o, child: true })).join('') : '');
+}
+
+// The switch in the list header: for the open account (in "all accounts" each account's own setting applies)
+function paintThreadToggle(): void {
+  const btn = el<HTMLButtonElement>('#btn-threads');
+  btn.hidden = !currentAccount || inVirtual();
+  const on = !!currentAccount && threadAccounts.has(currentAccount);
+  btn.classList.toggle('on', on);
+  btn.setAttribute('aria-pressed', String(on));
+  btn.title = t(on ? 'threads.on' : 'threads.tip');
+}
+
+function setThreads(accountId: string, on: boolean): void {
+  if (on) threadAccounts.add(accountId);
+  else threadAccounts.delete(accountId);
+  localStorage.setItem(THREADS_KEY, JSON.stringify([...threadAccounts]));
+  renderList();
+}
+
+el('#btn-threads').addEventListener('click', () => {
+  if (!currentAccount) return;
+  const on = !threadAccounts.has(currentAccount);
+  setThreads(currentAccount, on);
+  setStatus(t(on ? 'threads.enabled' : 'threads.disabled'));
+});
+
+// Open/close a conversation (capture: before the row's own click selects the mail)
+el('#mail-list').addEventListener(
+  'click',
+  (e) => {
+    const id = (e.target as HTMLElement).closest<HTMLElement>('[data-thread-toggle]')?.dataset.threadToggle;
+    if (!id) return;
+    e.stopPropagation();
+    if (expandedThreads.has(id)) expandedThreads.delete(id);
+    else expandedThreads.add(id);
+    renderList();
+  },
+  true,
+);
+
+// One row of the mail list. thread: head of a conversation (count, open/closed); child: an older mail in it
+function mailRowHtml(m: MailSummary, o: { showTo: boolean; listFolder: string; animateNew: boolean; thread?: { id: string; n: number; open: boolean; unread: boolean }; child?: boolean }): string {
+  const { showTo, listFolder, animateNew } = o;
+  const key = mailKey(m);
+  const color = colorOf(m.accountId);
+  const accName = accLabel(accountOf(m.accountId)).toUpperCase();
+  const otherFolder = m.folder !== listFolder || !currentAccount ? ` · ${folderLabel(m.accountId, m.folder).toUpperCase()}` : '';
+  const who = showTo ? t('mail.toName', { name: m.toName || '–' }) : m.from || m.fromAddress || t('mail.unknown');
+  const prio = m.priority === 'high' ? `<span class="prio high" title="${esc(t('prio.high'))}">!</span>` : m.priority === 'low' ? `<span class="prio low" title="${esc(t('prio.low'))}">↓</span>` : '';
+  const isNew = animateNew && !listKeysBefore.has(key);
+  const lbls = labelsOf(m);
+  const unread = !m.seen;
+  const threadBtn = o.thread
+    ? `<span class="thread-n${o.thread.open ? ' open' : ''}${o.thread.unread ? ' has-unread' : ''}" data-thread-toggle="${esc(o.thread.id)}" role="button" aria-expanded="${o.thread.open}" title="${esc(t(o.thread.open ? 'threads.collapse' : 'threads.expand'))}">${svgIco('<path d="m9 6 6 6-6 6"/>', 11)}${o.thread.n}</span>`
+    : '';
+  return `<button class="mail${unread ? ' unread' : ''}${o.child ? ' thread-child' : ''}${o.thread?.open ? ' thread-open' : ''}${selected.has(key) ? ' selected' : ''}${isNew ? ' entering' : ''}" data-key="${esc(key)}" draggable="true">
+    ${showTo ? avatarHtml('', m.toName || '?', 'avatar m-av') : avatarHtml(m.fromAddress, m.from, 'avatar m-av')}
+    <span class="m-body">
+      <span class="row">
+        <span class="from">${esc(who)}</span>${threadBtn}
+        ${!showTo && isExternal(m.fromAddress) ? `<span class="ext-tag sm" title="${esc(t('ext.banner'))}">${esc(t('ext.tag'))}</span>` : ''}${prio}${m.hasAttachments ? `<span class="clip" title="${esc(t('mail.attachmentTag'))}">${svgIco('<path d="m21 12-8.5 8.5a5 5 0 0 1-7-7L14 5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4L15.5 8"/>', 12)}</span>` : ''}
+        <span class="time">${fmtShort(m.date)}</span>
+        <span class="star${m.flagged ? ' on' : ''}" data-star role="button" title="${esc(t(m.flagged ? 'mail.unflag' : 'mail.flag'))}">${m.flagged ? '★' : '☆'}</span>
+      </span>
+      <span class="subject">${unread ? '<span class="new-dot"></span>' : ''}${esc(m.subject || t('mail.noSubject'))}</span>
+      <span class="acc-row-line"><span class="acc" style="color:${color}">${esc(accName)}${esc(otherFolder)}</span>${lbls.length ? `<span class="lbls">${labelPills(lbls)}</span>` : ''}</span>
+    </span>
+  </button>`;
+}
+
 function renderList(): void {
   const q = el<HTMLInputElement>('#search').value.trim().toLowerCase();
   // While the server search runs: filter locally by sender/subject
@@ -311,48 +450,145 @@ function renderList(): void {
   const listFolder = currentAccount ? currentFolder : 'INBOX';
 
   el('#scope-seg').hidden = !q;
-  shownKeys = shown.map(mailKey);
+  el('#kind-seg').hidden = !q;
+  // Search also finds appointments and contacts (not with the mail-only filters)
+  const others = !!q && listFilter === 'all' && !labelFilter;
+  const evs = others ? eventHits : [];
+  const cts = others ? contactHits : [];
+  const tks = others ? taskHits : [];
+  // counts only once the search is finished – the interim numbers would jump around
+  const phase = q ? searchPhase : 'idle';
+  const busy = phase !== 'idle';
+  const typing = phase === 'typing';
+  el('#kind-n-mail').textContent = q && !busy ? String(shown.length) : '';
+  el('#kind-n-event').textContent = evs.length && !typing ? String(evs.length) : '';
+  el('#kind-n-contact').textContent = cts.length && !typing ? String(cts.length) : '';
+  el('#kind-n-task').textContent = tks.length && !typing ? String(tks.length) : '';
+  if (q && searchKind !== 'all' && searchKind !== 'mail') shown = [];
+  const progressRow = (text: string) => `<div class="search-progress" role="status"><span class="search-spin"></span>${esc(text)}</div>`;
+  // first the fast hits; the mails from the server are added below them later
+  const serverRow = phase === 'server' && (searchKind === 'all' || searchKind === 'mail') ? progressRow(t('search.runningServer')) : '';
+  const extraHtml = (typing ? progressRow(t('search.runningAll')) : '') + (q ? searchHitsHtml(evs, cts, tks, shown.length) : '') + serverRow;
+  // Conversations: only in normal folders, not while searching or in filtered/virtual views
+  const rows = !q && !inVirtual() ? buildThreads(shown) : shown;
+  closedThreads.clear(); // filled again while the rows are drawn
+  const rowOpts = { showTo, listFolder, animateNew };
+  shownKeys = rows.flatMap((row) => (isThread(row) ? (expandedThreads.has(row.id) ? row.mails : [row.mails[0]]) : [row]).map(mailKey));
+  paintThreadToggle();
   if (!accounts.length) {
     el('#mail-list').innerHTML = `<div class="list-empty">${esc(t('mail.noAccount'))}<br><button class="btn ghost" data-action="add-account">${esc(t('settings.addMailAccount'))}</button></div>`;
     return;
   }
   el('#mail-list').innerHTML =
-    shown
-      .map((m) => {
-        const key = mailKey(m);
-        const color = colorOf(m.accountId);
-        const accName = accLabel(accountOf(m.accountId)).toUpperCase();
-        const otherFolder = m.folder !== listFolder || !currentAccount ? ` · ${folderLabel(m.accountId, m.folder).toUpperCase()}` : '';
-        const who = showTo ? t('mail.toName', { name: m.toName || '–' }) : m.from || m.fromAddress || t('mail.unknown');
-        const prio = m.priority === 'high' ? `<span class="prio high" title="${esc(t('prio.high'))}">!</span>` : m.priority === 'low' ? `<span class="prio low" title="${esc(t('prio.low'))}">↓</span>` : '';
-        const isNew = animateNew && !listKeysBefore.has(key);
-        const lbls = labelsOf(m);
-        return `<button class="mail${m.seen ? '' : ' unread'}${selected.has(key) ? ' selected' : ''}${isNew ? ' entering' : ''}" data-key="${esc(key)}" draggable="true">
-          ${showTo ? avatarHtml('', m.toName || '?', 'avatar m-av') : avatarHtml(m.fromAddress, m.from, 'avatar m-av')}
-          <span class="m-body">
-            <span class="row">
-              <span class="from">${esc(who)}</span>
-              ${!showTo && isExternal(m.fromAddress) ? `<span class="ext-tag sm" title="${esc(t('ext.banner'))}">${esc(t('ext.tag'))}</span>` : ''}${prio}${m.hasAttachments ? `<span class="clip" title="${esc(t('mail.attachmentTag'))}">${svgIco('<path d="m21 12-8.5 8.5a5 5 0 0 1-7-7L14 5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4L15.5 8"/>', 12)}</span>` : ''}
-              <span class="time">${fmtShort(m.date)}</span>
-              <span class="star${m.flagged ? ' on' : ''}" data-star role="button" title="${esc(t(m.flagged ? 'mail.unflag' : 'mail.flag'))}">${m.flagged ? '★' : '☆'}</span>
-            </span>
-            <span class="subject">${m.seen ? '' : '<span class="new-dot"></span>'}${esc(m.subject || t('mail.noSubject'))}</span>
-            <span class="acc-row-line"><span class="acc" style="color:${color}">${esc(accName)}${esc(otherFolder)}</span>${lbls.length ? `<span class="lbls">${labelPills(lbls)}</span>` : ''}</span>
-          </span>
-        </button>`;
-      })
-      .join('') || `<div class="list-empty">${esc(q ? t('mail.noHits') : listFilter !== 'all' || labelFilter ? t('mail.noFiltered') : t('mail.folderEmpty'))}</div>`;
+    extraHtml +
+    (rows
+      .map((row) => (isThread(row) ? threadRowsHtml(row, rowOpts) : mailRowHtml(row, rowOpts)))
+      .join('') || (extraHtml || busy ? '' : `<div class="list-empty">${esc(q ? t('mail.noHits') : listFilter !== 'all' || labelFilter ? t('mail.noFiltered') : t('mail.folderEmpty'))}</div>`));
   listKeysBefore = new Set(shownKeys);
   if (typeof renderLabelSidebar === 'function') renderLabelSidebar();
 }
 
+// ---------- Right-click on a folder: all read; trash / spam as a whole ----------
+
+const folderMenu = document.createElement('div');
+folderMenu.className = 'ctx-menu';
+folderMenu.setAttribute('role', 'menu');
+folderMenu.hidden = true;
+document.body.appendChild(folderMenu);
+let folderMenuAcc = '';
+let folderMenuPath = '';
+
+el('#account-list').addEventListener('contextmenu', (e) => {
+  const row = (e.target as HTMLElement).closest<HTMLElement>('.folder[data-folder]');
+  const accId = row?.dataset.account;
+  if (!row || !accId) return;
+  e.preventDefault();
+  const use = folderInfo(accId, row.dataset.folder!)?.specialUse;
+  folderMenuAcc = accId;
+  folderMenuPath = row.dataset.folder!;
+  folderMenu.innerHTML =
+    `<button type="button" role="menuitem" data-folder-act="allRead">${ACT_ICONS.read}<span>${esc(t('folder.markAllRead'))}</span></button>` +
+    (use === '\\Trash'
+      ? `<hr><button type="button" role="menuitem" class="danger" data-folder-act="emptyTrash">${ACT_ICONS.trash}<span>${esc(t('folder.emptyTrash'))}</span></button>`
+      : use === '\\Junk'
+        ? `<hr><button type="button" role="menuitem" data-folder-act="junkToTrash">${ACT_ICONS.trash}<span>${esc(t('folder.junkToTrash'))}</span></button>`
+        : '');
+  folderMenu.hidden = false;
+  const r = folderMenu.getBoundingClientRect();
+  folderMenu.style.left = `${Math.min(e.clientX, innerWidth - r.width - 6)}px`;
+  folderMenu.style.top = `${Math.min(e.clientY, innerHeight - r.height - 6)}px`;
+});
+document.addEventListener('mousedown', (e) => {
+  if (!folderMenu.contains(e.target as Node)) folderMenu.hidden = true;
+});
+document.addEventListener('scroll', () => (folderMenu.hidden = true), true); // e.g. the sidebar
+
+// No question: marking read can be undone mail by mail
+async function markFolderRead(accountId: string, folder: string): Promise<void> {
+  setStatus(t('status.updating'));
+  try {
+    const n = await window.api.markFolderSeen(accountId, folder);
+    // the open list shows it right away
+    for (const m of mails) if (m.accountId === accountId && m.folder === folder) m.seen = true;
+    renderList();
+    updateCounts();
+    loadFolders(accountId);
+    setStatus(n ? t('folder.markedRead', { n }) : t('folder.noneUnread'));
+  } catch (err) {
+    setStatus(errMsg(err));
+  }
+}
+
+folderMenu.addEventListener('click', async (e) => {
+  const act = (e.target as HTMLElement).closest<HTMLElement>('[data-folder-act]')?.dataset.folderAct as 'allRead' | 'emptyTrash' | 'junkToTrash' | undefined;
+  const acc = accountOf(folderMenuAcc);
+  folderMenu.hidden = true;
+  if (!act || !acc) return;
+  if (act === 'allRead') return void markFolderRead(acc.id, folderMenuPath);
+  if (!confirm(t(act === 'emptyTrash' ? 'folder.emptyTrashConfirm' : 'folder.junkToTrashConfirm', { email: acc.email }))) return;
+  setStatus(t('status.updating'));
+  try {
+    const done = act === 'emptyTrash' ? await window.api.emptyTrash(acc.id) : await window.api.junkToTrash(acc.id);
+    setStatus(done ? t(act === 'emptyTrash' ? 'folder.trashEmptied' : 'folder.junkMoved', { n: done }) : t('folder.alreadyEmpty'));
+    // the open folder was affected → reload the list
+    const openUse = currentAccount === acc.id ? folderInfo(acc.id, currentFolder)?.specialUse : '';
+    if (openUse === '\\Trash' || openUse === '\\Junk') {
+      clearReader();
+      await loadMails();
+    }
+    loadFolders(acc.id);
+  } catch (err) {
+    setStatus(errMsg(err));
+  }
+});
+
 // ---------- Reading pane ----------
 
 function clearReader(text = t('mail.noneSelected')): void {
+  clearTimeout(readTimer);
   currentMsg = null;
   selectedKey = '';
   selected.clear();
   el('#reader').innerHTML = `<div class="empty">${esc(text)}</div>`;
+}
+
+function setSeenLocal(key: string): void {
+  for (const m of [summaryOf(key), ...mails, ...flaggedMails, ...(searchResults ?? [])]) if (m && mailKey(m) === key) m.seen = true;
+}
+
+// Still the same mail on screen → mark read quietly (no status message)
+async function markReadAfterDelay(key: string): Promise<void> {
+  if (selectedKey !== key || summaryOf(key)?.seen !== false) return;
+  setSeenLocal(key);
+  renderList();
+  updateCounts();
+  const { accountId, folder, uid } = parseKey(key);
+  try {
+    await window.api.setSeen(accountId, folder, [uid], true);
+    if (folderCache.has(accountId)) loadFolders(accountId);
+  } catch {
+    /* offline – stays read locally, the next sync corrects it */
+  }
 }
 
 async function openMail(key: string, loadImages = false): Promise<void> {
@@ -361,12 +597,11 @@ async function openMail(key: string, loadImages = false): Promise<void> {
   selected = new Set([key]);
   anchorKey = key;
 
-  const summary = summaryOf(key);
-  if (summary && !summary.seen) {
-    summary.seen = true;
-    const inFolder = mails.find((m) => mailKey(m) === key);
-    if (inFolder) inFolder.seen = true;
-  }
+  // Read: at once, after a few seconds on this mail, or only by hand
+  clearTimeout(readTimer);
+  const unread = summaryOf(key)?.seen === false;
+  if (unread && readDelay === 0) setSeenLocal(key);
+  else if (unread && readDelay > 0) readTimer = window.setTimeout(() => markReadAfterDelay(key), readDelay * 1000);
   renderList();
   updateCounts();
 
@@ -375,7 +610,7 @@ async function openMail(key: string, loadImages = false): Promise<void> {
 
   let msg: MailDetail;
   try {
-    msg = await window.api.getMail(accountId, folder, uid, loadImages);
+    msg = await window.api.getMail(accountId, folder, uid, loadImages, readDelay === 0);
   } catch (e) {
     if (selectedKey === key) reader.innerHTML = `<div class="empty">${esc(errMsg(e))}</div>`;
     return;
@@ -563,7 +798,7 @@ el('#mail-list').addEventListener('dragstart', (e) => {
     anchorKey = key;
     paintSelection();
   }
-  dragKeys = [...selected];
+  dragKeys = [...new Set([...selected].flatMap((k) => closedThreads.get(k) ?? [k]))];
   e.dataTransfer.effectAllowed = 'move';
   e.dataTransfer.setData('application/x-agenoras', JSON.stringify(dragKeys));
   // drag image: "3 messages" or the subject
@@ -628,6 +863,30 @@ const form = el<HTMLFormElement>('#form-add');
 const field = (name: string) => form.elements.namedItem(name) as HTMLInputElement;
 
 let editingAccountId: string | null = null; // set = edit account
+const ACC_COLORS = ['#2BA89F', '#7FA6CF', '#E0574B', '#E0A458', '#B48EAD', '#4DB37A', '#D9C35B', '#969993'];
+let accColor = ACC_COLORS[0];
+
+function paintAccColors(): void {
+  const custom = !ACC_COLORS.includes(accColor);
+  el('#acc-colors').innerHTML =
+    ACC_COLORS.map(
+      (c) => `<button type="button" role="radio" aria-checked="${c === accColor}" class="swatch${c === accColor ? ' on' : ''}" data-acc-color="${c}" style="background:${c}" aria-label="${c}"></button>`,
+    ).join('') +
+    `<label class="swatch custom${custom ? ' on' : ''}" style="background:${accColor}" title="${esc(t('account.customColor'))}">+<input type="color" id="acc-color-custom" value="${accColor}" aria-label="${esc(t('account.customColor'))}"></label>`;
+}
+
+el('#acc-colors').addEventListener('click', (e) => {
+  const c = (e.target as HTMLElement).closest<HTMLElement>('[data-acc-color]')?.dataset.accColor;
+  if (!c) return;
+  accColor = c;
+  paintAccColors();
+});
+el('#acc-colors').addEventListener('change', (e) => {
+  const inp = e.target as HTMLInputElement;
+  if (inp.id !== 'acc-color-custom') return;
+  accColor = inp.value.toUpperCase();
+  paintAccColors();
+});
 
 function setAccountDialogMode(edit: boolean): void {
   dlg.querySelector('h2')!.innerHTML = t(edit ? 'account.editTitle' : 'account.addTitle');
@@ -639,6 +898,10 @@ function setAccountDialogMode(edit: boolean): void {
 function openAddMailAccount(): void {
   editingAccountId = null;
   form.reset();
+  accColor = ACC_COLORS[accounts.length % ACC_COLORS.length];
+  paintAccColors();
+  fillPrivacyFields(null);
+  fillProtocolFields(null);
   setAccountDialogMode(false);
   el('#add-error').textContent = '';
   dlg.showModal();
@@ -649,6 +912,9 @@ function openEditMailAccount(id: string): void {
   if (!acc) return;
   editingAccountId = id;
   form.reset();
+  accColor = acc.color;
+  paintAccColors();
+  fillPrivacyFields(acc);
   setAccountDialogMode(true);
   field('name').value = acc.name === acc.email ? '' : acc.name;
   field('email').value = acc.email;
@@ -659,17 +925,85 @@ function openEditMailAccount(id: string): void {
   field('smtpPort').value = String(acc.smtpPort);
   field('smtpSecure').checked = acc.smtpSecure;
   field('user').value = acc.user;
+  fillProtocolFields(acc);
   el('#add-error').textContent = '';
   dlg.showModal();
 }
 el('#btn-cancel').addEventListener('click', () => dlg.close());
+
+// ---------- Private account (PIN) in the account dialog ----------
+
+const AUTOLOCK_CHOICES = [1, 2, 5, 10, 15, 30];
+const lockSelect = () => form.elements.namedItem('autoLockMin') as HTMLSelectElement;
+
+function fillPrivacyFields(acc: Account | null): void {
+  field('private').checked = !!acc?.private;
+  el('#priv-fields').hidden = !acc?.private;
+  lockSelect().innerHTML = AUTOLOCK_CHOICES.map((n) => `<option value="${n}">${esc(t('account.autoLockMin', { n }))}</option>`).join('');
+  lockSelect().value = String(acc?.autoLockMin ?? 5);
+  // already private: empty PIN = keep the current one
+  for (const f of ['pin', 'pin2']) field(f).placeholder = acc?.private ? t('account.passKeep') : '';
+}
+
+field('private').addEventListener('change', () => {
+  el('#priv-fields').hidden = !field('private').checked;
+  if (field('private').checked) field('pin').focus();
+});
+
+function readPrivacyFields(wasPrivate: boolean): { on: boolean; pin: string; min: number } {
+  const on = field('private').checked;
+  const pin = field('pin').value.trim();
+  const min = Number(lockSelect().value) || 5;
+  if (on && (pin || !wasPrivate)) {
+    if (!/^\d{4,8}$/.test(pin)) throw new Error(t('err.pinFormat'));
+    if (pin !== field('pin2').value.trim()) throw new Error(t('err.pinMismatch'));
+  }
+  return { on, pin, min };
+}
+
+// ---------- Incoming mail: IMAP or POP3 ----------
+
+const protoSelect = () => form.elements.namedItem('protocol') as HTMLSelectElement;
+const isPopForm = () => protoSelect().value === 'pop3';
+const POP_DAYS = [0, 7, 14, 30, 90, 365];
+const defaultPort = (pop: boolean, secure: boolean) => (pop ? (secure ? 995 : 110) : secure ? 993 : 143);
+
+// Labels, placeholder and POP3 options follow the protocol; a default port is switched along
+function syncProtocolUi(switched = false): void {
+  const pop = isPopForm();
+  el('#host-label').textContent = t(pop ? 'account.popServer' : 'account.imapServer');
+  field('host').placeholder = pop ? 'pop.example.com' : 'imap.example.com';
+  el('#secure-label').textContent = field('secure').checked ? 'SSL/TLS' : t('account.startTls');
+  el('#pop-fields').hidden = !pop;
+  (form.elements.namedItem('deleteAfterDays') as HTMLSelectElement).disabled = !field('leaveOnServer').checked;
+  if (switched) {
+    const port = Number(field('port').value);
+    if (!port || [993, 143, 995, 110].includes(port)) field('port').value = String(defaultPort(pop, field('secure').checked));
+    const host = field('host').value.trim();
+    if (pop && /^imap\./i.test(host)) field('host').value = host.replace(/^imap\./i, 'pop.');
+    if (!pop && /^pop3?\./i.test(host)) field('host').value = host.replace(/^pop3?\./i, 'imap.');
+  }
+}
+
+function fillProtocolFields(acc: Account | null): void {
+  protoSelect().value = acc?.protocol === 'pop3' ? 'pop3' : 'imap';
+  field('leaveOnServer').checked = acc?.leaveOnServer !== false;
+  const days = form.elements.namedItem('deleteAfterDays') as HTMLSelectElement;
+  days.innerHTML = POP_DAYS.map((n) => `<option value="${n}">${esc(n ? t('account.afterDays', { n }) : t('account.never'))}</option>`).join('');
+  days.value = String(acc?.deleteAfterDays ?? 0);
+  syncProtocolUi();
+}
+
+protoSelect().addEventListener('change', () => syncProtocolUi(true));
+field('secure').addEventListener('change', () => syncProtocolUi(true));
+field('leaveOnServer').addEventListener('change', () => syncProtocolUi());
 
 field('email').addEventListener('change', () => {
   const email = field('email').value.trim();
   const domain = email.split('@')[1];
   if (!domain) return;
   if (!field('user').value) field('user').value = email;
-  if (!field('host').value) field('host').value = `imap.${domain}`;
+  if (!field('host').value) field('host').value = `${isPopForm() ? 'pop' : 'imap'}.${domain}`;
   if (!field('smtpHost').value) field('smtpHost').value = `smtp.${domain}`;
 });
 
@@ -680,6 +1014,13 @@ field('smtpSecure').addEventListener('change', () => {
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   const save = el<HTMLButtonElement>('#btn-save');
+  let priv: ReturnType<typeof readPrivacyFields>;
+  try {
+    priv = readPrivacyFields(!!(editingAccountId && accountOf(editingAccountId)?.private));
+  } catch (err) {
+    el('#add-error').textContent = errMsg(err);
+    return;
+  }
   save.disabled = true;
   save.textContent = t('btn.connecting');
   el('#add-error').textContent = '';
@@ -693,9 +1034,45 @@ form.addEventListener('submit', async (e) => {
     smtpHost: field('smtpHost').value.trim(),
     smtpPort: Number(field('smtpPort').value) || 465,
     smtpSecure: field('smtpSecure').checked,
+    protocol: protoSelect().value as 'imap' | 'pop3',
+    leaveOnServer: field('leaveOnServer').checked,
+    deleteAfterDays: Number((form.elements.namedItem('deleteAfterDays') as HTMLSelectElement).value) || 0,
     pass: field('pass').value,
+    color: accColor,
+    ...(priv.on && !editingAccountId ? { pin: priv.pin, autoLockMin: priv.min } : {}),
   };
   const editing = editingAccountId;
+  const old = editing ? accountOf(editing) : undefined;
+  // PIN protection on/off/changed: saved on its own (no reconnect)
+  if (old && (priv.on !== !!old.private || (priv.on && (priv.pin || priv.min !== old.autoLockMin)))) {
+    try {
+      await window.api.privacy.set(old.id, priv.on ? priv.pin : null, priv.min);
+    } catch (err) {
+      el('#add-error').textContent = errMsg(err);
+      save.disabled = false;
+      save.textContent = t('btn.saveConnect');
+      return;
+    }
+  }
+  // Only colour/privacy changed → save without testing and reconnecting
+  const sameProtocol = input.protocol === (old?.protocol ?? 'imap') && (input.protocol !== 'pop3' || (input.leaveOnServer === (old?.leaveOnServer !== false) && input.deleteAfterDays === (old?.deleteAfterDays ?? 0)));
+  if (old && !input.pass && sameProtocol && (['email', 'host', 'port', 'secure', 'user', 'smtpHost', 'smtpPort', 'smtpSecure'] as const).every((k) => input[k] === old[k]) && (input.name || input.email) === old.name) {
+    try {
+      await window.api.setAccountColor(old.id, accColor);
+      dlg.close();
+      await loadAccounts();
+      markActive();
+      renderList();
+      if (currentMsg) openMail(mailKey(currentMsg));
+      setStatus(t('account.saved', { email: old.email }));
+    } catch (err) {
+      el('#add-error').textContent = errMsg(err);
+    } finally {
+      save.disabled = false;
+      save.textContent = t('btn.saveConnect');
+    }
+    return;
+  }
   try {
     const acc = editing ? await window.api.updateAccount(editing, input) : await window.api.addAccount(input);
     dlg.close();
@@ -758,6 +1135,7 @@ el('#reader').addEventListener('click', async (e) => {
     clearReader();
     return paintSelection();
   }
+  if (currentMsg && (await reactionAction(currentMsg, tgt, setStatus))) return;
   if (currentMsg) await attachmentAction(currentMsg, tgt, setStatus);
 });
 
@@ -827,7 +1205,33 @@ el('.side').addEventListener('click', (e) => {
 
 
 el('#mail-list').addEventListener('click', (e) => {
-  if ((e.target as HTMLElement).closest('[data-action="add-account"]')) return openAddMailAccount();
+  const tgt = e.target as HTMLElement;
+  if (tgt.closest('[data-action="add-account"]')) return openAddMailAccount();
+  const go = tgt.closest<HTMLElement>('[data-kind-go]')?.dataset.kindGo;
+  if (go) return setSearchKind(go as typeof searchKind);
+  const evIdx = tgt.closest<HTMLElement>('[data-hit-event]')?.dataset.hitEvent;
+  if (evIdx !== undefined) {
+    const ev = eventHits[Number(evIdx)];
+    if (ev) {
+      setView('cal');
+      void openEventAt(ev);
+    }
+    return;
+  }
+  const taskIdx = tgt.closest<HTMLElement>('[data-hit-task]')?.dataset.hitTask;
+  if (taskIdx !== undefined) {
+    const task = taskHits[Number(taskIdx)];
+    if (task) {
+      setView('tasks');
+      openTaskDialog(taskItems.find((x) => x.id === task.id) ?? task);
+    }
+    return;
+  }
+  const contactId = tgt.closest<HTMLElement>('[data-hit-contact]')?.dataset.hitContact;
+  if (contactId) {
+    setView('contacts');
+    return void showContact(contactId);
+  }
   const starKey = (e.target as HTMLElement).closest('[data-star]') && (e.target as HTMLElement).closest<HTMLElement>('[data-key]')?.dataset.key;
   if (starKey) {
     e.stopPropagation();
@@ -835,6 +1239,12 @@ el('#mail-list').addEventListener('click', (e) => {
   }
   const key = (e.target as HTMLElement).closest<HTMLElement>('[data-key]')?.dataset.key;
   if (!key) return;
+  // Double-click → own window. Detected by hand: the first click re-renders the list, so the
+  // browser's own dblclick never fires (the second click hits a new element)
+  const now = Date.now();
+  const isDouble = lastListClick.key === key && now - lastListClick.at < 450 && !e.ctrlKey && !e.metaKey && !e.shiftKey;
+  lastListClick = isDouble ? { key: '', at: 0 } : { key, at: now };
+  if (isDouble) return void window.api.mailview.open(parseKey(key));
   if (e.ctrlKey || e.metaKey) {
     if (selected.has(key)) selected.delete(key);
     else selected.add(key);
@@ -854,45 +1264,160 @@ el('#mail-list').addEventListener('mousedown', (e) => {
 });
 
 // Double-click: mail in its own window
-el('#mail-list').addEventListener('dblclick', (e) => {
-  const key = (e.target as HTMLElement).closest<HTMLElement>('[data-key]')?.dataset.key;
-  if (key) window.api.mailview.open(parseKey(key));
-});
+let lastListClick = { key: '', at: 0 }; // double-click detection, see the click handler above
 
 // ---------- Filters and search (full text on the server) ----------
 
 let searchTimer: number | undefined;
 
+// Search running: ring in the field; while waiting for the first hits the old ones are dimmed
+function setSearchPhase(phase: typeof searchPhase): void {
+  searchPhase = phase;
+  el('#search-box').classList.toggle('busy', phase !== 'idle');
+  el('#mail-list').classList.toggle('searching', phase === 'typing');
+}
+
 function resetSearch(): void {
   el<HTMLInputElement>('#search').value = '';
   searchResults = null;
+  eventHits = [];
+  contactHits = [];
+  taskHits = [];
+  searchKind = 'all';
+  paintSegs();
   searchSeq++;
+  setSearchPhase('idle');
 }
 
+const withTimeout = <T,>(p: Promise<T>, ms: number, fallback: T) => Promise.race([p, new Promise<T>((r) => setTimeout(() => r(fallback), ms))]);
+
+// Contacts and tasks: what's loaded, otherwise the local cache – the server load runs in the background
+async function quickContacts(ql: string): Promise<Contact[]> {
+  void ensureContacts().catch(() => {});
+  const list = contacts.length ? contacts : (await window.api.contacts.cached().catch(() => ({ contacts: [] as Contact[] }))).contacts;
+  return list.filter((c) => contactMatches(c, ql));
+}
+async function quickTasks(ql: string): Promise<Task[]> {
+  void ensureTasks().catch(() => {});
+  const list = taskItems.length ? taskItems : (await window.api.tasks.cached().catch(() => ({ tasks: [] as Task[] }))).tasks;
+  return list.filter((x) => `${x.title} ${x.notes}`.toLowerCase().includes(ql)).sort((a, b) => Number(a.done) - Number(b.done));
+}
+
+// Two steps so that something shows up right away:
+// 1. local copies of the mails + contacts, tasks, appointments (≈ instantly)
+// 2. full-text search on the mail server – its hits are added below
 async function runSearch(): Promise<void> {
   const q = el<HTMLInputElement>('#search').value.trim();
   const seq = ++searchSeq;
-  if (q.length < 2 || !accounts.length) return;
-  setStatus(t('search.running'));
-  try {
-    const folder = searchScope === 'all' ? null : currentAccount ? currentFolder : 'INBOX';
-    const res = await window.api.searchMail(currentAccount, folder, q);
-    if (seq !== searchSeq) return; // user kept typing in the meantime
-    searchResults = res.mails;
-    const errs = res.errors.map((er) => `${accountOf(er.accountId)?.email ?? ''}: ${er.message}`);
-    setStatus([t('search.hits', { n: res.mails.length }), ...errs].join(' · '));
-    renderList();
-  } catch (err) {
-    if (seq === searchSeq) setStatus(errMsg(err));
+  if (q.length < 2) {
+    setSearchPhase('idle');
+    return renderList();
   }
+  setSearchPhase('typing');
+  renderList();
+  setStatus(t('search.running'));
+  const folder = searchScope === 'all' ? null : currentAccount ? currentFolder : 'INBOX';
+  const ql = q.toLowerCase();
+  type MailRes = { mails: MailSummary[] | null; errors: { accountId: string; message: string }[]; failed?: string };
+  const server: Promise<MailRes> = accounts.length
+    ? window.api.searchMail(currentAccount, folder, q).catch((err) => ({ mails: null, errors: [], failed: errMsg(err) }))
+    : Promise.resolve({ mails: [], errors: [] });
+  const events = ensureCalendars()
+    .then(() => window.api.cal.search(q, visibleCalIds()))
+    .catch(() => [] as CalEvent[]);
+  const [local, cts, tks, evsQuick] = await Promise.all([
+    accounts.length ? window.api.searchCachedMail(currentAccount, folder, q).catch(() => [] as MailSummary[]) : Promise.resolve([] as MailSummary[]),
+    quickContacts(ql),
+    quickTasks(ql),
+    withTimeout(events, 800, null), // calendar server slow → appointments follow later
+  ]);
+  if (seq !== searchSeq) return; // user kept typing in the meantime
+  searchResults = local;
+  contactHits = cts;
+  taskHits = tks;
+  eventHits = evsQuick ?? [];
+  setSearchPhase('server');
+  renderList();
+  if (!evsQuick) {
+    events.then((evs) => {
+      if (seq !== searchSeq) return;
+      eventHits = evs;
+      renderList();
+    });
+  }
+  const mailRes = await server;
+  if (seq !== searchSeq) return;
+  if (mailRes.mails) {
+    // server hits plus local ones the server limit cut off; server version wins
+    const byKey = new Map(local.map((m) => [mailKey(m), m]));
+    for (const m of mailRes.mails) byKey.set(mailKey(m), m);
+    searchResults = [...byKey.values()].sort((a, b) => b.date.localeCompare(a.date));
+  }
+  setSearchPhase('idle');
+  renderList();
+  const errs = mailRes.errors.map((er) => `${accountOf(er.accountId)?.email ?? ''}: ${er.message}`);
+  if (mailRes.failed) errs.unshift(mailRes.failed);
+  const n = (searchResults?.length ?? 0) + eventHits.length + contactHits.length + taskHits.length;
+  setStatus([t('search.done', { n }), ...errs].join(' · '));
+}
+
+const HIT_PREVIEW = 3; // under "All": this many appointments/contacts, the rest behind "show more"
+
+// Contacts and appointments above the mail hits, clearly marked by kind
+function searchHitsHtml(evs: CalEvent[], cts: Contact[], tks: Task[], nMails: number): string {
+  const show = (k: typeof searchKind) => searchKind === 'all' || searchKind === k;
+  const group = (kind: 'contact' | 'event' | 'task', n: number, rows: string[]) => {
+    if (!n || !show(kind)) return '';
+    const more = searchKind === 'all' && n > HIT_PREVIEW ? `<button type="button" class="hit-more" data-kind-go="${kind}">${esc(t('search.more', { n: n - HIT_PREVIEW }))}</button>` : '';
+    return `<div class="hit-head"><span>${esc(t(`search.kind.${kind}`))}</span><span class="n">${n}</span></div>${rows.join('')}${more}`;
+  };
+  const limit = <T,>(list: T[]) => (searchKind === 'all' ? list.slice(0, HIT_PREVIEW) : list);
+  const contactRows = limit(cts).map((c) => {
+    const sub = [c.emails[0]?.value, c.org].filter(Boolean).join(' · ') || c.phones[0]?.value || '';
+    return `<button type="button" class="hit hit-contact" data-hit-contact="${esc(c.id)}">
+      ${c.photo ? `<span class="avatar m-av has-img"><img src="${esc(c.photo)}" alt=""></span>` : avatarHtml(c.emails[0]?.value ?? '', c.name, 'avatar m-av')}
+      <span class="hit-body"><b>${esc(c.name)}</b><span>${esc(sub)}</span></span>
+      <span class="hit-tag">${esc(t('search.tag.contact'))}</span>
+    </button>`;
+  });
+  const eventRows = limit(evs).map((ev, i) => {
+    const d = ev.allDay ? parseYmd(ev.start) : new Date(ev.start);
+    const past = new Date(ev.end).getTime() < Date.now();
+    const when = `${d.toLocaleDateString(LOCALE, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })} · ${ev.allDay ? t('agenda.allDay') : hm(d)}`;
+    return `<button type="button" class="hit hit-event${past ? ' past' : ''}" data-hit-event="${i}" style="--ec:${calColor(ev.calendarId)}">
+      <span class="hit-cal">${svgIco('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>', 16)}</span>
+      <span class="hit-body"><b>${ev.recurring ? '↻ ' : ''}${esc(ev.title)}</b><span>${esc(when)}${ev.location ? ` · ${esc(ev.location)}` : ''}</span></span>
+      <span class="hit-tag">${esc(t('search.tag.event'))}</span>
+    </button>`;
+  });
+  const taskRows = limit(tks).map((task, i) => {
+    const list = tlistOf(task.listId);
+    const due = dueLabel(task);
+    const sub = [due.text, list?.name].filter(Boolean).join(' · ');
+    return `<button type="button" class="hit hit-task${task.done ? ' done' : ''}" data-hit-task="${i}" style="--ec:${list?.color ?? '#969993'}">
+      <span class="hit-cal">${svgIco(task.done ? '<rect x="4" y="4" width="16" height="16" rx="4"/><path d="m8 12 3 3 5-6"/>' : '<rect x="4" y="4" width="16" height="16" rx="4"/>', 16)}</span>
+      <span class="hit-body"><b>${esc(task.title)}</b><span class="${due.cls}">${esc(sub)}</span></span>
+      <span class="hit-tag">${esc(t('search.tag.task'))}</span>
+    </button>`;
+  });
+  const html = group('contact', cts.length, contactRows) + group('event', evs.length, eventRows) + group('task', tks.length, taskRows);
+  // Heading for the mails only when other kinds are listed above them
+  return html && searchKind === 'all' && nMails ? `${html}<div class="hit-head"><span>${esc(t('search.kind.mail'))}</span><span class="n">${nMails}</span></div>` : html;
 }
 
 el('#search').addEventListener('input', () => {
   searchResults = null;
   searchSeq++;
+  const pending = el<HTMLInputElement>('#search').value.trim().length >= 2;
+  if (!pending) {
+    eventHits = [];
+    contactHits = [];
+    taskHits = [];
+  }
+  setSearchPhase(pending ? 'typing' : 'idle');
   renderList();
   clearTimeout(searchTimer);
-  if (el<HTMLInputElement>('#search').value.trim().length >= 2) searchTimer = window.setTimeout(runSearch, 450);
+  if (pending) searchTimer = window.setTimeout(runSearch, 300);
   else setStatus('');
 });
 el('#search').addEventListener('keydown', (e) => {
@@ -900,6 +1425,7 @@ el('#search').addEventListener('keydown', (e) => {
     clearTimeout(searchTimer);
     runSearch();
   } else if (e.key === 'Escape') {
+    clearTimeout(searchTimer);
     resetSearch();
     renderList();
     setStatus('');
@@ -909,7 +1435,20 @@ el('#search').addEventListener('keydown', (e) => {
 function paintSegs(): void {
   document.querySelectorAll<HTMLElement>('#filter-seg [data-filter]').forEach((b) => b.classList.toggle('on', b.dataset.filter === listFilter));
   document.querySelectorAll<HTMLElement>('#scope-seg [data-scope]').forEach((b) => b.classList.toggle('on', b.dataset.scope === searchScope));
+  document.querySelectorAll<HTMLElement>('#kind-seg [data-kind]').forEach((b) => b.classList.toggle('on', b.dataset.kind === searchKind));
 }
+
+function setSearchKind(kind: typeof searchKind): void {
+  searchKind = kind;
+  paintSegs();
+  renderList();
+  el('#mail-list').scrollTop = 0;
+}
+
+el('#kind-seg').addEventListener('click', (e) => {
+  const k = (e.target as HTMLElement).closest<HTMLElement>('[data-kind]')?.dataset.kind as typeof searchKind | undefined;
+  if (k && k !== searchKind) setSearchKind(k);
+});
 
 el('#filter-seg').addEventListener('click', (e) => {
   const f = (e.target as HTMLElement).closest<HTMLElement>('[data-filter]')?.dataset.filter;
@@ -1225,6 +1764,7 @@ window.api.settings
   .then((s) => {
     if (s.notify) notify = s.notify;
     labels = s.labels ?? [];
+    readDelay = s.readDelay ?? 3;
     mailLabels = s.mailLabels ?? {};
     renderList();
   })
@@ -1256,6 +1796,77 @@ window.api.onNewMail((accountId, grew) => {
     if (folderCache.has(accountId)) loadFolders(accountId);
   }, 800);
 });
+
+// ---------- Private accounts: unlock with PIN, lock (manually or automatically) ----------
+
+
+function renderPrivacy(): void {
+  el('#privacy-row').innerHTML =
+    (privacy.locked ? `<button class="box priv-btn" data-privacy="unlock"><span class="vico">${svgIco(LOCK_ICO, 14)}</span><span class="name">${esc(t('privacy.unlockBtn'))}</span></button>` : '') +
+    (privacy.unlocked ? `<button class="box priv-btn open" data-privacy="lock"><span class="vico">${svgIco(UNLOCK_ICO, 14)}</span><span class="name">${esc(t('privacy.lockBtn'))}</span></button>` : '');
+}
+
+const pinDlg = el<HTMLDialogElement>('#dlg-pin');
+const pinForm = el<HTMLFormElement>('#form-pin');
+const pinField = () => pinForm.elements.namedItem('pin') as HTMLInputElement;
+
+function openPinDialog(): void {
+  pinForm.reset();
+  el('#pin-error').textContent = '';
+  pinDlg.showModal();
+  pinField().focus();
+}
+
+el('#privacy-row').addEventListener('click', async (e) => {
+  const act = (e.target as HTMLElement).closest<HTMLElement>('[data-privacy]')?.dataset.privacy;
+  if (act === 'unlock') openPinDialog();
+  if (act === 'lock') {
+    await window.api.privacy.lock();
+    setStatus(t('privacy.locked'));
+  }
+});
+el('#btn-pin-cancel').addEventListener('click', () => pinDlg.close());
+pinForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    const n = await window.api.privacy.unlock(pinField().value.trim());
+    pinDlg.close();
+    setStatus(t('privacy.unlocked', { n }));
+  } catch (err) {
+    el('#pin-error').textContent = errMsg(err);
+    pinField().select();
+  }
+});
+
+// Locked or unlocked (also by the auto-lock): drop everything of the accounts that are gone
+window.api.privacy.onChanged(async (state) => {
+  privacy = state;
+  await loadAccounts();
+  const gone = (m: { accountId: string }) => !accountOf(m.accountId);
+  if (currentAccount && !accountOf(currentAccount)) {
+    currentAccount = null;
+    currentFolder = 'INBOX';
+  }
+  for (const id of [...folderCache.keys()]) if (!accountOf(id)) folderCache.delete(id);
+  mails = mails.filter((m) => !gone(m));
+  flaggedMails = flaggedMails.filter((m) => !gone(m));
+  if (searchResults) searchResults = searchResults.filter((m) => !gone(m));
+  selected = new Set([...selected].filter((k) => accountOf(parseKey(k).accountId)));
+  if (currentMsg && gone(currentMsg)) clearReader();
+  renderAccounts();
+  renderList();
+  await loadMails();
+  if (el<HTMLInputElement>('#search').value.trim().length >= 2) runSearch();
+});
+
+// Any use of the app postpones the auto-lock (sent at most every 15 s)
+let lastActivityPing = 0;
+const activityPing = () => {
+  if (!privacy.unlocked || Date.now() - lastActivityPing < 15_000) return;
+  lastActivityPing = Date.now();
+  window.api.privacy.activity().catch(() => {});
+};
+for (const ev of ['pointerdown', 'keydown', 'wheel', 'mousemove']) document.addEventListener(ev, activityPing, { capture: true, passive: true });
 
 // ---------- Views (mail / calendar / contacts) ----------
 
@@ -1343,3 +1954,10 @@ document.querySelectorAll<HTMLElement>('.col-resizer').forEach((h) => {
   await loadMails();
   loadFlagged();
 })();
+
+// Compose popup open → darken the main window; a click brings the popup back to the front
+window.api.compose.onDim((on) => (el('#popup-dim').hidden = !on));
+el('#popup-dim').addEventListener('mousedown', (e) => {
+  e.preventDefault();
+  window.api.compose.focusPopup();
+});

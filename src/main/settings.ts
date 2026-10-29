@@ -2,7 +2,7 @@ import { app } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { listAccounts } from './accounts';
+import { listAccounts, listAllAccounts } from './accounts';
 import { t } from './i18n';
 
 // Sender identities: per account the main address plus any aliases (e.g. info@…),
@@ -40,6 +40,8 @@ interface Settings {
   language: string; // 'system' | 'de' | 'en' …
   weekStart: number; // 1 = Monday, 0 = Sunday, 6 = Saturday
   sendDelay: number; // seconds to undo when sending (0–5)
+  readDelay: number; // mark an opened mail as read after this many seconds (0 = at once, -1 = only by hand)
+  composeMode: 'window' | 'popup'; // writing: own window or a popup over the main window
   accountLabel: 'name' | 'email'; // mailboxes in the sidebar/list by name or address
   externalMark: boolean; // mark mails from outside the own domains
   internalDomains: string[]; // additional domains that count as internal
@@ -107,6 +109,8 @@ function read(): Settings {
       language: typeof s.language === 'string' && /^(system|[a-z]{2})$/.test(s.language) ? s.language : 'system',
       weekStart: [0, 1, 6].includes(s.weekStart) ? s.weekStart : 1,
       sendDelay: Number.isFinite(s.sendDelay) ? Math.min(5, Math.max(0, Math.round(s.sendDelay))) : 2,
+      readDelay: READ_DELAYS.includes(s.readDelay) ? s.readDelay : 3,
+      composeMode: s.composeMode === 'popup' ? 'popup' : 'window',
       accountLabel: s.accountLabel === 'name' ? 'name' : 'email',
       externalMark: s.externalMark === true,
       internalDomains: Array.isArray(s.internalDomains) ? s.internalDomains.filter((d: unknown) => typeof d === 'string') : [],
@@ -115,7 +119,7 @@ function read(): Settings {
       notify: { ...DEFAULT_NOTIFY, ...(s.notify ?? {}), perAccount: { ...(s.notify?.perAccount ?? {}) }, desktopOff: [...(s.notify?.desktopOff ?? [])] },
     };
   } catch {
-    return { identities: [], templates: [], theme: 'dark', trustedSenders: [], imageMails: [], labels: [], mailLabels: {}, uiScale: 'medium', language: 'system', weekStart: 1, sendDelay: 2, accountLabel: 'email', externalMark: false, internalDomains: [], rules: [], notify: { ...DEFAULT_NOTIFY, perAccount: {}, desktopOff: [] } };
+    return { identities: [], templates: [], theme: 'dark', trustedSenders: [], imageMails: [], labels: [], mailLabels: {}, uiScale: 'medium', language: 'system', weekStart: 1, sendDelay: 2, readDelay: 3, composeMode: 'window', accountLabel: 'email', externalMark: false, internalDomains: [], rules: [], notify: { ...DEFAULT_NOTIFY, perAccount: {}, desktopOff: [] } };
   }
 }
 
@@ -123,10 +127,12 @@ function write(s: Settings): void {
   fs.writeFileSync(file(), JSON.stringify(s, null, 2), 'utf8');
 }
 
-// Every account's main address always exists; identities of removed accounts are dropped
+// Every account's main address always exists; identities of removed accounts are dropped,
+// those of locked private accounts are kept but not handed out
 export function getSettings(): Settings {
   const s = read();
-  const accounts = listAccounts();
+  const accounts = listAllAccounts();
+  const visible = new Set(listAccounts().map((a) => a.id));
   const ids = new Set(accounts.map((a) => a.id));
   let identities = s.identities.filter((i) => ids.has(i.accountId));
   for (const acc of accounts) {
@@ -140,7 +146,7 @@ export function getSettings(): Settings {
   // Order: by account, main address first
   const order = new Map(accounts.map((a, i) => [a.id, i]));
   identities = identities.sort((a, b) => (order.get(a.accountId)! - order.get(b.accountId)!) || Number(b.primary) - Number(a.primary));
-  return { ...s, identities };
+  return { ...s, identities: identities.filter((i) => visible.has(i.accountId)) };
 }
 
 export function getIdentity(id: string): Identity | undefined {
@@ -169,7 +175,9 @@ export function saveIdentities(list: Identity[]): Identity[] {
     });
   }
   const s = read();
-  write({ ...s, identities: clean });
+  // identities of locked private accounts are not in the list – keep them
+  const hidden = s.identities.filter((i) => !accounts.has(i.accountId));
+  write({ ...s, identities: [...clean, ...hidden] });
   return getSettings().identities;
 }
 
@@ -267,7 +275,9 @@ export function setMailLabel(keys: string[], labelId: string, on: boolean): Reco
 }
 
 // Appearance / language / week start (saved individually)
-export function savePrefs(p: { uiScale?: UiScale; language?: string; weekStart?: number; sendDelay?: number; externalMark?: boolean; internalDomains?: string[]; accountLabel?: 'name' | 'email' }): void {
+export const READ_DELAYS = [0, 1, 3, 5, 10, -1];
+
+export function savePrefs(p: { uiScale?: UiScale; language?: string; weekStart?: number; sendDelay?: number; readDelay?: number; composeMode?: 'window' | 'popup'; externalMark?: boolean; internalDomains?: string[]; accountLabel?: 'name' | 'email' }): void {
   const s = read();
   write({
     ...s,
@@ -275,6 +285,8 @@ export function savePrefs(p: { uiScale?: UiScale; language?: string; weekStart?:
     ...(typeof p.language === 'string' && /^(system|[a-z]{2})$/.test(p.language) ? { language: p.language } : {}),
     ...([0, 1, 6].includes(Number(p.weekStart)) && p.weekStart !== undefined ? { weekStart: Number(p.weekStart) } : {}),
     ...(p.sendDelay !== undefined && Number.isFinite(Number(p.sendDelay)) ? { sendDelay: Math.min(5, Math.max(0, Math.round(Number(p.sendDelay)))) } : {}),
+    ...(READ_DELAYS.includes(Number(p.readDelay)) && p.readDelay !== undefined ? { readDelay: Number(p.readDelay) } : {}),
+    ...(p.composeMode === 'popup' || p.composeMode === 'window' ? { composeMode: p.composeMode } : {}),
     ...(typeof p.externalMark === 'boolean' ? { externalMark: p.externalMark } : {}),
     ...(p.accountLabel === 'name' || p.accountLabel === 'email' ? { accountLabel: p.accountLabel } : {}),
     ...(Array.isArray(p.internalDomains)

@@ -13,6 +13,10 @@
   <div class="brand"><img class="brand-logo" alt="" hidden><span class="logo">Agenoras<span class="dot">.</span></span></div>
   <div class="tb-actions" id="tb-actions"></div>
   <div class="tb-fill"></div>
+  <button type="button" class="tb-btn tb-log" id="btn-log" hidden data-i18n-aria="log.open" data-i18n-title="log.open">
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></svg>
+    <span class="tb-badge" id="log-badge"></span>
+  </button>
   <button type="button" class="tb-btn" id="btn-agenda" aria-pressed="false" data-i18n-aria="agenda.toggle" data-i18n-title="agenda.toggle">
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/><path d="M17.5 9h1M17.5 12h1"/></svg>
   </button>
@@ -37,6 +41,7 @@
       </button>
       <div id="virtual-list"></div>
       <div id="account-list"></div>
+      <div id="privacy-row"></div>
     </div>
 
     <div class="side-part" id="side-cal">
@@ -76,7 +81,10 @@
   <section class="list" data-i18n-aria="mail.listAria">
     <div class="list-head">
       <h1><span id="list-heading"></span> <em id="list-title"></em></h1>
-      <input type="search" id="search" data-i18n-ph="mail.search" data-i18n-aria="mail.searchAria">
+      <div class="search-box" id="search-box">
+        <input type="search" id="search" data-i18n-ph="mail.search" data-i18n-aria="mail.searchAria">
+        <span class="search-spin" aria-hidden="true"></span>
+      </div>
       <div class="list-tools">
         <div class="seg mini" id="filter-seg" role="group" data-i18n-aria="filter.aria">
           <button type="button" data-filter="all" data-i18n="filter.all"></button>
@@ -84,9 +92,17 @@
           <button type="button" data-filter="attach" data-i18n-title="filter.attachTip"><svg viewBox="0 0 24 24" class="seg-ico" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg><span data-i18n="filter.attach"></span></button>
           <button type="button" data-filter="flagged" data-i18n-title="filter.flaggedTip"><svg viewBox="0 0 24 24" class="seg-ico" aria-hidden="true"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/></svg><span data-i18n="filter.flagged"></span></button>
         </div>
+        <button type="button" class="icon-btn sm thread-toggle" id="btn-threads" aria-pressed="false" data-i18n-title="threads.tip" data-i18n-aria="threads.tip" hidden><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16M4 10h16"/><path d="M8 15h12M8 20h12"/><path d="M4 15v5"/></svg></button>
         <div class="seg mini" id="scope-seg" role="group" data-i18n-aria="search.scopeAria" hidden>
           <button type="button" data-scope="folder" data-i18n="search.thisFolder"></button>
           <button type="button" data-scope="all" data-i18n="search.everywhere"></button>
+        </div>
+        <div class="seg mini" id="kind-seg" role="group" data-i18n-aria="search.kindAria" hidden>
+          <button type="button" data-kind="all" class="on"><span data-i18n="search.kind.all"></span></button>
+          <button type="button" data-kind="mail"><span data-i18n="search.kind.mail"></span><span class="seg-n" id="kind-n-mail"></span></button>
+          <button type="button" data-kind="event"><span data-i18n="search.kind.event"></span><span class="seg-n" id="kind-n-event"></span></button>
+          <button type="button" data-kind="contact"><span data-i18n="search.kind.contact"></span><span class="seg-n" id="kind-n-contact"></span></button>
+          <button type="button" data-kind="task"><span data-i18n="search.kind.task"></span><span class="seg-n" id="kind-n-task"></span></button>
         </div>
       </div>
       <div class="status" id="status"></div>
@@ -106,6 +122,7 @@
       </div>
       <div class="cal-search">
         <input type="search" id="cal-search" data-i18n-ph="calSearch.ph" data-i18n-aria="calSearch.ph" autocomplete="off">
+        <span class="search-spin" aria-hidden="true"></span>
         <div class="cal-results" id="cal-results" hidden></div>
       </div>
       <div class="cal-nav">
@@ -161,12 +178,31 @@
   <form id="form-add">
     <h2 data-i18n-html="account.addTitle"></h2>
     <label><span data-i18n="account.displayName"></span><input name="name" data-i18n-ph="account.displayNamePh"></label>
+    <div class="acc-color">
+      <span data-i18n="labels.color"></span>
+      <div class="swatches" id="acc-colors" role="radiogroup" data-i18n-aria="labels.color"></div>
+    </div>
+    <label class="check"><input name="private" type="checkbox"> <span data-i18n="account.private"></span></label>
+    <div class="priv-fields" id="priv-fields" hidden>
+      <div class="row">
+        <label class="grow"><span data-i18n="account.pin"></span><input name="pin" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password"></label>
+        <label class="grow"><span data-i18n="account.pinRepeat"></span><input name="pin2" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password"></label>
+      </div>
+      <label><span data-i18n="account.autoLock"></span><select name="autoLockMin"></select></label>
+      <p class="hint" data-i18n="account.privateHint"></p>
+    </div>
     <label><span data-i18n="field.email"></span><input name="email" type="email" required></label>
     <div class="row">
-      <label class="grow"><span data-i18n="account.imapServer"></span><input name="host" required placeholder="imap.example.com"></label>
+      <label class="proto"><span data-i18n="account.incoming"></span><select name="protocol"><option value="imap">IMAP</option><option value="pop3">POP3</option></select></label>
+      <label class="grow"><span id="host-label" data-i18n="account.imapServer"></span><input name="host" required placeholder="imap.example.com"></label>
       <label class="port"><span data-i18n="field.port"></span><input name="port" type="number" value="993" required></label>
     </div>
-    <label class="check"><input name="secure" type="checkbox" checked> SSL/TLS</label>
+    <label class="check"><input name="secure" type="checkbox" checked> <span id="secure-label">SSL/TLS</span></label>
+    <div class="priv-fields" id="pop-fields" hidden>
+      <label class="check"><input name="leaveOnServer" type="checkbox" checked> <span data-i18n="account.leaveOnServer"></span></label>
+      <label><span data-i18n="account.deleteAfter"></span><select name="deleteAfterDays"></select></label>
+      <p class="hint" data-i18n="account.popHint"></p>
+    </div>
     <div class="row">
       <label class="grow"><span data-i18n="account.smtpServer"></span><input name="smtpHost" required placeholder="smtp.example.com"></label>
       <label class="port"><span data-i18n="field.port"></span><input name="smtpPort" type="number" value="465" required></label>
@@ -194,6 +230,7 @@
       <button type="button" role="tab" data-tab="labels" data-i18n="settings.tabLabels"></button>
       <button type="button" role="tab" data-tab="sounds" data-i18n="settings.tabSounds"></button>
       <button type="button" role="tab" data-tab="appearance" data-i18n="settings.tabAppearance"></button>
+      <button type="button" role="tab" data-tab="ai" data-i18n="settings.tabAi"></button>
     </div>
   </div>
   <div class="settings-body" id="settings-body"></div>
@@ -208,10 +245,14 @@
   <form id="form-card-add">
     <h2 data-i18n-html="contacts.connectTitle"></h2>
     <label><span data-i18n="field.name"></span><input name="name" data-i18n-ph="dav.namePh"></label>
-    <label><span data-i18n="dav.serverUrl"></span><input name="serverUrl" type="url" required placeholder="https://cloud.example.com/remote.php/dav"></label>
-    <label><span data-i18n="field.username"></span><input name="username" required></label>
-    <label><span data-i18n="field.password"></span><input name="password" type="password" required></label>
-    <p class="hint" data-i18n="contacts.connectHint"></p>
+    <label class="check"><input name="local" type="checkbox"> <span data-i18n="dav.local"></span></label>
+    <div class="dav-server">
+      <label><span data-i18n="dav.serverUrl"></span><input name="serverUrl" type="url" required placeholder="https://cloud.example.com/remote.php/dav"></label>
+      <label><span data-i18n="field.username"></span><input name="username" required></label>
+      <label><span data-i18n="field.password"></span><input name="password" type="password" required></label>
+      <p class="hint" data-i18n="contacts.connectHint"></p>
+    </div>
+    <p class="hint dav-local-hint" data-i18n="dav.localHint" hidden></p>
     <p class="error" id="card-add-error"></p>
     <div class="actions">
       <button type="button" class="btn ghost" id="btn-card-add-cancel" data-i18n="btn.cancel"></button>
@@ -256,6 +297,29 @@
 <dialog id="dlg-about" class="about-dlg">
   <div id="about-body"></div>
   <div class="actions"><button type="button" class="btn primary" id="btn-about-close" data-i18n="btn.close"></button></div>
+</dialog>
+
+<dialog id="dlg-log" class="log-dlg">
+  <h2 data-i18n-html="log.title"></h2>
+  <p class="hint" data-i18n="log.hint"></p>
+  <div class="log-list" id="log-list"></div>
+  <div class="actions">
+    <button type="button" class="btn ghost danger" id="btn-log-clear" data-i18n="log.clear"></button>
+    <button type="button" class="btn ghost" id="btn-log-copy" data-i18n="log.copy"></button>
+    <button type="button" class="btn primary" id="btn-log-close" data-i18n="btn.close"></button>
+  </div>
+</dialog>
+
+<dialog id="dlg-pin" class="pin-dlg">
+  <form id="form-pin">
+    <h2 data-i18n-html="privacy.title"></h2>
+    <label><span data-i18n="privacy.pinLabel"></span><input name="pin" type="password" inputmode="numeric" maxlength="8" autocomplete="off" required></label>
+    <p class="error" id="pin-error"></p>
+    <div class="actions">
+      <button type="button" class="btn ghost" id="btn-pin-cancel" data-i18n="btn.cancel"></button>
+      <button type="submit" class="btn primary" data-i18n="privacy.unlockBtn"></button>
+    </div>
+  </form>
 </dialog>
 
 <dialog id="dlg-label" class="label-dlg">
@@ -313,10 +377,14 @@
   <form id="form-cal-add">
     <h2 data-i18n-html="cal.connectTitle"></h2>
     <label><span data-i18n="field.name"></span><input name="name" data-i18n-ph="dav.namePh"></label>
-    <label><span data-i18n="dav.serverUrl"></span><input name="serverUrl" type="url" required placeholder="https://cloud.example.com/remote.php/dav"></label>
-    <label><span data-i18n="field.username"></span><input name="username" required></label>
-    <label><span data-i18n="field.password"></span><input name="password" type="password" required></label>
-    <p class="hint" data-i18n="cal.connectHint"></p>
+    <label class="check"><input name="local" type="checkbox"> <span data-i18n="dav.local"></span></label>
+    <div class="dav-server">
+      <label><span data-i18n="dav.serverUrl"></span><input name="serverUrl" type="url" required placeholder="https://cloud.example.com/remote.php/dav"></label>
+      <label><span data-i18n="field.username"></span><input name="username" required></label>
+      <label><span data-i18n="field.password"></span><input name="password" type="password" required></label>
+      <p class="hint" data-i18n="cal.connectHint"></p>
+    </div>
+    <p class="hint dav-local-hint" data-i18n="dav.localHint" hidden></p>
     <p class="error" id="cal-add-error"></p>
     <div class="actions">
       <button type="button" class="btn ghost" id="btn-cal-add-cancel" data-i18n="btn.cancel"></button>
@@ -385,9 +453,11 @@
 <script src="../../dist/renderer/common.js"></script>
 <script src="../../dist/renderer/reader.js"></script>
 <script src="../../dist/renderer/renderer.js"></script>
+<script src="../../dist/renderer/problems.js"></script>
 <script src="../../dist/renderer/calendar.js"></script>
 <script src="../../dist/renderer/contacts.js"></script>
 <script src="../../dist/renderer/tasks.js"></script>
+<div class="popup-dim" id="popup-dim" hidden></div>
 <script src="../../dist/renderer/labels.js"></script>
 <script src="../../dist/renderer/agenda.js"></script>
 <script src="../../dist/renderer/settings.js"></script>

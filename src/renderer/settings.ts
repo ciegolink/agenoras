@@ -2,7 +2,7 @@
 // Uses el, esc, errMsg from common.ts, account data/dialogs from renderer.ts, calendar.ts and contacts.ts.
 // New compose windows load senders and templates themselves when they open.
 
-type SettingsTab = 'accounts' | 'identities' | 'templates' | 'labels' | 'rules' | 'appearance' | 'sounds';
+type SettingsTab = 'accounts' | 'identities' | 'templates' | 'labels' | 'rules' | 'appearance' | 'sounds' | 'ai';
 type ThemeChoice = 'dark' | 'light' | 'system';
 
 const setDlg = el<HTMLDialogElement>('#dlg-settings');
@@ -13,7 +13,7 @@ let calAccs: CalAccount[] = [];
 let cardAccs: CalAccount[] = [];
 let curTheme: ThemeChoice = 'dark';
 let soundList: { id: string; name: string }[] = [];
-let prefs: { uiScale: 'small' | 'medium' | 'large'; language: string; weekStart: number; sendDelay: number } = { uiScale: 'medium', language: 'system', weekStart: 1, sendDelay: 2 };
+let prefs: { uiScale: 'small' | 'medium' | 'large'; language: string; weekStart: number; sendDelay: number; composeMode: 'window' | 'popup' } = { uiScale: 'medium', language: 'system', weekStart: 1, sendDelay: 2, composeMode: 'window' };
 let langList: string[] = ['de', 'en'];
 let editLabels: MailLabel[] = [];
 let editRules: MailRule[] = [];
@@ -31,7 +31,7 @@ async function openSettings(tab: SettingsTab = setTab): Promise<void> {
     curTheme = s.theme ?? 'dark';
     if (s.notify) notify = s.notify;
     soundList = await window.api.sounds.list().catch(() => []);
-    prefs = { uiScale: s.uiScale ?? 'medium', language: s.language ?? 'system', weekStart: s.weekStart ?? 1, sendDelay: s.sendDelay ?? 2 };
+    prefs = { uiScale: s.uiScale ?? 'medium', language: s.language ?? 'system', weekStart: s.weekStart ?? 1, sendDelay: s.sendDelay ?? 2, composeMode: s.composeMode ?? 'window' };
     langList = await window.api.settings.languages().catch(() => ['de', 'en']);
     editLabels = (s.labels ?? labels).map((l) => ({ ...l }));
     editRules = JSON.parse(JSON.stringify(s.rules ?? []));
@@ -63,10 +63,100 @@ function renderSettings(): void {
               ? labelsHtml()
               : setTab === 'rules'
                 ? rulesHtml()
-                : appearanceHtml();
+                : setTab === 'ai'
+                  ? aiHtml()
+                  : appearanceHtml();
+  if (setTab === 'identities' && idnFilter) applyIdnFilter();
   // accounts, appearance and sounds apply immediately
-  el('#btn-settings-save').hidden = setTab === 'accounts' || setTab === 'appearance' || setTab === 'sounds';
+  el('#btn-settings-save').hidden = setTab === 'accounts' || setTab === 'appearance' || setTab === 'sounds' || setTab === 'ai';
 }
+
+// ---------- Mini-KI (offline): switch on, download/delete models, pick the version ----------
+
+let ai: AiState | null = null;
+const mb = (bytes: number) => `${Math.round(bytes / 1_000_000)} MB`;
+
+function aiHtml(): string {
+  if (!ai) {
+    window.api.ai.state().then((s) => {
+      ai = s;
+      if (setTab === 'ai') renderSettings();
+    });
+    return `<p class="hint">${esc(t('status.loading'))}</p>`;
+  }
+  const rows = ai.models
+    .map((m) => {
+      const dl = ai!.download?.id === m.id ? ai!.download : null;
+      const pct = dl ? Math.floor((dl.received / (dl.total || m.size)) * 100) : 0;
+      const status = dl ? `${pct} % · ${mb(dl.received)} / ${mb(dl.total || m.size)}` : m.downloaded ? t('ai.onDisk') : t('ai.notOnDisk');
+      const actions = dl
+        ? `<button type="button" class="link" data-ai-cancel>${esc(t('btn.cancel'))}</button>`
+        : m.downloaded
+          ? `<button type="button" class="link danger" data-ai-delete="${esc(m.id)}">${esc(t('btn.delete'))}</button>`
+          : `<button type="button" class="btn ghost sm" data-ai-download="${esc(m.id)}"${ai!.download ? ' disabled' : ''}>${esc(t('ai.download'))}</button>`;
+      return `<div class="ai-model${ai!.model === m.id ? ' active' : ''}">
+        <label class="ai-pick"><input type="radio" name="ai-model" value="${esc(m.id)}" data-ai-model${ai!.model === m.id ? ' checked' : ''}><span><b>${esc(m.name)}</b><small>${esc(t(`ai.model.${m.id}`))} · ${esc(mb(m.size))} · ${esc(status)}</small></span></label>
+        ${dl ? `<progress max="100" value="${pct}"></progress>` : ''}
+        <span class="ai-act">${actions}</span>
+      </div>`;
+    })
+    .join('');
+  const active = ai.models.find((m) => m.id === ai!.model);
+  const state = !ai.enabled ? t('ai.stateOff') : active?.downloaded ? t('ai.stateReady') : t('ai.stateNeedsModel');
+  return `<div class="set-card">
+      <label class="check"><input type="checkbox" data-ai-enable${ai.enabled ? ' checked' : ''}> <b>${esc(t('ai.enable'))}</b></label>
+      <p class="hint">${esc(t('ai.hint'))}</p>
+      <span class="ai-state${ai.enabled && active?.downloaded ? ' ok' : ''}">${esc(state)}</span>
+    </div>
+    <div class="set-card">
+      <span class="mono">${esc(t('ai.langLabel').toUpperCase())}</span>
+      <div class="sound-row"><span class="sound-acc">${esc(t('ai.langHint'))}</span><select data-ai-lang>${AI_LANG_CODES.map((l) => `<option value="${l}"${ai!.lang === l ? ' selected' : ''}>${esc(t(`ai.lang.${l}`))}</option>`).join('')}</select></div>
+    </div>
+    <div class="set-card">
+      <span class="mono">${esc(t('tr.defaultLabel').toUpperCase())}</span>
+      <div class="sound-row"><span class="sound-acc">${esc(t('tr.defaultHint'))}</span><select data-ai-trlang>${TR_LANGS.map((l) => `<option value="${l}"${translateTarget(ai) === l ? ' selected' : ''}>${esc(trLangName(l))}</option>`).join('')}</select></div>
+    </div>
+    <h3 class="set-sub">${esc(t('ai.models'))}</h3>
+    <div class="set-card ai-models">${rows}</div>
+    <p class="hint">${esc(t('ai.modelsHint'))}</p>`;
+}
+
+window.api.ai.onState((s) => {
+  ai = s;
+  if (setDlg.open && setTab === 'ai') renderSettings();
+});
+
+el('#settings-body').addEventListener('change', async (e) => {
+  const tgt = e.target as HTMLInputElement;
+  try {
+    if (tgt.dataset.aiEnable !== undefined) ai = await window.api.ai.enable(tgt.checked);
+    else if (tgt.dataset.aiModel !== undefined) ai = await window.api.ai.setModel(tgt.value);
+    else if (tgt.dataset.aiLang !== undefined) ai = await window.api.ai.setLang(tgt.value);
+    else if (tgt.dataset.aiTrlang !== undefined) ai = await window.api.ai.setTranslateLang(tgt.value);
+    else return;
+    renderSettings();
+  } catch (err) {
+    el('#settings-error').textContent = errMsg(err);
+  }
+});
+
+el('#settings-body').addEventListener('click', async (e) => {
+  const tgt = e.target as HTMLElement;
+  const dl = tgt.closest<HTMLElement>('[data-ai-download]')?.dataset.aiDownload;
+  const del = tgt.closest<HTMLElement>('[data-ai-delete]')?.dataset.aiDelete;
+  if (!dl && !del && !tgt.closest('[data-ai-cancel]')) return;
+  el('#settings-error').textContent = '';
+  try {
+    if (dl) ai = await window.api.ai.download(dl);
+    else if (del) {
+      if (!confirm(t('ai.deleteConfirm'))) return;
+      ai = await window.api.ai.remove(del);
+    } else await window.api.ai.cancel();
+    if (setTab === 'ai') renderSettings();
+  } catch (err) {
+    el('#settings-error').textContent = errMsg(err);
+  }
+});
 
 // ---------- Sounds for new mail ----------
 
@@ -202,6 +292,13 @@ function appearanceHtml(): string {
     </div>
     <p class="hint">${esc(t('settings.accountLabelHint'))}</p>
   </div>
+  <div class="set-card">
+    <span class="mono">${esc(t('settings.composeMode').toUpperCase())}</span>
+    <div class="sound-row"><span class="sound-acc">${esc(t('settings.composeModeHint'))}</span><select data-pref-compose>
+      <option value="window"${prefs.composeMode !== 'popup' ? ' selected' : ''}>${esc(t('settings.composeWindow'))}</option>
+      <option value="popup"${prefs.composeMode === 'popup' ? ' selected' : ''}>${esc(t('settings.composePopup'))}</option>
+    </select></div>
+  </div>
   <div class="set-card two-col">
     <label>${esc(t('settings.language'))}
       <select data-pref-lang>
@@ -262,6 +359,12 @@ el('#settings-body').addEventListener('change', async (e) => {
     const res = await window.api.settings.savePrefs({ language: tgt.value }).catch(() => ({ restartNeeded: false }));
     if (res.restartNeeded && confirm(t('settings.restartConfirm'))) window.api.settings.relaunch();
     else if (res.restartNeeded) el('#settings-error').textContent = t('settings.restartLater');
+  } else if (tgt.dataset.prefCompose !== undefined) {
+    prefs.composeMode = tgt.value === 'popup' ? 'popup' : 'window';
+    await window.api.settings.savePrefs({ composeMode: prefs.composeMode }).catch(() => {});
+  } else if (tgt.dataset.prefRead !== undefined) {
+    readDelay = Number(tgt.value); // renderer.ts – applies right away
+    await window.api.settings.savePrefs({ readDelay }).catch(() => {});
   } else if (tgt.dataset.prefDelay !== undefined) {
     prefs.sendDelay = Number(tgt.value);
     await window.api.settings.savePrefs({ sendDelay: prefs.sendDelay }).catch(() => {});
@@ -367,12 +470,12 @@ function accountsHtml(): string {
   return [
     section(
       t('settings.mailAccounts'),
-      accounts.map((a) => line('mail', a.id, a.color, a.name && a.name !== a.email ? `${a.name} · ${a.email}` : a.email, `IMAP ${a.host}:${a.port} · SMTP ${a.smtpHost}:${a.smtpPort}`)).join(''),
+      accounts.map((a) => line('mail', a.id, a.color, a.name && a.name !== a.email ? `${a.name} · ${a.email}` : a.email, `${a.protocol === 'pop3' ? 'POP3' : 'IMAP'} ${a.host}:${a.port} · SMTP ${a.smtpHost}:${a.smtpPort}`)).join(''),
       'mail',
       t('settings.addMailAccount'),
     ),
-    section(t('settings.calAccounts'), calAccs.map((a) => line('cal', a.id, '#7FA6CF', a.name, [a.serverUrl, a.username].filter(Boolean).join(' · '))).join(''), 'cal', t('cal.addAccount')),
-    section(t('settings.cardAccounts'), cardAccs.map((a) => line('card', a.id, '#C1C8BE', a.name, [a.serverUrl, a.username].filter(Boolean).join(' · '))).join(''), 'card', t('contacts.addAccount')),
+    section(t('settings.calAccounts'), calAccs.map((a) => line('cal', a.id, '#7FA6CF', a.name, a.serverUrl === 'local:' ? t('dav.localLine') : [a.serverUrl, a.username].filter(Boolean).join(' · '))).join(''), 'cal', t('cal.addAccount')),
+    section(t('settings.cardAccounts'), cardAccs.map((a) => line('card', a.id, '#C1C8BE', a.name, a.serverUrl === 'local:' ? t('dav.localLine') : [a.serverUrl, a.username].filter(Boolean).join(' · '))).join(''), 'card', t('contacts.addAccount')),
   ].join('');
 }
 
@@ -455,37 +558,88 @@ function signatureBlock(idn: Identity, i: number, acc: Account): string {
     </div>`;
 }
 
+// Many senders stay manageable: one line per sender (name, address, start of the signature),
+// only one opened for editing at a time; accounts can be folded, a filter finds a sender quickly
+let openIdn: Identity | null = null;
+const foldedSigAccs = new Set<string>();
+let idnFilter = '';
+
+function sigPlain(idn: Identity): string {
+  const text = idn.signatureHtml ? new DOMParser().parseFromString(idn.signatureHtml, 'text/html').body.textContent ?? '' : idn.signature;
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function identityCard(idn: Identity, i: number, acc: Account): string {
+  const open = openIdn === idn;
+  const sig = sigPlain(idn);
+  const head = `<button type="button" class="idn-head" data-idn-toggle="${i}" aria-expanded="${open}">
+      <span class="tw${open ? ' open' : ''}">›</span>
+      <span class="idn-who"><b>${esc(idn.name || acc.name)}</b><span>${esc(idn.email || '–')}</span></span>
+      <span class="idn-sig${sig ? '' : ' none'}">${esc(sig || t('settings.noSignature'))}</span>
+      ${idn.signatureHtml ? '<span class="idn-tag">HTML</span>' : ''}
+      <span class="idn-tag${idn.primary ? ' main' : ''}">${esc(idn.primary ? t('settings.mainTag') : t('identity.alias'))}</span>
+    </button>`;
+  if (!open) return `<div class="set-card idn-card" data-idn="${i}">${head}</div>`;
+  return `<div class="set-card idn-card open" data-idn="${i}">${head}
+      <div class="row">
+        <label class="grow">${esc(t('account.displayName'))}<input data-list="id" data-i="${i}" data-k="name" value="${esc(idn.name)}" placeholder="${esc(acc.name)}"></label>
+        <label class="grow">${esc(t('settings.senderAddress'))}<input data-list="id" data-i="${i}" data-k="email" value="${esc(idn.email)}" ${idn.primary ? 'disabled' : 'placeholder="info@example.com"'}></label>
+      </div>
+      ${signatureBlock(idn, i, acc)}
+      <div class="set-card-foot">${
+        idn.primary
+          ? `<span class="hint">${esc(t('settings.primary'))}</span>`
+          : `<span class="hint">${esc(t('identity.alias'))}</span><button type="button" class="link danger" data-rm-alias="${i}">${esc(t('settings.removeAlias'))}</button>`
+      }</div>
+    </div>`;
+}
+
 function identitiesHtml(): string {
   if (!accounts.length) return `<p class="hint">${esc(t('settings.addMailAccountFirst'))}</p>`;
   const sections = accounts.map((acc) => {
-    const cards = editIdentities
-      .map((idn, i) => ({ idn, i }))
-      .filter(({ idn }) => idn.accountId === acc.id)
-      .map(
-        ({ idn, i }) => `<div class="set-card">
-          <div class="row">
-            <label class="grow">${esc(t('account.displayName'))}<input data-list="id" data-i="${i}" data-k="name" value="${esc(idn.name)}" placeholder="${esc(acc.name)}"></label>
-            <label class="grow">${esc(t('settings.senderAddress'))}<input data-list="id" data-i="${i}" data-k="email" value="${esc(idn.email)}" ${idn.primary ? 'disabled' : 'placeholder="info@example.com"'}></label>
-          </div>
-          ${signatureBlock(idn, i, acc)}
-          <div class="set-card-foot">${
-            idn.primary
-              ? `<span class="hint">${esc(t('settings.primary'))}</span>`
-              : `<span class="hint">${esc(t('identity.alias'))}</span><button type="button" class="link danger" data-rm-alias="${i}">${esc(t('settings.removeAlias'))}</button>`
-          }</div>
-        </div>`,
-      )
-      .join('');
-    return `<section class="set-acc">
-      <div class="set-acc-head"><span class="dot" style="background:${acc.color}"></span><b>${esc(acc.email)}</b><button type="button" class="link" data-add-alias="${acc.id}">+ ${esc(t('identity.alias'))}</button></div>
-      ${cards}
+    const mine = editIdentities.map((idn, i) => ({ idn, i })).filter(({ idn }) => idn.accountId === acc.id);
+    const folded = foldedSigAccs.has(acc.id) && !idnFilter;
+    return `<section class="set-acc" data-idn-acc="${esc(acc.id)}">
+      <div class="set-acc-head">
+        <button type="button" class="idn-acc-toggle" data-sigacc-toggle="${esc(acc.id)}" aria-expanded="${!folded}"><span class="tw${folded ? '' : ' open'}">›</span><span class="dot" style="background:${acc.color}"></span><b>${esc(acc.email)}</b><span class="n">${mine.length}</span></button>
+        <button type="button" class="link" data-add-alias="${acc.id}">+ ${esc(t('identity.alias'))}</button>
+      </div>
+      ${folded ? '' : mine.map(({ idn, i }) => identityCard(idn, i, acc)).join('')}
     </section>`;
   });
-  const delay = `<div class="set-card">
+  const filter =
+    editIdentities.length > 4
+      ? `<input type="search" class="idn-filter" data-idn-filter value="${esc(idnFilter)}" placeholder="${esc(t('settings.idnFilter'))}" aria-label="${esc(t('settings.idnFilter'))}">`
+      : '';
+  const general = `<h3 class="set-sub">${esc(t('settings.sendRead'))}</h3>
+    <div class="set-card">
       <span class="mono">${esc(t('settings.sendDelay').toUpperCase())}</span>
       <div class="sound-row"><span class="sound-acc">${esc(t('settings.sendDelayHint'))}</span><input type="range" min="0" max="5" step="1" value="${prefs.sendDelay}" data-pref-delay><b class="delay-val">${prefs.sendDelay ? t('settings.seconds', { n: prefs.sendDelay }) : t('settings.delayOff')}</b></div>
+    </div>
+    <div class="set-card">
+      <span class="mono">${esc(t('settings.readDelay').toUpperCase())}</span>
+      <div class="sound-row"><span class="sound-acc">${esc(t('settings.readDelayHint'))}</span><select data-pref-read>${[0, 1, 3, 5, 10, -1]
+        .map((n) => `<option value="${n}"${n === readDelay ? ' selected' : ''}>${esc(n === 0 ? t('settings.readNow') : n < 0 ? t('settings.readManual') : t('settings.readAfter', { n }))}</option>`)
+        .join('')}</select></div>
     </div>`;
-  return `${delay}<p class="hint">${esc(t('settings.aliasHint'))}</p>${sections.join('')}`;
+  return `${filter}${sections.join('')}<p class="hint">${esc(t('settings.aliasHint'))}</p>${general}`;
+}
+
+// Filter without re-rendering (keeps the focus in the field)
+function applyIdnFilter(): void {
+  const q = idnFilter.trim().toLowerCase();
+  const body = el('#settings-body');
+  body.querySelectorAll<HTMLElement>('[data-idn]').forEach((card) => {
+    const idn = editIdentities[Number(card.dataset.idn)];
+    card.hidden = !!q && !`${idn.name} ${idn.email} ${sigPlain(idn)}`.toLowerCase().includes(q);
+  });
+  body.querySelectorAll<HTMLElement>('[data-idn-acc]').forEach((sec) => {
+    sec.hidden = !!q && !sec.querySelector('[data-idn]:not([hidden])');
+  });
+  const none = body.querySelector<HTMLElement>('.idn-none');
+  const empty = !!q && !body.querySelector('[data-idn]:not([hidden])');
+  if (empty && !none) body.querySelector('.idn-filter')?.insertAdjacentHTML('afterend', `<p class="hint idn-none">${esc(t('mail.noHits'))}</p>`);
+  if (!empty) none?.remove();
 }
 
 function templatesHtml(): string {
@@ -510,6 +664,18 @@ function templatesHtml(): string {
 // apply input directly to the working copy
 el('#settings-body').addEventListener('input', (e) => {
   const tgt = e.target as HTMLInputElement;
+  if (tgt.dataset.idnFilter !== undefined) {
+    const wasEmpty = !idnFilter;
+    idnFilter = tgt.value;
+    // folded accounts open while filtering → render once, then filter in place
+    if (wasEmpty !== !idnFilter && foldedSigAccs.size) {
+      renderSettings();
+      const f = el('#settings-body').querySelector<HTMLInputElement>('[data-idn-filter]');
+      f?.focus();
+      f?.setSelectionRange(f.value.length, f.value.length);
+    }
+    return applyIdnFilter();
+  }
   // HTML signature: edited directly in the preview or in the source
   if (tgt.dataset.sigEdit !== undefined) {
     const i = Number(tgt.dataset.sigEdit);
@@ -551,6 +717,20 @@ el('#settings-body').addEventListener('click', (e) => {
     if (acc) return kind === 'cal' ? openEditCalAccount(acc) : openEditCardAccount(acc);
     return;
   }
+  const idnToggle = tgt.closest<HTMLElement>('[data-idn-toggle]')?.dataset.idnToggle;
+  if (idnToggle !== undefined) {
+    const idn = editIdentities[Number(idnToggle)];
+    openIdn = openIdn === idn ? null : idn;
+    renderSettings();
+    el('#settings-body').querySelector(`[data-idn="${idnToggle}"]`)?.scrollIntoView({ block: 'nearest' });
+    return;
+  }
+  const accToggle = tgt.closest<HTMLElement>('[data-sigacc-toggle]')?.dataset.sigaccToggle;
+  if (accToggle !== undefined) {
+    if (foldedSigAccs.has(accToggle)) foldedSigAccs.delete(accToggle);
+    else foldedSigAccs.add(accToggle);
+    return renderSettings();
+  }
   const sigMode = tgt.closest<HTMLElement>('[data-sigmode]');
   if (sigMode) {
     const idn = editIdentities[Number(sigMode.dataset.i)];
@@ -584,7 +764,10 @@ el('#settings-body').addEventListener('click', (e) => {
   if (rmAcc) return void removeAccountFromSettings(rmAcc);
   if (add) {
     const acc = accounts.find((a) => a.id === add);
-    editIdentities.push({ id: '', accountId: add, name: acc?.name ?? '', email: '', signature: '', primary: false });
+    const idn: Identity = { id: '', accountId: add, name: acc?.name ?? '', email: '', signature: '', primary: false };
+    editIdentities.push(idn);
+    openIdn = idn; // new sender: open right away for editing
+    foldedSigAccs.delete(add);
   } else if (rmAlias !== undefined) {
     editIdentities.splice(Number(rmAlias), 1);
   } else if (rmTpl !== undefined) {
@@ -709,7 +892,8 @@ async function openAbout(): Promise<void> {
       <dt>Node.js</dt><dd>${esc(info?.node ?? '–')}</dd>
       <dt>${esc(t('about.system'))}</dt><dd>${esc(info?.platform ?? '–')}</dd>
     </dl>
-    <p class="about-credits">${esc(t('about.credits'))} Electron, ImapFlow, Nodemailer, mailparser, tsdav, ical.js.</p>
+    <p class="about-credits">${esc(t('about.credits'))} Electron, ImapFlow, Nodemailer, mailparser, tsdav, ical.js, node-llama-cpp.</p>
+    <p class="about-credits">${esc(t('about.aiModel'))} <a href="https://huggingface.co/mistralai/Ministral-3-3B-Instruct-2512" target="_blank" rel="noopener">Ministral 3 3B Instruct</a> © Mistral AI, <a href="https://www.apache.org/licenses/LICENSE-2.0" target="_blank" rel="noopener">Apache License 2.0</a>, ${esc(t('about.aiQuant'))} <a href="https://huggingface.co/bartowski/mistralai_Ministral-3-3B-Instruct-2512-GGUF" target="_blank" rel="noopener">bartowski</a>.</p>
     <p class="about-license"><a href="${REPO}/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a> · © 2026 CiegoLink GmbH</p>`;
   // Own logo (build/logo.png) if present, otherwise the app icon
   const img = el<HTMLImageElement>('#about-body .about-logo');

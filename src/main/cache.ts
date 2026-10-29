@@ -72,6 +72,26 @@ export function storeMail<T extends { uid: number; date: string }>(accountId: st
   });
 }
 
+// Instant search in the local copies (summary fields and cached bodies) – shown before the server answers.
+// folder null = every cached folder of the accounts
+export function searchCachedMail<T>(accountIds: string[], folder: string | null, query: string, limit = 200): T[] {
+  if (!accountIds.length) return [];
+  const where = accountIds.map(() => (folder ? 'm.account_id = ?' : '(m.account_id = ? OR m.account_id LIKE ?)')).join(' OR ');
+  const keys = accountIds.flatMap((id) => (folder ? [folderKey(id, folder)] : [id, `${id.replace(/[\\%_]/g, '\\$&')}#%`]));
+  const like = `%${query.replace(/[\\%_]/g, '\\$&')}%`;
+  const rows = open()
+    .prepare(
+      `SELECT m.summary, (b.detail LIKE ? ESCAPE '\\') AS in_body FROM mail m LEFT JOIN mail_body b ON b.account_id = m.account_id AND b.uid = m.uid
+       WHERE (${where}) AND (m.summary LIKE ? ESCAPE '\\' OR b.detail LIKE ? ESCAPE '\\') ORDER BY m.date DESC LIMIT ?`,
+    )
+    .all(like, ...keys, like, like, limit) as { summary: string; in_body: number | null }[];
+  const q = query.toLowerCase();
+  return rows
+    .map((r) => ({ s: JSON.parse(r.summary), body: !!r.in_body }))
+    .filter(({ s, body }) => body || [s.subject, s.from, s.fromAddress, s.toName, s.toAddress].some((v) => typeof v === 'string' && v.toLowerCase().includes(q)))
+    .map(({ s }) => s as T);
+}
+
 export function setCachedSeen(accountId: string, uid: number, seen = true): void {
   const d = open();
   const row = d.prepare('SELECT summary FROM mail WHERE account_id = ? AND uid = ?').get(accountId, uid) as { summary: string } | undefined;
@@ -88,6 +108,15 @@ export function cachedBody<T>(accountId: string, uid: number): T | null {
 
 export function storeBody(accountId: string, uid: number, detail: unknown): void {
   open().prepare('INSERT OR REPLACE INTO mail_body (account_id, uid, detail) VALUES (?, ?, ?)').run(accountId, uid, JSON.stringify(detail));
+}
+
+// One folder emptied/moved on the server → drop its local copies
+export function forgetFolder(key: string): void {
+  const d = open();
+  tx(() => {
+    d.prepare('DELETE FROM mail WHERE account_id = ?').run(key);
+    d.prepare('DELETE FROM mail_body WHERE account_id = ?').run(key);
+  });
 }
 
 export function forgetMailAccount(accountId: string): void {

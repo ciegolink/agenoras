@@ -112,7 +112,7 @@ export async function sendMail(
 ): Promise<SendResult> {
   const attachments = await collectAttachments(mail);
   const from = { name: identity.name || acc.name, address: identity.email };
-  const transporter = transport(acc, getPassword(acc.id));
+  const transporter = transport(acc, await getPassword(acc.id));
 
   // Build once: the same message is sent and stored in "Sent".
   // Bcc is only in the envelope, never in the header – the other recipients do not see it.

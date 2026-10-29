@@ -43,22 +43,44 @@ export function getDavAccount(kind: DavKind, id: string): DavAccount | undefined
   return listDavAccounts(kind).find((a) => a.id === id);
 }
 
-export function getDavPassword(kind: DavKind, id: string): string {
+export async function getDavPassword(kind: DavKind, id: string): Promise<string> {
   const a = readAll(kind).find((x) => x.id === id);
   if (!a) throw new Error(t('err.accountNotFound'));
   return decrypt(a.password);
 }
 
-export function addDavAccount(kind: DavKind, input: NewDavAccount): DavAccount {
+export async function addDavAccount(kind: DavKind, input: NewDavAccount): Promise<DavAccount> {
+  const pass = await encrypt(input.password); // before reading: no await between read and write
   const all = readAll(kind);
   const acc: StoredDavAccount = {
     id: crypto.randomUUID(),
     name: input.name || new URL(input.serverUrl).hostname,
     serverUrl: input.serverUrl,
     username: input.username,
-    password: encrypt(input.password),
+    password: pass,
   };
   all.push(acc);
+  writeAll(kind, all);
+  const { password, ...pub } = acc;
+  return pub;
+}
+
+// Local account (no server): calendar or address book only on this computer, see localdav.ts
+export async function addLocalDavAccount(kind: DavKind, name: string): Promise<DavAccount> {
+  const pass = await encrypt('');
+  const all = readAll(kind);
+  const acc: StoredDavAccount = { id: crypto.randomUUID(), name: name.trim() || t('dav.localDefault'), serverUrl: 'local:', username: '', password: pass };
+  all.push(acc);
+  writeAll(kind, all);
+  const { password, ...pub } = acc;
+  return pub;
+}
+
+export function renameDavAccount(kind: DavKind, id: string, name: string): DavAccount {
+  const all = readAll(kind);
+  const acc = all.find((a) => a.id === id);
+  if (!acc) throw new Error(t('err.accountNotFound'));
+  acc.name = name.trim() || acc.name;
   writeAll(kind, all);
   const { password, ...pub } = acc;
   return pub;
@@ -69,7 +91,8 @@ export function removeDavAccount(kind: DavKind, id: string): void {
 }
 
 // Edit account: empty password = keep the current one
-export function updateDavAccount(kind: DavKind, id: string, input: Omit<NewDavAccount, 'password'> & { password?: string }): DavAccount {
+export async function updateDavAccount(kind: DavKind, id: string, input: Omit<NewDavAccount, 'password'> & { password?: string }): Promise<DavAccount> {
+  const newPass = input.password ? await encrypt(input.password) : null;
   const all = readAll(kind);
   const i = all.findIndex((a) => a.id === id);
   if (i === -1) throw new Error(t('err.accountNotFound'));
@@ -78,7 +101,7 @@ export function updateDavAccount(kind: DavKind, id: string, input: Omit<NewDavAc
     name: input.name || new URL(input.serverUrl).hostname,
     serverUrl: input.serverUrl,
     username: input.username,
-    password: input.password ? encrypt(input.password) : all[i].password,
+    password: newPass ?? all[i].password,
   };
   writeAll(kind, all);
   const { password, ...pub } = all[i];
