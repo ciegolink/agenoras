@@ -135,7 +135,7 @@
       "icon": "build/icon.png",
       "category": "public.app-category.productivity",
       "identity": null,
-      "x64ArchFiles": "**/node_modules/@node-llama-cpp/**",
+      "x64ArchFiles": "**/node_modules/{@node-llama-cpp,@reflink}/**",
       "artifactName": "${productName}-mac.${ext}"
     },
     "dmg": {
