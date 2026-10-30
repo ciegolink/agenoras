@@ -280,6 +280,7 @@ el('#btn-ai-redo').addEventListener('click', generate);
 writeInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
+    e.stopPropagation(); // stays in the panel – never reaches the compose form
     generate();
   }
 });

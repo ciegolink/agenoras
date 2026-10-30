@@ -208,7 +208,7 @@
   "compose.templateName": "Name der Vorlage",
   "compose.templateSaved": "Vorlage „{name}“ gespeichert.",
   "compose.replaceSubject": "Betreff durch den der Vorlage ersetzen?",
-  "compose.ctrlEnter": "Ctrl+Enter sendet",
+  "compose.ctrlEnter": "Strg+Shift+S sendet",
   "compose.discard": "Verwerfen",
   "compose.send": "Senden →",
   "compose.sending": "Sende …",
@@ -776,5 +776,7 @@
   "bm.replyOnly": "Nur antworten an",
   "folder.markAllRead": "Alle als gelesen markieren",
   "folder.markedRead": "{n} Mails als gelesen markiert.",
-  "folder.noneUnread": "Keine ungelesenen Mails in diesem Ordner."
+  "folder.noneUnread": "Keine ungelesenen Mails in diesem Ordner.",
+  "react.pending": "Reaktion {emoji} wird gesendet …",
+  "react.cancelled": "Reaktion nicht gesendet."
 }

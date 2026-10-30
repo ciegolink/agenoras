@@ -428,15 +428,86 @@ async function reactionAction(msg: MailDetail, target: HTMLElement, status: (s: 
 }
 
 // Also used by the right-click menu in the mail body; the 😊 button shows what was sent
+// Like sending a mail: the ring counts down the undo delay (Settings → Sending), then a check mark
+// and the "sent" sound.
 async function sendReaction(msg: MailDetail, emoji: string, status: (s: string) => void): Promise<void> {
+  const delay = await window.api.settings
+    .get()
+    .then((s) => Math.min(5, Math.max(0, s.sendDelay ?? 2)) * 1000)
+    .catch(() => 2000);
+  if (!(await reactCountdown(emoji, delay))) return void status(t('react.cancelled'));
   status(t('react.sending'));
   try {
     const to = await window.api.react(msg.accountId, msg.folder, msg.uid, emoji);
     document.querySelectorAll<HTMLElement>('[data-react-menu]').forEach((b) => (b.textContent = emoji));
+    window.api.compose.sent().catch(() => {}); // the "ding" comes from the main window
     status(t('react.sent', { emoji, to }));
+    reactToastState('sent', t('compose.sentShort'));
+    setTimeout(() => (reactToast.hidden = true), 900);
   } catch (err) {
+    reactToast.hidden = true;
     status(errMsg(err));
   }
+}
+
+const reactToast = document.createElement('div');
+reactToast.className = 'send-undo react-undo';
+reactToast.hidden = true;
+reactToast.setAttribute('role', 'status');
+reactToast.innerHTML = `
+  <svg class="ring" width="34" height="34" viewBox="0 0 36 36" aria-hidden="true">
+    <circle cx="18" cy="18" r="15" class="ring-bg"/><circle cx="18" cy="18" r="15" class="ring-fg"/>
+    <path class="ring-check" d="m11.5 18.5 4.5 4.5 8.5-9"/>
+  </svg>
+  <span class="su-text"></span>
+  <button type="button" class="btn ghost sm su-undo"></button>`;
+document.body.appendChild(reactToast);
+let cancelReact: (() => void) | null = null; // a reaction still waiting – a new one replaces it
+
+function reactToastState(state: 'counting' | 'sending' | 'sent', text: string): void {
+  reactToast.className = `send-undo react-undo ${state}`;
+  reactToast.hidden = false;
+  reactToast.querySelector('.su-text')!.textContent = text;
+  reactToast.querySelector<HTMLButtonElement>('.su-undo')!.hidden = state !== 'counting';
+}
+
+// true = send, false = undone (button, Esc or Ctrl+Z)
+function reactCountdown(emoji: string, ms: number): Promise<boolean> {
+  cancelReact?.();
+  if (ms <= 0) {
+    reactToastState('sending', t('react.pending', { emoji }));
+    return Promise.resolve(true);
+  }
+  reactToast.querySelector<SVGElement>('.ring-fg')!.style.animationDuration = `${ms}ms`;
+  const undo = reactToast.querySelector<HTMLButtonElement>('.su-undo')!;
+  undo.textContent = t('compose.undo');
+  reactToastState('counting', t('react.pending', { emoji }));
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (ok: boolean) => {
+      if (done) return;
+      done = true;
+      cancelReact = null;
+      clearTimeout(timer);
+      undo.removeEventListener('click', onUndo);
+      document.removeEventListener('keydown', onKey, true);
+      if (ok) reactToastState('sending', t('react.pending', { emoji }));
+      else reactToast.hidden = true;
+      resolve(ok);
+    };
+    const onUndo = () => finish(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z')) {
+        e.preventDefault();
+        e.stopPropagation();
+        finish(false);
+      }
+    };
+    undo.addEventListener('click', onUndo);
+    document.addEventListener('keydown', onKey, true);
+    cancelReact = () => finish(false);
+    const timer = setTimeout(() => finish(true), ms);
+  });
 }
 
 document.addEventListener('mousedown', (e) => {

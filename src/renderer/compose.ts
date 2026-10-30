@@ -924,8 +924,10 @@ window.addEventListener('beforeunload', (e) => {
 
 el('#btn-discard').addEventListener('click', () => window.close());
 
+// Send: Ctrl+Shift+S (Cmd+Shift+S). Not Ctrl+Enter – that generates the text in the AI panel,
+// and a slip would send the mail half-written.
 cform.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.code === 'KeyS') {
     e.preventDefault();
     cform.requestSubmit();
   }

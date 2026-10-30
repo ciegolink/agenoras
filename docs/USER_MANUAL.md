@@ -271,7 +271,7 @@ The German placeholders (`{{Vorname}}` etc.) work as well.
 
 ### Sending and undo
 
-Click **Send →** or press **Ctrl+Enter**. If an undo delay is set (Settings → Senders & signatures → **Sending**, 0–5 seconds), you can click **Undo** (or press Esc / Ctrl+Z) during that time to stop the email and keep editing.
+Click **Send →** or press **Ctrl+Shift+S**. If an undo delay is set (Settings → Senders & signatures → **Sending**, 0–5 seconds), you can click **Undo** (or press Esc / Ctrl+Z) during that time to stop the email and keep editing.
 
 If you close the compose window without sending, Agenoras asks whether you want to discard the draft.
 
@@ -409,7 +409,7 @@ On macOS, use **Cmd** instead of **Ctrl**.
 | Mail | **Esc** | Clear selection, close menus |
 | Mail | Double-click | Open email in its own window |
 | Search | **Enter** / **Esc** | Start / end search |
-| Compose | **Ctrl+Enter** | Send |
+| Compose | **Ctrl+Shift+S** | Send |
 | Compose | **Ctrl+B / I / U** | Bold / italic / underline |
 | Compose | **Ctrl+K** | Insert link |
 | Compose | **Esc** / **Ctrl+Z** | Undo sending (during the delay) |

@@ -208,7 +208,7 @@
   "compose.templateName": "Template name",
   "compose.templateSaved": "Template “{name}” saved.",
   "compose.replaceSubject": "Replace the subject with the template’s?",
-  "compose.ctrlEnter": "Ctrl+Enter sends",
+  "compose.ctrlEnter": "Ctrl+Shift+S sends",
   "compose.discard": "Discard",
   "compose.send": "Send →",
   "compose.sending": "Sending …",
@@ -776,5 +776,7 @@
   "bm.replyOnly": "Reply only to",
   "folder.markAllRead": "Mark all as read",
   "folder.markedRead": "{n} mails marked as read.",
-  "folder.noneUnread": "No unread mails in this folder."
+  "folder.noneUnread": "No unread mails in this folder.",
+  "react.pending": "Sending reaction {emoji} …",
+  "react.cancelled": "Reaction not sent."
 }
