@@ -25,6 +25,14 @@ jobs:
 
       - run: npm ci
 
+      # The macOS runner is arm64, so npm only installs the arm64 llama binaries.
+      # Add the x64 ones too so the universal build works on Intel Macs.
+      - name: Install x64 llama binaries
+        if: runner.os == 'macOS'
+        run: |
+          VER=$(node -p "require('./node_modules/node-llama-cpp/package.json').optionalDependencies['@node-llama-cpp/mac-x64']")
+          npm install --no-save --force "@node-llama-cpp/mac-x64@$VER"
+
       - run: npm run build
 
       # Tag (v1.2.3): build and attach the installers to a draft GitHub release
