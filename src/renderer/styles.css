@@ -420,6 +420,21 @@ dialog.settings:not([open]) { display: none; }
 .c-head h2 { margin: 3px 0; font-family: var(--serif); font-weight: 400; font-size: 28px; line-height: 1.1; }
 .c-head .sub { font-size: 13px; color: var(--text-2); }
 .c-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+#side-contacts .box .vico { display: inline-flex; width: 16px; justify-content: center; color: var(--text-2); }
+/* Distribution lists */
+.label-act { display: flex; align-items: center; justify-content: space-between; }
+.label-act button { border: none; background: none; color: var(--accent-text); font: 700 15px var(--sans); line-height: 1; cursor: pointer; padding: 0 2px; }
+.list-bar { display: flex; align-items: center; gap: 8px; margin: 4px 12px 8px; padding: 10px 12px; border-radius: 10px; background: var(--accent-soft); }
+.list-bar span { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.list-bar b { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list-bar small { font-size: 11.5px; color: var(--text-2); }
+.list-bar .btn { flex: none; }
+.mlist-member .mlist-rm { margin-left: auto; width: 22px; height: 22px; flex: none; border: none; border-radius: 11px; background: none; color: var(--muted); font-size: 15px; cursor: pointer; opacity: 0; }
+.mlist-member:hover .mlist-rm, .mlist-member .mlist-rm:focus-visible { opacity: 1; }
+.mlist-member .mlist-rm:hover { background: rgba(var(--danger-rgb), 0.15); color: var(--danger); }
+#dlg-mlist { width: 520px; }
+#mlist-side .drop-target { outline: var(--bw) dashed var(--accent-text); outline-offset: -2px; background: var(--accent-soft); border-radius: 6px; }
+#mlist-recips { max-height: 220px; overflow-y: auto; text-transform: none; letter-spacing: 0; font-family: var(--sans); }
 .c-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
 .c-field { border: var(--bw) solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .c-field .k { font-family: var(--mono); font-size: 9.5px; letter-spacing: 1.5px; color: var(--muted); }

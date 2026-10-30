@@ -5,6 +5,9 @@ let books: AddressBookInfo[] = [];
 let contacts: Contact[] = [];
 let currentBook: string | null = null;
 let selectedContact = '';
+let pickedContacts = new Set<string>(); // multi-select (Ctrl/Shift+click, Ctrl+A)
+let anchorContact = '';
+let shownContactIds: string[] = [];
 let contactsLoaded = false;
 let editingContact: Contact | null = null;
 
@@ -70,7 +73,7 @@ function renderBooks(): void {
       return `<div class="cal-group"><span>${esc(acc.name.toUpperCase())}</span></div>${items}`;
     })
     .join('');
-  document.querySelector<HTMLElement>('#side-contacts [data-book=""]')?.classList.toggle('active', currentBook === null);
+  document.querySelector<HTMLElement>('#side-contacts [data-book=""]')?.classList.toggle('active', currentBook === null && !currentList);
   el('#contacts-count').textContent = contacts.length ? String(contacts.length) : '';
 }
 
@@ -79,6 +82,7 @@ el('#side-contacts').addEventListener('click', async (e) => {
   const b = tgt.closest<HTMLElement>('[data-book]');
   if (!b) return;
   currentBook = b.dataset.book || null;
+  currentList = null;
   renderBooks();
   renderContacts();
 });
@@ -91,22 +95,26 @@ function contactMatches(c: Contact, q: string): boolean {
 }
 
 function renderContacts(): void {
+  if (currentList) return renderListMembers(); // see lists.ts
   const q = el<HTMLInputElement>('#contact-search').value.trim().toLowerCase();
   const shown = contacts.filter((c) => (!currentBook || c.bookId === currentBook) && contactMatches(c, q));
   let last = '';
+  shownContactIds = shown.map((c) => c.id);
   el('#contact-list').innerHTML = shown
     .map((c) => {
       const letter = (c.name[0] || '#').toUpperCase();
       const head = letter !== last ? `<div class="letter">${esc(letter)}</div>` : '';
       last = letter;
       const sub = c.org || c.emails[0]?.value || c.phones[0]?.value || '';
-      return `${head}<button class="person${c.id === selectedContact ? ' selected' : ''}" data-contact="${esc(c.id)}">
+      return `${head}<button class="person${pickedContacts.has(c.id) || c.id === selectedContact ? ' selected' : ''}" data-contact="${esc(c.id)}" draggable="true">
         <span class="avatar${c.photo ? ' has-img' : ''}">${c.photo ? `<img src="${esc(c.photo)}" alt="">` : esc(initials(c.name))}</span>
         <span class="who"><b>${esc(c.name)}</b><span>${esc(sub)}</span></span>
       </button>`;
     })
     .join('') + (q ? searchElsewhereHtml(el<HTMLInputElement>('#contact-search').value, shown.length > 0) : '');
-  if (selectedContact && !contacts.some((c) => c.id === selectedContact)) {
+  if (pickedContacts.size > 1) {
+    renderMultiDetail();
+  } else if (selectedContact && !contacts.some((c) => c.id === selectedContact)) {
     selectedContact = '';
     el('#contact-detail').innerHTML = `<div class="empty">${esc(t('contacts.noneSelected'))}</div>`;
   } else if (selectedContact) {
@@ -128,6 +136,7 @@ async function showContact(id: string): Promise<void> {
   currentBook = null;
   el<HTMLInputElement>('#contact-search').value = '';
   selectedContact = id;
+  pickedContacts = new Set([id]);
   renderBooks();
   renderContacts();
   document.querySelector(`#contact-list [data-contact="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'center' });
@@ -136,8 +145,76 @@ async function showContact(id: string): Promise<void> {
 el('#contact-list').addEventListener('click', (e) => {
   const id = (e.target as HTMLElement).closest<HTMLElement>('[data-contact]')?.dataset.contact;
   if (!id) return;
-  selectedContact = id;
+  if (e.ctrlKey || e.metaKey) {
+    if (pickedContacts.has(id)) pickedContacts.delete(id);
+    else pickedContacts.add(id);
+  } else if (e.shiftKey && anchorContact && shownContactIds.includes(anchorContact)) {
+    const [a, b] = [shownContactIds.indexOf(anchorContact), shownContactIds.indexOf(id)].sort((x, y) => x - y);
+    pickedContacts = new Set(shownContactIds.slice(a, b + 1));
+  } else {
+    pickedContacts = new Set([id]);
+  }
+  if (!e.shiftKey) anchorContact = id;
+  selectedContact = pickedContacts.size === 1 ? [...pickedContacts][0] : '';
+  if (!pickedContacts.size) el('#contact-detail').innerHTML = `<div class="empty">${esc(t('contacts.noneSelected'))}</div>`;
   renderContacts();
+});
+
+const pickedList = () => contacts.filter((c) => pickedContacts.has(c.id));
+
+// Several contacts selected: write to them or put them on a distribution list
+function renderMultiDetail(): void {
+  const picked = pickedList();
+  const withMail = picked.filter((c) => c.emails.length).length;
+  el('#contact-detail').innerHTML = `
+    <div class="c-head"><div><h2>${esc(t('contacts.picked', { n: picked.length }))}</h2><div class="sub">${esc(t('contacts.pickedMail', { n: withMail }))}</div></div></div>
+    <div class="c-actions">
+      ${withMail ? `<button class="btn primary" data-picked-mail>${esc(t('contacts.writeMail'))} →</button>` : ''}
+      ${withMail ? `<button class="btn ghost" data-mlist-for="">${esc(t('lists.addContact'))}</button>` : ''}
+    </div>
+    <p class="hint">${esc(t('contacts.dragHint'))}</p>`;
+}
+
+// Ctrl+A selects every contact shown, Esc clears the selection
+document.addEventListener('keydown', (e) => {
+  if (el('.app').dataset.view !== 'contacts' || document.querySelector('dialog[open]') || currentList) return;
+  if ((e.target as HTMLElement).closest('input, textarea, select')) return;
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+    e.preventDefault();
+    pickedContacts = new Set(shownContactIds);
+    selectedContact = pickedContacts.size === 1 ? shownContactIds[0] : '';
+    renderContacts();
+  } else if (e.key === 'Escape' && pickedContacts.size > 1) {
+    pickedContacts = new Set();
+    el('#contact-detail').innerHTML = `<div class="empty">${esc(t('contacts.noneSelected'))}</div>`;
+    renderContacts();
+  }
+});
+
+// Drag contacts onto a distribution list (drop handling in lists.ts)
+el('#contact-list').addEventListener('dragstart', (e) => {
+  const row = (e.target as HTMLElement).closest<HTMLElement>('[data-contact]');
+  if (!row || !e.dataTransfer) return;
+  const id = row.dataset.contact!;
+  if (!pickedContacts.has(id)) {
+    pickedContacts = new Set([id]);
+    anchorContact = id;
+    el('#contact-list').querySelectorAll('.person.selected').forEach((r) => r.classList.remove('selected'));
+    row.classList.add('selected');
+  }
+  e.dataTransfer.effectAllowed = 'copy';
+  e.dataTransfer.setData('application/x-agenoras-contacts', JSON.stringify([...pickedContacts]));
+  const ghost = document.createElement('div');
+  ghost.className = 'drag-ghost';
+  ghost.textContent = pickedContacts.size === 1 ? contacts.find((c) => c.id === id)?.name ?? '' : t('contacts.picked', { n: pickedContacts.size });
+  document.body.appendChild(ghost);
+  e.dataTransfer.setDragImage(ghost, 12, 12);
+  setTimeout(() => ghost.remove());
+});
+
+el('#contact-detail').addEventListener('click', (e) => {
+  if (!(e.target as HTMLElement).closest('[data-picked-mail]')) return;
+  openCompose({ to: pickedList().filter((c) => c.emails.length).map((c) => asRecipient({ name: c.name, address: c.emails[0].value })) });
 });
 
 // Detail
@@ -180,6 +257,7 @@ function renderContactDetail(): void {
     <div class="c-actions">
       ${c.emails[0] ? `<button class="btn primary" data-mailto="${esc(c.emails[0].value)}">${esc(t('contacts.writeMail'))} →</button>` : ''}
       <button class="btn ghost" id="btn-contact-edit">${esc(t('btn.edit'))}</button>
+      ${c.emails[0] ? `<button class="btn ghost" data-mlist-for="${esc(c.id)}">${esc(t('lists.addContact'))}</button>` : ''}
     </div>
     ${fields.length ? `<div class="c-fields">${fields.join('')}</div>` : ''}
     ${recentHtml}`;

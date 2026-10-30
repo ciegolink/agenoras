@@ -216,6 +216,17 @@ interface MailDetail {
   attachments: { filename: string; size: number; contentType: string }[];
 }
 
+interface ListMember {
+  name: string;
+  address: string;
+}
+
+interface MailList {
+  id: string;
+  name: string;
+  members: ListMember[];
+}
+
 interface RssFeed {
   id: string;
   name: string;
@@ -528,6 +539,11 @@ interface Window {
       list(): Promise<{ lists: TaskList[]; tasks: Task[]; errors: { accountId: string; message: string }[] }>;
       save(input: TaskInput): Promise<void>;
       delete(id: string): Promise<void>;
+    };
+    lists: {
+      get(): Promise<MailList[]>;
+      save(list: MailList): Promise<MailList[]>;
+      remove(id: string): Promise<MailList[]>;
     };
     rss: {
       feeds(): Promise<RssFeed[]>;

@@ -69,6 +69,8 @@ All versions and release notes: [Releases](https://github.com/ciegolink/agenoras
 **Contacts**
 - CardDAV address books with photo upload, create contacts directly from a mail
 - Local address books without a server
+- Multi-select (Ctrl/Shift+click, Ctrl+A) to write to several contacts at once
+- Distribution lists stored only in the app (`lists.json`): add contacts by drag and drop or from the contact view, also addresses that aren't contacts; offered as a suggestion in the To field; send to all or individually to each
 
 **Feeds**
 - RSS 2.0, RSS 1.0 (RDF) and Atom; enter a feed or just a website address (the feed is discovered automatically)
@@ -166,6 +168,7 @@ User data is stored in `~/.config/agenoras/` (Linux), `%APPDATA%\agenoras\` (Win
 
 - `accounts.json`, `calendars.json`, `contacts.json`: accounts; passwords are encrypted with the OS keychain via Electron `safeStorage`; PINs of private accounts are stored only as a salted scrypt hash
 - `settings.json`: identities, signatures, templates, rules, preferences
+- `lists.json`: distribution lists – exist only on this computer, include them in your backup
 - `rss.json`: feeds (password encrypted like the accounts)
 - `cache.db`: local cache (mail, feed articles and their read state), safe to delete at any time; feed articles are fetched again on the next refresh
 - `pop3.db`: mail of POP3 accounts – the only copy if the server copy is deleted, include it in your backup
@@ -200,6 +203,7 @@ The AI model runs locally in a separate process (`utilityProcess`). Texts are pr
    │  ├─ invites.ts      Meeting invitations (iMIP)
    │  ├─ tasks.ts        CalDAV tasks (VTODO)
    │  ├─ carddav.ts      Address books, vCards
+   │  ├─ lists.ts        Distribution lists (lists.json)
    │  ├─ rss.ts          RSS/Atom feeds: storage, fetching, parsing, article cache
    │  ├─ localdav.ts     Local calendars and address books (no server)
    │  ├─ rules.ts        Mail rules
@@ -226,7 +230,8 @@ The AI model runs locally in a separate process (`utilityProcess`). Texts are pr
       ├─ compose-ai.ts   AI in the compose window: text, subject, proofread, translate
       ├─ calendar.ts     Calendar view
       ├─ tasks.ts        Task view
-      ├─ contacts.ts     Contacts view
+      ├─ contacts.ts     Contacts view, multi-select
+      ├─ lists.ts        Distribution lists: sidebar, dialog, drag and drop
       ├─ rss.ts          Feeds view, add/edit feed dialog
       ├─ agenda.ts       "My day" sidebar
       ├─ labels.ts       Categories

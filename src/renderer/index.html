@@ -64,6 +64,7 @@
         <span class="name" data-i18n="contacts.all"></span><span class="count" id="contacts-count"></span>
       </button>
       <div id="book-list"></div>
+      <div id="mlist-side"></div>
     </div>
 
     <div class="side-part" id="side-tasks">
@@ -331,6 +332,24 @@
   </form>
 </dialog>
 
+<dialog id="dlg-mlist">
+  <form id="form-mlist">
+    <h2 id="mlist-title"></h2>
+    <label><span data-i18n="field.name"></span><input name="name" required data-i18n-ph="lists.namePh" autocomplete="off"></label>
+    <label><span data-i18n="lists.members"></span>
+      <div class="recips" id="mlist-recips"><input class="recip-input" id="mlist-input" list="mlist-suggest" autocomplete="off" data-i18n-ph="lists.addPh"></div>
+    </label>
+    <datalist id="mlist-suggest"></datalist>
+    <p class="hint" data-i18n="lists.addHint"></p>
+    <p class="error" id="mlist-error"></p>
+    <div class="actions">
+      <button type="button" class="btn ghost danger" id="btn-mlist-delete" data-i18n="btn.delete"></button>
+      <button type="button" class="btn ghost" id="btn-mlist-cancel" data-i18n="btn.cancel"></button>
+      <button type="submit" class="btn primary" data-i18n="btn.save"></button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="dlg-contact">
   <form id="form-contact">
     <h2 id="contact-title"></h2>
@@ -526,6 +545,7 @@
 <script src="../../dist/renderer/problems.js"></script>
 <script src="../../dist/renderer/calendar.js"></script>
 <script src="../../dist/renderer/contacts.js"></script>
+<script src="../../dist/renderer/lists.js"></script>
 <script src="../../dist/renderer/tasks.js"></script>
 <script src="../../dist/renderer/rss.js"></script>
 <div class="popup-dim" id="popup-dim" hidden></div>

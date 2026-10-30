@@ -59,6 +59,7 @@ import { allowImages, getIdentity, getSettings, Identity, imagesAllowed, isTrust
 import { listSounds, openSoundFolder, soundData } from './sounds';
 import { flushWinState, loadWinState, trackWinState } from './winstate';
 import { cachedTasks, deleteTask, listTasks, saveTask, TaskInput } from './tasks';
+import { getLists, MailList, removeList, saveList } from './lists';
 import { addFeed, article as rssArticle, cachedItems as cachedRss, listFeeds, NewRssFeed, refreshFeeds, removeFeed, searchItems as searchRss, setRead as setRssRead, updateFeed } from './rss';
 import { runRulesForNew, runRulesNow } from './rules';
 import { parseInvite, sendInvitations, sendReply } from './invites';
@@ -1228,6 +1229,12 @@ ipcMain.handle('contacts:delete', async (_e, url: string) => {
     throw new Error(davError(err));
   }
 });
+
+// Distribution lists
+
+ipcMain.handle('lists:get', () => getLists());
+ipcMain.handle('lists:save', (_e, list: MailList) => saveList(list));
+ipcMain.handle('lists:remove', (_e, id: string) => removeList(String(id)));
 
 // RSS
 ipcMain.handle('rss:feeds', () => listFeeds());

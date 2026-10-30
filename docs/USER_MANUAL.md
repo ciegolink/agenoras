@@ -228,7 +228,7 @@ The toolbar shows icons only; hover over an icon to see what it does.
 
 ### Recipients
 
-Type a name or address into **To**, **Cc** or **Bcc**. Agenoras suggests addresses from your contacts and people you have emailed before. Use the arrow keys and **Enter** or **Tab** to pick one. Separate several recipients with **Enter**, a comma or a semicolon. **Backspace** in an empty field removes the last recipient.
+Type a name or address into **To**, **Cc** or **Bcc**. Agenoras suggests addresses from your contacts and people you have emailed before. Use the arrow keys and **Enter** or **Tab** to pick one. Separate several recipients with **Enter**, a comma or a semicolon. **Backspace** in an empty field removes the last recipient. Type the name of a [distribution list](#distribution-lists) to add all its recipients at once.
 
 ### Sender
 
@@ -355,6 +355,21 @@ The contacts view lists all address books from your CardDAV accounts and local a
 - **Write email** starts a new email to the contact. **Recent emails** shows your latest correspondence.
 - To create a contact from an email, click the sender's name and choose **Add as contact**.
 
+### Selecting several contacts
+
+**Ctrl+click** adds or removes single contacts, **Shift+click** selects a range and **Ctrl+A** selects every contact shown. **Esc** clears the selection. With several contacts selected you can **Write email** to all of them or add them to a distribution list.
+
+### Distribution lists
+
+A distribution list is a named group of recipients for emails, such as "Newsletter" or "Team". Lists are stored only in Agenoras on this computer, not on your contacts server, and can also contain addresses that aren't contacts.
+
+- **Create a list**: click **+** next to **Distribution lists** in the sidebar. Enter a name and add recipients: contacts are suggested as you type, and you can paste several addresses separated by commas.
+- **Add contacts**: drag selected contacts onto a list in the sidebar, or onto **+** to start a new list with them. In a contact, **Add to list** shows all lists; a tick means the contact is already in it, and clicking again removes it. Contacts without an email address are skipped.
+- **Use a list**: click it in the sidebar to see its recipients. **Email list** starts a new email to everyone on it; **Edit** changes the name and recipients; the **×** next to a recipient removes it.
+- When writing an email, type the list's name into **To** and pick it from the suggestions.
+
+When sending, choose **To all** or **Individually to each** on the send button. With **To all**, every recipient sees the other addresses, so for newsletters **Individually to each** is usually the better choice.
+
 ## 10. Feeds
 
 Follow websites, blogs and news sites (RSS 2.0, RSS 1.0 and Atom) right next to your mail. The **Feed** button in the sidebar appears as soon as you have added a feed, and disappears again when you remove the last one.
@@ -447,6 +462,8 @@ On macOS, use **Cmd** instead of **Ctrl**.
 | Mail | **Ctrl+A** | Select all emails in the list |
 | Mail | **Ctrl+click** / **Shift+click** | Select single emails / a range |
 | Mail | **Esc** | Clear selection, close menus |
+| Contacts | **Ctrl+click** / **Shift+click** / **Ctrl+A** | Select single contacts / a range / all |
+| Contacts | **Esc** | Clear the selection |
 | Mail | Double-click | Open email in its own window |
 | Search | **Enter** | Search right away |
 | Search | **Esc** / **×** | Close the search and go back |
@@ -476,6 +493,7 @@ Your data is stored here:
 
 - **Passwords** are encrypted with your system's keychain. PINs of private accounts are stored only as a protected hash.
 - `settings.json` contains signatures, templates, rules and preferences. Back it up if you want to keep them.
+- `lists.json` holds your distribution lists. They exist only on this computer – back the file up.
 - `rss.json` holds your feeds (addresses and encrypted passwords for protected feeds).
 - `cache.db` is a local copy of your mail and feed articles for fast start and offline reading. You can delete it at any time; it is rebuilt from the server.
 - `pop3.db` holds the mail of POP3 accounts. If the copy on the server is deleted, this is the only copy – back it up.

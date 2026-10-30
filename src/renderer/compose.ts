@@ -243,7 +243,7 @@ function commitInput(f: RecipField): void {
 
 // Suggestions from contacts and previous senders
 let suggestField: RecipField | null = null;
-let suggestItems: Recipient[] = [];
+let suggestItems: (Recipient & { members?: Recipient[] })[] = [];
 let suggestIndex = 0;
 const suggestBox = el<HTMLUListElement>('#recip-suggest');
 
@@ -264,13 +264,23 @@ function suggestionSource(): Recipient[] {
   return out;
 }
 
+// Distribution lists (lists.json) offered like a single recipient
+let cLists: MailList[] = [];
+
+function listSuggestions(q: string): (Recipient & { members: Recipient[] })[] {
+  return cLists
+    .filter((l) => l.members.length && l.name.toLowerCase().includes(q))
+    .map((l) => ({ name: t('compose.listSuggest', { name: l.name }), address: t('compose.listMembers', { n: l.members.length }), members: l.members }));
+}
+
 function showSuggest(f: RecipField): void {
   const q = recipInput(f).value.trim().toLowerCase();
   if (!q) return hideSuggest();
   const chosen = new Set(recipients[f].map((r) => r.address.toLowerCase()));
-  suggestItems = suggestionSource()
-    .filter((r) => !chosen.has(r.address.toLowerCase()) && (r.name.toLowerCase().includes(q) || r.address.toLowerCase().includes(q)))
-    .slice(0, 6);
+  suggestItems = [
+    ...listSuggestions(q).slice(0, 3),
+    ...suggestionSource().filter((r) => !chosen.has(r.address.toLowerCase()) && (r.name.toLowerCase().includes(q) || r.address.toLowerCase().includes(q))),
+  ].slice(0, 7);
   if (!suggestItems.length) return hideSuggest();
   suggestField = f;
   suggestIndex = 0;
@@ -294,7 +304,7 @@ function pickSuggestion(i: number): void {
   const r = suggestItems[i];
   if (!f || !r) return;
   recipInput(f).value = '';
-  addRecipients(f, [r]);
+  addRecipients(f, r.members ?? [r]);
   hideSuggest();
   recipInput(f).focus();
 }
@@ -1103,6 +1113,10 @@ function showSent(): Promise<void> {
   undoMs = Math.min(5, Math.max(0, (settings as { sendDelay?: number }).sendDelay ?? 2)) * 1000;
   cContacts = book.contacts;
   cSenders = inbox.map((m) => ({ name: m.from, address: m.fromAddress }));
+  window.api.lists
+    .get()
+    .then((l) => (cLists = l))
+    .catch(() => {});
   window.api
     .knownAddresses()
     .then((list) => (cKnown = list))
