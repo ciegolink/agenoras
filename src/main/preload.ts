@@ -115,6 +115,17 @@ contextBridge.exposeInMainWorld('api', {
     save: (input: unknown) => ipcRenderer.invoke('tasks:save', input),
     delete: (id: string) => ipcRenderer.invoke('tasks:delete', id),
   },
+  rss: {
+    feeds: () => ipcRenderer.invoke('rss:feeds'),
+    add: (input: unknown) => ipcRenderer.invoke('rss:add', input),
+    update: (id: string, input: unknown) => ipcRenderer.invoke('rss:update', id, input),
+    remove: (id: string) => ipcRenderer.invoke('rss:remove', id),
+    cached: () => ipcRenderer.invoke('rss:cached'),
+    list: () => ipcRenderer.invoke('rss:list'),
+    article: (key: string) => ipcRenderer.invoke('rss:article', key),
+    search: (query: string) => ipcRenderer.invoke('rss:search', query),
+    setRead: (keys: string[], read: boolean) => ipcRenderer.invoke('rss:read', keys, read),
+  },
   contacts: {
     listAccounts: () => ipcRenderer.invoke('contacts:accounts:list'),
     addAccount: (input: unknown) => ipcRenderer.invoke('contacts:accounts:add', input),

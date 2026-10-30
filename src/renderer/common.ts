@@ -2,8 +2,7 @@
 
 const el = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector(sel) as T;
 
-// ---------- Language (strings from lang/<language>.json, delivered by the main process) ----------
-
+// Language (strings from lang/<language>.json, delivered by the main process)
 const I18N = window.i18n ?? { lang: 'en', locale: 'en-GB', strings: {} };
 const LOCALE = I18N.locale;
 // First day of the week (1 = Monday, 0 = Sunday, 6 = Saturday) – Settings → Appearance
@@ -26,8 +25,7 @@ function applyI18n(root: ParentNode = document): void {
 
 document.documentElement.lang = I18N.lang;
 
-// ---------- Custom title bar: move (CSS), minimize, maximize, close ----------
-
+// Custom title bar: move (CSS), minimize, maximize, close
 const WIN_ICONS = {
   min: '<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1 5h8" stroke="currentColor" stroke-width="1.2"/></svg>',
   max: '<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect x="1" y="1" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>',
@@ -125,8 +123,7 @@ function textToHtml(text: string): string {
   return paras.map((p) => `<p>${esc(p).replace(/\n/g, '<br>')}</p>`).join('') || '<p><br></p>';
 }
 
-// ---------- File icons for attachments ----------
-
+// File icons for attachments
 const FILE_COLORS: [RegExp, string][] = [
   [/^pdf$/, '#E0574B'],
   [/^(docx?|odt|rtf|pages|txt|md)$/, '#7FA6CF'],
@@ -167,8 +164,7 @@ function fileIcon(name: string): string {
   </svg>`;
 }
 
-// ---------- Sanitize HTML (allow list): editor, templates, signatures ----------
-
+// Sanitize HTML (allow list): editor, templates, signatures
 const ALLOWED_TAGS = new Set(['P', 'BR', 'DIV', 'SPAN', 'B', 'STRONG', 'I', 'EM', 'U', 'S', 'STRIKE', 'A', 'UL', 'OL', 'LI', 'BLOCKQUOTE', 'H1', 'H2', 'H3', 'H4', 'PRE', 'CODE', 'IMG', 'HR', 'FONT', 'SUB', 'SUP', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TD', 'TH']);
 const DROP_TAGS = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'LINK', 'META', 'TITLE', 'HEAD', 'SVG', 'MATH', 'TEMPLATE', 'NOSCRIPT', 'FORM', 'INPUT', 'BUTTON', 'TEXTAREA', 'SELECT', 'VIDEO', 'AUDIO', 'CANVAS']);
 // Styles: enough for signatures (table layouts), but no positioning and no url()

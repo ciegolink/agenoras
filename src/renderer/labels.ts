@@ -26,8 +26,7 @@ async function toggleLabel(keys: string[], labelId: string): Promise<void> {
   setStatus(t(on ? 'labels.added' : 'labels.removed', { name, n: list.length }));
 }
 
-// ---------- Dialog: new / edit ----------
-
+// Dialog: new / edit
 const lblDlg = el<HTMLDialogElement>('#dlg-label');
 const lblForm = el<HTMLFormElement>('#form-label');
 

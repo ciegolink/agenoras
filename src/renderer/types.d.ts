@@ -216,6 +216,32 @@ interface MailDetail {
   attachments: { filename: string; size: number; contentType: string }[];
 }
 
+interface RssFeed {
+  id: string;
+  name: string;
+  url: string;
+  siteUrl: string;
+  username: string;
+}
+
+interface RssFeedInput {
+  name: string;
+  url: string;
+  username: string;
+  password: string;
+}
+
+interface RssItem {
+  key: string;
+  feedId: string;
+  title: string;
+  link: string;
+  date: string;
+  author: string;
+  snippet: string;
+  read: boolean;
+}
+
 interface CalAccount {
   id: string;
   name: string;
@@ -424,8 +450,8 @@ interface Window {
     };
     listFolders(accountId: string): Promise<FolderInfo[]>;
     cachedFolders(accountId: string): Promise<FolderInfo[]>;
-    moveMails(accountId: string, folder: string, uids: number[], target: string): Promise<void>;
-    deleteMails(accountId: string, folder: string, uids: number[]): Promise<'trash' | 'deleted'>;
+    moveMails(accountId: string, folder: string, uids: number[], target: string): Promise<{ target: string; uids: number[] }>;
+    deleteMails(accountId: string, folder: string, uids: number[]): Promise<{ result: 'trash' | 'deleted'; target?: string; uids?: number[] }>;
     emptyTrash(accountId: string): Promise<number>;
     markFolderSeen(accountId: string, folder: string): Promise<number>;
     react(accountId: string, folder: string, uid: number, emoji: string): Promise<string>;
@@ -502,6 +528,17 @@ interface Window {
       list(): Promise<{ lists: TaskList[]; tasks: Task[]; errors: { accountId: string; message: string }[] }>;
       save(input: TaskInput): Promise<void>;
       delete(id: string): Promise<void>;
+    };
+    rss: {
+      feeds(): Promise<RssFeed[]>;
+      add(input: RssFeedInput): Promise<RssFeed>;
+      update(id: string, input: RssFeedInput): Promise<RssFeed>;
+      remove(id: string): Promise<void>;
+      cached(): Promise<{ feeds: RssFeed[]; items: RssItem[] }>;
+      list(): Promise<{ feeds: RssFeed[]; items: RssItem[]; errors: { feedId: string; message: string }[] }>;
+      article(key: string): Promise<string>;
+      search(query: string): Promise<RssItem[]>;
+      setRead(keys: string[], read: boolean): Promise<void>;
     };
     contacts: {
       listAccounts(): Promise<CalAccount[]>;

@@ -59,6 +59,7 @@ import { allowImages, getIdentity, getSettings, Identity, imagesAllowed, isTrust
 import { listSounds, openSoundFolder, soundData } from './sounds';
 import { flushWinState, loadWinState, trackWinState } from './winstate';
 import { cachedTasks, deleteTask, listTasks, saveTask, TaskInput } from './tasks';
+import { addFeed, article as rssArticle, cachedItems as cachedRss, listFeeds, NewRssFeed, refreshFeeds, removeFeed, searchItems as searchRss, setRead as setRssRead, updateFeed } from './rss';
 import { runRulesForNew, runRulesNow } from './rules';
 import { parseInvite, sendInvitations, sendReply } from './invites';
 import { getAvatars, hasRemoteImages, inlineRemoteImages, loadSignatureFile } from './remote';
@@ -215,8 +216,7 @@ function showWindow(): void {
 
 app.on('second-instance', showWindow);
 
-// ---------- Tray ----------
-
+// Tray
 let tray: Tray | null = null;
 let quitting = false;
 
@@ -264,8 +264,7 @@ function createTray(): void {
   tray.on('click', showWindow); // Windows/macOS; Ubuntu only shows the menu
 }
 
-// ---------- Desktop notifications ----------
-
+// Desktop notifications
 const liveNotifications = new Set<Notification>(); // keep a reference, otherwise the click gets lost
 
 function showNotification(title: string, body: string, icon?: Electron.NativeImage, onClick?: () => void): void {
@@ -313,8 +312,7 @@ async function notifyNewMail(accountId: string): Promise<void> {
   }
 }
 
-// ---------- Compose window (one window per mail, like Outlook) ----------
-
+// Compose window (one window per mail, like Outlook)
 const composeOpts = new Map<number, unknown>();
 // Open popups: the main window darkens behind them (like a modal dialog)
 const popups = new Set<BrowserWindow>();
@@ -402,8 +400,7 @@ function openComposeWindow(opts: unknown): void {
   });
 }
 
-// ---------- Mail in its own window (double-click in the list) ----------
-
+// Mail in its own window (double-click in the list)
 const viewerOpts = new Map<number, unknown>();
 
 function openMailWindow(ref: { accountId: string; folder: string; uid: number }): void {
@@ -456,8 +453,7 @@ ipcMain.handle('compose:done', (e, status: string) => {
   BrowserWindow.fromWebContents(e.sender)?.destroy(); // sent → close without asking
 });
 
-// ---------- Mail accounts ----------
-
+// Mail accounts
 ipcMain.handle('accounts:list', () => listAccounts());
 
 ipcMain.handle('accounts:add', async (_e, input: NewAccount) => {
@@ -503,8 +499,7 @@ ipcMain.handle('accounts:update', async (_e, id: string, input: AccountUpdate) =
 
 ipcMain.handle('accounts:color', (_e, id: string, color: string) => setAccountColor(id, color));
 
-// ---------- Private accounts (PIN, auto-lock) ----------
-
+// Private accounts (PIN, auto-lock)
 let lastActivity = Date.now();
 
 // Close the connection, wipe the local copies (mails, bodies, starred list) and
@@ -554,8 +549,7 @@ setInterval(() => {
   if (due.length) lockPrivate(due.map((a) => a.id)).catch((err) => console.error('auto-lock:', err));
 }, 15_000);
 
-// ---------- Problem log (warning sign in the title bar) ----------
-
+// Problem log (warning sign in the title bar)
 setOnLogChange((state) => {
   for (const w of BrowserWindow.getAllWindows()) w.webContents.send('log:changed', state);
 });
@@ -571,8 +565,7 @@ ipcMain.handle('accounts:remove', async (_e, id: string) => {
   forgetPopAccount(id); // POP3: the local mailbox belongs to the account
 });
 
-// ---------- Mail ----------
-
+// Mail
 const accountsFor = (accountId: string | null) => listAccounts().filter((a) => !accountId || a.id === accountId);
 
 // Folder tree of an account (with unread counts); offline from the cache
@@ -775,8 +768,9 @@ ipcMain.handle('mail:move', async (_e, accountId: string, folder: string, uids: 
       if (!junk) throw new Error(t('err.noJunk'));
       target = junk;
     }
-    await moveMessages(acc, folder, list, target);
+    const moved = await moveMessages(acc, folder, list, target);
     for (const uid of list) removeCachedMail(folderKey(accountId, folder), uid);
+    return { target, uids: moved };
   } catch (err) {
     throw new Error(friendlyError(err));
   }
@@ -839,8 +833,7 @@ ipcMain.handle('mail:junkToTrash', async (_e, accountId: string) => {
   }
 });
 
-// ---------- Mini-KI (offline) ----------
-
+// Mini-KI (offline)
 ipcMain.handle('ai:state', () => aiState());
 ipcMain.handle('ai:enable', (_e, on: boolean) => setAiEnabled(!!on));
 ipcMain.handle('ai:model', (_e, id: string) => setAiModel(String(id)));
@@ -854,8 +847,7 @@ ipcMain.handle('ai:proofread', (_e, text: string) => proofread(text));
 ipcMain.handle('ai:write', (_e, instruction: string, ctx?: { original?: string; subject?: string }) => writeText(instruction, ctx));
 ipcMain.handle('ai:translate', (_e, text: string, target: string) => translate(String(text ?? ''), String(target)));
 
-// ---------- Reactions: a short reply mail whose content is the emoji ----------
-
+// Reactions: a short reply mail whose content is the emoji
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🎉'];
 
 // HTML-only mails: rough text for the quote (no DOM in the main process)
@@ -917,8 +909,7 @@ ipcMain.handle('mail:react', async (_e, accountId: string, folder: string, uid: 
   return to;
 });
 
-// ---------- Attachments ----------
-
+// Attachments
 // Only files the user picked or dropped in may be sent
 const approvedFiles = new Set<string>();
 
@@ -994,8 +985,7 @@ ipcMain.handle('mail:send', async (e, mail: OutgoingMail) => {
   }
 });
 
-// ---------- Settings: senders/aliases, signatures, templates ----------
-
+// Settings: senders/aliases, signatures, templates
 ipcMain.handle('settings:get', () => getSettings());
 ipcMain.handle('settings:identities', async (_e, list: Identity[]) => {
   // embed external images in HTML signatures – recipients see them without loading anything
@@ -1052,8 +1042,7 @@ nativeTheme.on('updated', () => {
   for (const w of BrowserWindow.getAllWindows()) w.setBackgroundColor(bgColor());
 });
 
-// ---------- DAV accounts (calendar + contacts) ----------
-
+// DAV accounts (calendar + contacts)
 async function addDav(kind: DavKind, input: NewDavAccount) {
   if (!input?.serverUrl || !input.username || !input.password) throw new Error(t('err.fillAll'));
   try {
@@ -1101,8 +1090,7 @@ async function updateDav(kind: DavKind, id: string, input: NewDavAccount) {
 ipcMain.handle('cal:accounts:update', (_e, id: string, input: NewDavAccount) => updateDav('caldav', id, input));
 ipcMain.handle('contacts:accounts:update', (_e, id: string, input: NewDavAccount) => updateDav('carddav', id, input));
 
-// ---------- Calendar (CalDAV) ----------
-
+// Calendar (CalDAV)
 ipcMain.handle('cal:accounts:list', () => listDavAccounts('caldav'));
 ipcMain.handle('cal:accounts:add', (_e, input: NewDavAccount) => addDav('caldav', input));
 ipcMain.handle('cal:accounts:addLocal', (_e, name: string) => addLocalDavAccount('caldav', String(name ?? '')));
@@ -1190,8 +1178,7 @@ ipcMain.handle('cal:delete', async (_e, url: string, occurrence?: string, cancel
   }
 });
 
-// ---------- Tasks (CalDAV VTODO) ----------
-
+// Tasks (CalDAV VTODO)
 ipcMain.handle('tasks:cached', () => cachedTasks());
 ipcMain.handle('tasks:list', () => listTasks());
 ipcMain.handle('tasks:save', async (_e, input: TaskInput) => {
@@ -1209,8 +1196,7 @@ ipcMain.handle('tasks:delete', async (_e, id: string) => {
   }
 });
 
-// ---------- Contacts (CardDAV) ----------
-
+// Contacts (CardDAV)
 ipcMain.handle('contacts:accounts:list', () => listDavAccounts('carddav'));
 ipcMain.handle('contacts:accounts:add', (_e, input: NewDavAccount) => addDav('carddav', input));
 ipcMain.handle('contacts:accounts:addLocal', (_e, name: string) => addLocalDavAccount('carddav', String(name ?? '')));
@@ -1243,8 +1229,18 @@ ipcMain.handle('contacts:delete', async (_e, url: string) => {
   }
 });
 
-// ---------- Startup / shutdown ----------
+// RSS
+ipcMain.handle('rss:feeds', () => listFeeds());
+ipcMain.handle('rss:add', (_e, input: NewRssFeed) => addFeed(input));
+ipcMain.handle('rss:update', (_e, id: string, input: NewRssFeed) => updateFeed(id, input));
+ipcMain.handle('rss:remove', (_e, id: string) => removeFeed(id));
+ipcMain.handle('rss:cached', () => cachedRss());
+ipcMain.handle('rss:list', () => refreshFeeds());
+ipcMain.handle('rss:search', (_e, query: string) => searchRss(String(query ?? '')));
+ipcMain.handle('rss:article', (_e, key: string) => rssArticle(String(key)));
+ipcMain.handle('rss:read', (_e, keys: string[], read: boolean) => setRssRead(Array.isArray(keys) ? keys.map(String) : [], !!read));
 
+// Startup / shutdown
 // New mail: rules first (move, mark read …), then notify – moved mail is not reported
 async function rulesFor(accountId: string): Promise<void> {
   const acc = getAccount(accountId);

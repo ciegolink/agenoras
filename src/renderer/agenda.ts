@@ -42,8 +42,7 @@ function applyAgenda(): void {
   renderAgendaTasks();
 }
 
-// ---------- Calendar ----------
-
+// Calendar
 const agKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 async function loadAgendaEvents(force = false): Promise<void> {
@@ -140,8 +139,7 @@ el('#dlg-event').addEventListener('close', () => {
   if (agenda.on && agenda.cal) setTimeout(() => loadAgendaEvents(true), 300);
 });
 
-// ---------- Tasks ----------
-
+// Tasks
 function renderAgendaTasks(): void {
   if (!agenda.on || !agenda.tasks) return;
   const box = el('#ag-tasks');
@@ -209,8 +207,7 @@ el('#ag-tasks').addEventListener('submit', async (e) => {
   }
 });
 
-// ---------- Toggles ----------
-
+// Toggles
 el('#btn-agenda').addEventListener('click', () => {
   agenda.on = !agenda.on;
   if (agenda.on && !agenda.cal && !agenda.tasks) agenda.cal = agenda.tasks = true;

@@ -1,10 +1,10 @@
 # Agenoras
-Desktop mail, calendar, contacts and tasks in one app, built by [CiegoLink](https://ciegolink.com).
+Desktop mail, calendar, contacts, tasks and news feeds in one app, built by [CiegoLink](https://ciegolink.com).
 
 <img width="100%" alt="main" src="screenshots/agenorasmain.jpg" />
 
 
-Agenoras is an Electron + TypeScript client for standard protocols: IMAP or POP3 and SMTP for mail, CalDAV for calendars and tasks, CardDAV for contacts. It works with Nextcloud, iCloud, Gmail (app password), Dovecot/Postfix hosting and most other providers. Calendars, tasks and contacts can also be kept locally without a server. An optional offline AI writes, proofreads and translates mail on your own computer. The user interface is available in German and English.
+Agenoras is an Electron + TypeScript client for standard protocols: IMAP or POP3 and SMTP for mail, CalDAV for calendars and tasks, CardDAV for contacts, RSS/Atom for news feeds. It works with Nextcloud, iCloud, Gmail (app password), Dovecot/Postfix hosting and most other providers. Calendars, tasks and contacts can also be kept locally without a server. An optional offline AI writes, proofreads and translates mail on your own computer. The user interface is available in German and English.
 
 [User manual](docs/USER_MANUAL.md) · [Wiki](https://github.com/ciegolink/agenoras/wiki) · [Issues](https://github.com/ciegolink/agenoras/issues) · [ciegolink.com](https://ciegolink.com) · [agenoras.com](https://agenoras.com)
 
@@ -36,8 +36,9 @@ All versions and release notes: [Releases](https://github.com/ciegolink/agenoras
 - Folder tree per account with unread counts; expand/collapse state is remembered
 - Right-click on a folder: mark all as read; empty the trash; move all spam to the trash
 - Conversations: replies are grouped under the newest mail and can be expanded; switched on or off per account
-- Search with a progress indicator: mails (current folder or everywhere, full text on the server) plus appointments, contacts and tasks, filterable by type; filters for unread, attachments and starred mail
+- Filter bar per folder: all/unread, attachments, starred, plus a quick filter by sender and subject that offers the full search when nothing matches
 - Star (`\Flagged`), categories (colored labels), spam/not spam, archive, delete, drag and drop onto folders
+- Ctrl+Z moves deleted, moved, archived or spam-marked mail back to its folder (new UIDs via UIDPLUS, Message-ID lookup as fallback)
 - Multi-select (Ctrl/Shift+click, Ctrl+A), context menu, double-click opens a mail in its own window
 - Right-click in a mail: reply, reply all, reply to a single participant, reactions, copy, translate
 - Reactions (👍 ❤️ 😂 …) are sent as a short reply mail that quotes the original
@@ -69,6 +70,17 @@ All versions and release notes: [Releases](https://github.com/ciegolink/agenoras
 - CardDAV address books with photo upload, create contacts directly from a mail
 - Local address books without a server
 
+**Feeds**
+- RSS 2.0, RSS 1.0 (RDF) and Atom; enter a feed or just a website address (the feed is discovered automatically)
+- Optional login (HTTP Basic) for protected feeds, password encrypted like account passwords
+- Feeds view with unread counts, all/unread filter, full-text filter, mark all read; only shown once a feed exists
+- Articles cached for offline reading (up to 300 per feed), shown sanitized in the sandboxed frame, images embedded by the main process
+- Refreshed when opened, with F5 and every 30 minutes
+
+**Search**
+- One search field in the title bar (Ctrl+K / Ctrl+F) for mails (full text on the server, all folders, all or one account), appointments, contacts, tasks and feed articles
+- Own search page: hits by type with counts in the sidebar, mail preview on the right; × or Esc returns to the previous view
+
 **Offline AI (optional)**
 - Runs entirely on your computer with [Ministral 3 3B](https://huggingface.co/mistralai/Ministral-3-3B-Instruct-2512) by Mistral AI; no cloud, no data leaves the device
 - Generate a mail text from a short description; when replying, the AI knows the original mail and answers in its language
@@ -79,6 +91,7 @@ All versions and release notes: [Releases](https://github.com/ciegolink/agenoras
 
 **General**
 - Local SQLite cache for fast startup and offline reading
+- Same filter bar design in mail, feeds, contacts and tasks
 - Light and dark theme, three font sizes, configurable week start
 - Window size, position and column widths are remembered
 - About dialog with version info and links (gear menu → About Agenoras)
@@ -153,14 +166,15 @@ User data is stored in `~/.config/agenoras/` (Linux), `%APPDATA%\agenoras\` (Win
 
 - `accounts.json`, `calendars.json`, `contacts.json`: accounts; passwords are encrypted with the OS keychain via Electron `safeStorage`; PINs of private accounts are stored only as a salted scrypt hash
 - `settings.json`: identities, signatures, templates, rules, preferences
-- `cache.db`: local cache, safe to delete at any time
+- `rss.json`: feeds (password encrypted like the accounts)
+- `cache.db`: local cache (mail, feed articles and their read state), safe to delete at any time; feed articles are fetched again on the next refresh
 - `pop3.db`: mail of POP3 accounts – the only copy if the server copy is deleted, include it in your backup
 - `local.db`: local calendars, tasks and address books – the only copy, include it in your backup
 - `ai.json`, `ai-models/`: AI settings and the downloaded model (delete the model under Settings → AI)
 
 Data from earlier versions (folder `ciegolink-mail`) is copied over automatically on first start; the old folder can be deleted afterwards.
 
-HTML mail is rendered in a sandboxed frame without scripts under a strict Content Security Policy. Remote content is fetched only by the main process and only on request.
+HTML mail and feed articles are rendered in a sandboxed frame without scripts under a strict Content Security Policy. Remote content is fetched only by the main process: for mail only on request, for feed articles automatically when an article is opened.
 
 While a private account is locked it does not appear anywhere (no mails, search hits or notifications), and its locally cached mail is removed. After a restart, every private account starts locked.
 
@@ -186,6 +200,7 @@ The AI model runs locally in a separate process (`utilityProcess`). Texts are pr
    │  ├─ invites.ts      Meeting invitations (iMIP)
    │  ├─ tasks.ts        CalDAV tasks (VTODO)
    │  ├─ carddav.ts      Address books, vCards
+   │  ├─ rss.ts          RSS/Atom feeds: storage, fetching, parsing, article cache
    │  ├─ localdav.ts     Local calendars and address books (no server)
    │  ├─ rules.ts        Mail rules
    │  ├─ cache.ts        SQLite cache (node:sqlite)
@@ -205,13 +220,14 @@ The AI model runs locally in a separate process (`utilityProcess`). Texts are pr
       ├─ mailview.html   Mail in its own window
       ├─ styles.css
       ├─ common.ts       Shared helpers, i18n, HTML sanitizer
-      ├─ renderer.ts     Mail view
+      ├─ renderer.ts     Mail view, search page
       ├─ reader.ts       Mail display (reading pane and mail window)
       ├─ compose.ts      Editor, recipients, attachments, sending
       ├─ compose-ai.ts   AI in the compose window: text, subject, proofread, translate
       ├─ calendar.ts     Calendar view
       ├─ tasks.ts        Task view
       ├─ contacts.ts     Contacts view
+      ├─ rss.ts          Feeds view, add/edit feed dialog
       ├─ agenda.ts       "My day" sidebar
       ├─ labels.ts       Categories
       ├─ problems.ts     Problem log dialog
@@ -231,7 +247,7 @@ UI strings live in `lang/<code>.json`. The app uses the system language if a fil
 
 ## Tech stack
 
-[Electron](https://www.electronjs.org/), TypeScript, [ImapFlow](https://github.com/postalsys/imapflow), [Nodemailer](https://nodemailer.com/), [mailparser](https://github.com/nodemailer/mailparser), [tsdav](https://github.com/natelindev/tsdav), [ical.js](https://github.com/kewisch/ical.js), `node:sqlite`, [node-llama-cpp](https://github.com/withcatai/node-llama-cpp).
+[Electron](https://www.electronjs.org/), TypeScript, [ImapFlow](https://github.com/postalsys/imapflow), [Nodemailer](https://nodemailer.com/), [mailparser](https://github.com/nodemailer/mailparser), [tsdav](https://github.com/natelindev/tsdav), [ical.js](https://github.com/kewisch/ical.js), [xml-js](https://github.com/nashwaan/xml-js), `node:sqlite`, [node-llama-cpp](https://github.com/withcatai/node-llama-cpp).
 
 The optional offline AI uses [Ministral 3 3B Instruct](https://huggingface.co/mistralai/Ministral-3-3B-Instruct-2512) © Mistral AI, licensed under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0) (GGUF quantization by [bartowski](https://huggingface.co/bartowski/mistralai_Ministral-3-3B-Instruct-2512-GGUF)). The model is not part of the app; it is downloaded on request and verified with SHA-256.
 

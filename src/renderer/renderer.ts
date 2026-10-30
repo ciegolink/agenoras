@@ -10,13 +10,16 @@ let anchorKey = ''; // anchor for Shift+click
 let shownKeys: string[] = []; // currently visible mails (after search)
 let currentMsg: MailDetail | null = null;
 let listFilter: 'all' | 'unread' | 'attach' | 'flagged' = 'all'; // filter above the list (also applies to search hits)
-let searchScope: 'folder' | 'all' = 'folder'; // search: current folder or everywhere
+let searchAccount: string | null = null; // null = all accounts
+let viewBeforeSearch: View = 'mail';
 let searchResults: MailSummary[] | null = null; // hits of the server search (full text)
 let searchSeq = 0;
-let searchKind: 'all' | 'mail' | 'event' | 'contact' | 'task' = 'all'; // search: which kind of hits is shown
+type SearchKind = 'all' | 'mail' | 'event' | 'contact' | 'task' | 'feed';
+let searchKind: SearchKind = 'all'; // search: which kind of hits is shown
 let eventHits: CalEvent[] = []; // search hits from the calendars
 let contactHits: Contact[] = []; // search hits from the address books
 let taskHits: Task[] = []; // search hits from the task lists
+let feedHits: RssItem[] = [];
 let readDelay = 3; // seconds until an opened mail counts as read (0 = at once, -1 = only by hand); Settings → Accounts
 let readTimer: number | undefined;
 // typing = waiting for the first (local) hits · server = mails are still being searched on the server
@@ -52,8 +55,7 @@ function setStatus(text: string): void {
   el('#status').textContent = text;
 }
 
-// ---------- Accounts and folders ----------
-
+// Accounts and folders
 let currentFolder = 'INBOX';
 const folderCache = new Map<string, FolderInfo[]>();
 
@@ -186,6 +188,7 @@ function markActive(): void {
   if (inVirtual()) document.querySelectorAll<HTMLElement>('.side .folder.active').forEach((f) => f.classList.remove('active'));
   const acc = currentAccount ? accountOf(currentAccount) : null;
   const lbl = labelView ? labels.find((l) => l.id === labelView) : null;
+  if (el('.app').dataset.view === 'search') return renderVirtualList();
   el('#list-heading').textContent = flaggedView ? t('mail.flaggedView') : lbl ? lbl.name : acc ? folderLabel(currentAccount, currentFolder) : t('folder.inbox');
   el('#list-title').textContent = acc && !inVirtual() ? `${acc.name}.` : t('mail.allAccounts');
   renderVirtualList();
@@ -224,12 +227,43 @@ async function loadFlagged(): Promise<void> {
   }
 }
 
+// Hint below a quick filter to run the full search instead
+function searchElsewhereHtml(raw: string, found: boolean): string {
+  const q = raw.trim();
+  if (q.length < 2) return '';
+  return found
+    ? `<button type="button" class="hit-more search-all-link" data-search-all="${esc(q)}">${esc(t('search.notHere', { q }))}</button>`
+    : `<div class="list-empty">${esc(t('search.nothingHere'))}<br><button type="button" class="btn ghost" data-search-all="${esc(q)}">${esc(t('search.everywhereBtn', { q }))}</button></div>`;
+}
+
+function searchEverywhere(q: string): void {
+  const input = el<HTMLInputElement>('#search');
+  input.value = q;
+  input.dispatchEvent(new Event('input'));
+}
+
+document.addEventListener('click', (e) => {
+  const q = (e.target as HTMLElement).closest<HTMLElement>('[data-search-all]')?.dataset.searchAll;
+  if (q) searchEverywhere(q);
+});
+
+function clearQuickFilter(): void {
+  el<HTMLInputElement>('#quick-filter').value = '';
+}
+
+el('#quick-filter').addEventListener('input', () => renderList());
+el('#quick-filter').addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  clearQuickFilter();
+  renderList();
+});
+
 function openVirtual(kind: string): void {
   flaggedView = kind === 'flagged';
   labelView = kind.startsWith('label:') ? kind.slice(6) : null;
   currentAccount = null;
   currentFolder = 'INBOX';
-  resetSearch();
+  clearQuickFilter();
   clearReader();
   renderAccounts();
   loadMails();
@@ -240,8 +274,7 @@ function updateCounts(): void {
   if (!currentAccount) el('#count-all').textContent = unseen ? String(unseen) : '';
 }
 
-// ---------- Mail list ----------
-
+// Mail list
 async function loadVirtual(): Promise<void> {
   const want = flaggedView ? 'flagged' : `label:${labelView}`;
   const still = () => (flaggedView ? 'flagged' : `label:${labelView}`) === want;
@@ -308,7 +341,7 @@ document.addEventListener('externalprefs', () => {
   renderList();
 });
 
-// ---------- Conversations (threads), switchable per account ----------
+// Conversations (threads), switchable per account
 // Mails belong together when one answers the other (In-Reply-To). Older cached mails do not know that
 // yet, so a "Re:/AW:/Fwd:/WG:" subject also joins the mails with the same subject.
 
@@ -433,15 +466,26 @@ function mailRowHtml(m: MailSummary, o: { showTo: boolean; listFolder: string; a
   </button>`;
 }
 
+const isSearchView = () => el('.app').dataset.view === 'search';
+
 function renderList(): void {
-  const q = el<HTMLInputElement>('#search').value.trim().toLowerCase();
-  // While the server search runs: filter locally by sender/subject
-  let shown = searchResults ?? (q ? mails.filter((m) => `${m.subject} ${m.from} ${m.fromAddress} ${m.toName ?? ''}`.toLowerCase().includes(q)) : mails);
+  // used by the mail view and the search page
+  const searchPage = isSearchView();
+  const q = searchPage ? el<HTMLInputElement>('#search').value.trim().toLowerCase() : '';
+  // quick filter, local only
+  const qf = searchPage ? '' : el<HTMLInputElement>('#quick-filter').value.trim().toLowerCase();
+  if (searchPage) renderSearchSide(q);
+  if (searchPage && q.length < 2) {
+    shownKeys = [];
+    el('#mail-list').innerHTML = `<div class="list-empty">${esc(t('search.enterTerm'))}</div>`;
+    return;
+  }
+  let shown = searchPage ? (searchResults ?? []) : qf ? mails.filter((m) => `${m.from} ${m.fromAddress} ${m.toName ?? ''} ${m.subject}`.toLowerCase().includes(qf)) : mails;
   if (listFilter === 'unread') shown = shown.filter((m) => !m.seen);
   else if (listFilter === 'attach') shown = shown.filter((m) => m.hasAttachments);
   else if (listFilter === 'flagged') shown = shown.filter((m) => m.flagged);
   if (labelFilter) shown = shown.filter((m) => (mailLabels[labelKey(m)] ?? []).includes(labelFilter!));
-  const ctxNow = `${currentAccount}|${currentFolder}|${q}|${listFilter}|${labelFilter}`;
+  const ctxNow = `${searchPage ? `search:${searchAccount}` : currentAccount}|${currentFolder}|${q}|${qf}|${listFilter}|${labelFilter}`;
   const animateNew = ctxNow === listContext && listKeysBefore.size > 0 && !reduceMotion();
   listContext = ctxNow;
   // In Sent/Drafts the recipient matters, not yourself
@@ -449,47 +493,43 @@ function renderList(): void {
   const showTo = use === '\\Sent' || use === '\\Drafts';
   const listFolder = currentAccount ? currentFolder : 'INBOX';
 
-  el('#scope-seg').hidden = !q;
-  el('#kind-seg').hidden = !q;
   // Search also finds appointments and contacts (not with the mail-only filters)
   const others = !!q && listFilter === 'all' && !labelFilter;
   const evs = others ? eventHits : [];
   const cts = others ? contactHits : [];
   const tks = others ? taskHits : [];
+  const fds = others ? feedHits : [];
   // counts only once the search is finished – the interim numbers would jump around
   const phase = q ? searchPhase : 'idle';
   const busy = phase !== 'idle';
   const typing = phase === 'typing';
-  el('#kind-n-mail').textContent = q && !busy ? String(shown.length) : '';
-  el('#kind-n-event').textContent = evs.length && !typing ? String(evs.length) : '';
-  el('#kind-n-contact').textContent = cts.length && !typing ? String(cts.length) : '';
-  el('#kind-n-task').textContent = tks.length && !typing ? String(tks.length) : '';
+  if (searchPage) paintSearchCounts({ mail: busy ? null : shown.length, event: typing ? null : evs.length, contact: typing ? null : cts.length, task: typing ? null : tks.length, feed: typing ? null : fds.length });
   if (q && searchKind !== 'all' && searchKind !== 'mail') shown = [];
   const progressRow = (text: string) => `<div class="search-progress" role="status"><span class="search-spin"></span>${esc(text)}</div>`;
   // first the fast hits; the mails from the server are added below them later
   const serverRow = phase === 'server' && (searchKind === 'all' || searchKind === 'mail') ? progressRow(t('search.runningServer')) : '';
-  const extraHtml = (typing ? progressRow(t('search.runningAll')) : '') + (q ? searchHitsHtml(evs, cts, tks, shown.length) : '') + serverRow;
+  const extraHtml = (typing ? progressRow(t('search.runningAll')) : '') + (q ? searchHitsHtml(evs, cts, tks, fds, shown.length) : '') + serverRow;
   // Conversations: only in normal folders, not while searching or in filtered/virtual views
-  const rows = !q && !inVirtual() ? buildThreads(shown) : shown;
+  const rows = !q && !qf && !inVirtual() ? buildThreads(shown) : shown;
   closedThreads.clear(); // filled again while the rows are drawn
   const rowOpts = { showTo, listFolder, animateNew };
   shownKeys = rows.flatMap((row) => (isThread(row) ? (expandedThreads.has(row.id) ? row.mails : [row.mails[0]]) : [row]).map(mailKey));
   paintThreadToggle();
-  if (!accounts.length) {
+  if (!accounts.length && !extraHtml && !searchPage) {
     el('#mail-list').innerHTML = `<div class="list-empty">${esc(t('mail.noAccount'))}<br><button class="btn ghost" data-action="add-account">${esc(t('settings.addMailAccount'))}</button></div>`;
     return;
   }
+  const qfRaw = searchPage ? '' : el<HTMLInputElement>('#quick-filter').value;
   el('#mail-list').innerHTML =
     extraHtml +
     (rows
       .map((row) => (isThread(row) ? threadRowsHtml(row, rowOpts) : mailRowHtml(row, rowOpts)))
-      .join('') || (extraHtml || busy ? '' : `<div class="list-empty">${esc(q ? t('mail.noHits') : listFilter !== 'all' || labelFilter ? t('mail.noFiltered') : t('mail.folderEmpty'))}</div>`));
+      .join('') + (qf && rows.length ? searchElsewhereHtml(qfRaw, true) : '') || (extraHtml || busy ? '' : qf ? searchElsewhereHtml(qfRaw, false) : `<div class="list-empty">${esc(q ? t('mail.noHits') : listFilter !== 'all' || labelFilter ? t('mail.noFiltered') : t('mail.folderEmpty'))}</div>`));
   listKeysBefore = new Set(shownKeys);
   if (typeof renderLabelSidebar === 'function') renderLabelSidebar();
 }
 
-// ---------- Right-click on a folder: all read; trash / spam as a whole ----------
-
+// Right-click on a folder: all read; trash / spam as a whole
 const folderMenu = document.createElement('div');
 folderMenu.className = 'ctx-menu';
 folderMenu.setAttribute('role', 'menu');
@@ -562,8 +602,7 @@ folderMenu.addEventListener('click', async (e) => {
   }
 });
 
-// ---------- Reading pane ----------
-
+// Reading pane
 function clearReader(text = t('mail.noneSelected')): void {
   clearTimeout(readTimer);
   currentMsg = null;
@@ -648,8 +687,7 @@ async function openMail(key: string, loadImages = false): Promise<void> {
   fillInviteCalendars();
 }
 
-// ---------- Selection: Ctrl+click single, Shift+click range, Ctrl+A all ----------
-
+// Selection: Ctrl+click single, Shift+click range, Ctrl+A all
 function paintSelection(): void {
   // Only toggle classes – no rebuild (would cancel a running drag)
   document.querySelectorAll<HTMLElement>('#mail-list .mail').forEach((r) => r.classList.toggle('selected', selected.has(r.dataset.key!)));
@@ -698,8 +736,7 @@ function selectRange(toKey: string): void {
   selected = new Set(shownKeys.slice(from, to + 1));
 }
 
-// ---------- Move / archive / delete (one or more mails) ----------
-
+// Move / archive / delete (one or more mails)
 // Hide rows: delete slides left (red), move/archive slides right
 function animateRowsOut(keys: string[], kind: 'delete' | 'move'): Promise<void> {
   const rows = keys.map((k) => document.querySelector<HTMLElement>(`#mail-list [data-key="${CSS.escape(k)}"]`)).filter(Boolean) as HTMLElement[];
@@ -713,6 +750,35 @@ function animateRowsOut(keys: string[], kind: 'delete' | 'move'): Promise<void> 
 }
 
 const isTrash = (accountId: string, folder: string) => folderInfo(accountId, folder)?.specialUse === '\\Trash';
+
+// Undo (Ctrl+Z) for delete and move
+interface UndoMove {
+  accountId: string;
+  from: string;
+  to: string;
+  uids: number[]; // UIDs in the target folder
+}
+const undoStack: UndoMove[][] = [];
+const UNDO_KEY = window.api.platform === 'darwin' ? '⌘Z' : 'Ctrl+Z';
+
+async function undoRemove(): Promise<void> {
+  const step = undoStack.pop();
+  if (!step) return;
+  const moves = step.filter((m) => m.uids.length);
+  if (!moves.length) return void setStatus(t('mail.undoFailed'));
+  try {
+    for (const m of moves) await window.api.moveMails(m.accountId, m.to, m.uids, m.from);
+  } catch (err) {
+    setStatus(errMsg(err));
+    return;
+  }
+  const n = moves.reduce((sum, m) => sum + m.uids.length, 0);
+  const folder = folderLabel(moves[0].accountId, moves[0].from);
+  setStatus(n === 1 ? t('mail.undone', { folder }) : t('mail.undoneN', { n, folder }));
+  listContext = ''; // redraw without the fade-in animation
+  await loadMails();
+  for (const id of new Set(moves.map((m) => m.accountId))) loadFolders(id);
+}
 
 async function removeMails(keys: string[], action: 'delete' | 'archive' | { move: string }): Promise<void> {
   if (!keys.length) return;
@@ -730,16 +796,21 @@ async function removeMails(keys: string[], action: 'delete' | 'archive' | { move
   }
   const firstIdx = Math.min(...keys.map((k) => shownKeys.indexOf(k)).filter((i) => i >= 0));
   let deletedForever = false;
+  const undo: UndoMove[] = [];
   const anim = animateRowsOut(keys, action === 'delete' ? 'delete' : 'move');
   try {
     for (const g of groups.values()) {
       if (action === 'delete') {
-        if ((await window.api.deleteMails(g.accountId, g.folder, g.uids)) === 'deleted') deletedForever = true;
+        const res = await window.api.deleteMails(g.accountId, g.folder, g.uids);
+        if (res.result === 'deleted') deletedForever = true;
+        else if (res.target) undo.push({ accountId: g.accountId, from: g.folder, to: res.target, uids: res.uids ?? [] });
       } else {
-        await window.api.moveMails(g.accountId, g.folder, g.uids, action === 'archive' ? '\\Archive' : action.move);
+        const res = await window.api.moveMails(g.accountId, g.folder, g.uids, action === 'archive' ? '\\Archive' : action.move);
+        if (res?.target) undo.push({ accountId: g.accountId, from: g.folder, to: res.target, uids: res.uids });
       }
     }
   } catch (err) {
+    if (undo.length) undoStack.push(undo);
     setStatus(errMsg(err));
     await anim;
     listContext = ''; // redraw without the fade-in animation
@@ -747,6 +818,10 @@ async function removeMails(keys: string[], action: 'delete' | 'archive' | { move
     return;
   }
   await anim;
+  if (undo.length) {
+    undoStack.push(undo);
+    if (undoStack.length > 20) undoStack.shift();
+  }
   const one = n === 1;
   if (action === 'delete') setStatus(deletedForever ? (one ? t('mail.deletedForever') : t('mail.deletedForeverN', { n })) : one ? t('mail.movedToTrash') : t('mail.movedToTrashN', { n }));
   else if (action === 'archive') setStatus(one ? t('mail.archived') : t('mail.archivedN', { n }));
@@ -754,6 +829,7 @@ async function removeMails(keys: string[], action: 'delete' | 'archive' | { move
     const folder = action.move === '\\Junk' ? t('folder.junk') : folderLabel([...groups.values()][0].accountId, action.move);
     setStatus(one ? t('mail.movedTo', { folder }) : t('mail.movedToN', { n, folder }));
   }
+  if (undo.length) setStatus(`${el('#status').textContent} ${t('mail.undoHint', { key: UNDO_KEY })}`);
 
   const gone = new Set(keys);
   mails = mails.filter((m) => !gone.has(mailKey(m)));
@@ -768,12 +844,15 @@ async function removeMails(keys: string[], action: 'delete' | 'archive' | { move
 }
 
 document.addEventListener('keydown', (e) => {
-  if (document.querySelector('dialog[open]') || el('.app').dataset.view !== 'mail') return;
+  if (document.querySelector('dialog[open]') || !['mail', 'search'].includes(el('.app').dataset.view!)) return;
   const tgt = e.target as HTMLElement;
   if (tgt.closest('input, textarea, select, [contenteditable="true"]')) return;
   if (e.key === 'Delete' && selected.size) {
     e.preventDefault();
     removeMails([...selected], 'delete');
+  } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z' && undoStack.length) {
+    e.preventDefault();
+    void undoRemove();
   } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && shownKeys.length) {
     e.preventDefault();
     selected = new Set(shownKeys);
@@ -785,8 +864,7 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// ---------- Drag & drop: drag mails onto a folder ----------
-
+// Drag & drop: drag mails onto a folder
 let dragKeys: string[] = [];
 
 el('#mail-list').addEventListener('dragstart', (e) => {
@@ -856,8 +934,7 @@ el('#account-list').addEventListener('drop', (e) => {
   removeMails(keys, { move: target.folder });
 });
 
-// ---------- Account dialog ----------
-
+// Account dialog
 const dlg = el<HTMLDialogElement>('#dlg-add');
 const form = el<HTMLFormElement>('#form-add');
 const field = (name: string) => form.elements.namedItem(name) as HTMLInputElement;
@@ -931,8 +1008,7 @@ function openEditMailAccount(id: string): void {
 }
 el('#btn-cancel').addEventListener('click', () => dlg.close());
 
-// ---------- Private account (PIN) in the account dialog ----------
-
+// Private account (PIN) in the account dialog
 const AUTOLOCK_CHOICES = [1, 2, 5, 10, 15, 30];
 const lockSelect = () => form.elements.namedItem('autoLockMin') as HTMLSelectElement;
 
@@ -961,8 +1037,7 @@ function readPrivacyFields(wasPrivate: boolean): { on: boolean; pin: string; min
   return { on, pin, min };
 }
 
-// ---------- Incoming mail: IMAP or POP3 ----------
-
+// Incoming mail: IMAP or POP3
 const protoSelect = () => form.elements.namedItem('protocol') as HTMLSelectElement;
 const isPopForm = () => protoSelect().value === 'pop3';
 const POP_DAYS = [0, 7, 14, 30, 90, 365];
@@ -1091,7 +1166,7 @@ form.addEventListener('submit', async (e) => {
   }
 });
 
-// ---------- Open the compose window: new, reply, forward ----------
+// Open the compose window: new, reply, forward
 // The window itself (editor, recipients, attachments, sending) lives in compose.html / compose.ts.
 
 function openCompose(opts: ComposeOpts = {}): void {
@@ -1167,8 +1242,7 @@ LIGHT_MQ.addEventListener('change', () => {
   if (selectedKey) openMail(selectedKey);
 });
 
-// ---------- Events ----------
-
+// Events
 el('.side').addEventListener('click', (e) => {
   const v = (e.target as HTMLElement).closest<HTMLElement>('[data-virtual]')?.dataset.virtual;
   if (v) return openVirtual(v);
@@ -1196,7 +1270,7 @@ el('.side').addEventListener('click', (e) => {
   }
   currentAccount = account;
   currentFolder = account ? folder : 'INBOX';
-  resetSearch();
+  clearQuickFilter();
   clearReader();
   renderAccounts();
   loadMails();
@@ -1208,7 +1282,7 @@ el('#mail-list').addEventListener('click', (e) => {
   const tgt = e.target as HTMLElement;
   if (tgt.closest('[data-action="add-account"]')) return openAddMailAccount();
   const go = tgt.closest<HTMLElement>('[data-kind-go]')?.dataset.kindGo;
-  if (go) return setSearchKind(go as typeof searchKind);
+  if (go) return setSearchKind(go as SearchKind);
   const evIdx = tgt.closest<HTMLElement>('[data-hit-event]')?.dataset.hitEvent;
   if (evIdx !== undefined) {
     const ev = eventHits[Number(evIdx)];
@@ -1226,6 +1300,13 @@ el('#mail-list').addEventListener('click', (e) => {
       openTaskDialog(taskItems.find((x) => x.id === task.id) ?? task);
     }
     return;
+  }
+  const feedKey = tgt.closest<HTMLElement>('[data-hit-feed]')?.dataset.hitFeed;
+  if (feedKey) {
+    setView('rss');
+    currentFeed = null;
+    renderRss();
+    return void showRssItem(feedKey);
   }
   const contactId = tgt.closest<HTMLElement>('[data-hit-contact]')?.dataset.hitContact;
   if (contactId) {
@@ -1266,8 +1347,7 @@ el('#mail-list').addEventListener('mousedown', (e) => {
 // Double-click: mail in its own window
 let lastListClick = { key: '', at: 0 }; // double-click detection, see the click handler above
 
-// ---------- Filters and search (full text on the server) ----------
-
+// Filters and search (full text on the server)
 let searchTimer: number | undefined;
 
 // Search running: ring in the field; while waiting for the first hits the old ones are dimmed
@@ -1279,10 +1359,12 @@ function setSearchPhase(phase: typeof searchPhase): void {
 
 function resetSearch(): void {
   el<HTMLInputElement>('#search').value = '';
+  el('#search-clear').hidden = true;
   searchResults = null;
   eventHits = [];
   contactHits = [];
   taskHits = [];
+  feedHits = [];
   searchKind = 'all';
   paintSegs();
   searchSeq++;
@@ -1316,25 +1398,26 @@ async function runSearch(): Promise<void> {
   setSearchPhase('typing');
   renderList();
   setStatus(t('search.running'));
-  const folder = searchScope === 'all' ? null : currentAccount ? currentFolder : 'INBOX';
   const ql = q.toLowerCase();
   type MailRes = { mails: MailSummary[] | null; errors: { accountId: string; message: string }[]; failed?: string };
   const server: Promise<MailRes> = accounts.length
-    ? window.api.searchMail(currentAccount, folder, q).catch((err) => ({ mails: null, errors: [], failed: errMsg(err) }))
+    ? window.api.searchMail(searchAccount, null, q).catch((err) => ({ mails: null, errors: [], failed: errMsg(err) }))
     : Promise.resolve({ mails: [], errors: [] });
   const events = ensureCalendars()
     .then(() => window.api.cal.search(q, visibleCalIds()))
     .catch(() => [] as CalEvent[]);
-  const [local, cts, tks, evsQuick] = await Promise.all([
-    accounts.length ? window.api.searchCachedMail(currentAccount, folder, q).catch(() => [] as MailSummary[]) : Promise.resolve([] as MailSummary[]),
+  const [local, cts, tks, fds, evsQuick] = await Promise.all([
+    accounts.length ? window.api.searchCachedMail(searchAccount, null, q).catch(() => [] as MailSummary[]) : Promise.resolve([] as MailSummary[]),
     quickContacts(ql),
     quickTasks(ql),
+    rssFeeds.length ? window.api.rss.search(q).catch(() => [] as RssItem[]) : Promise.resolve([] as RssItem[]),
     withTimeout(events, 800, null), // calendar server slow → appointments follow later
   ]);
   if (seq !== searchSeq) return; // user kept typing in the meantime
   searchResults = local;
   contactHits = cts;
   taskHits = tks;
+  feedHits = fds;
   eventHits = evsQuick ?? [];
   setSearchPhase('server');
   renderList();
@@ -1357,16 +1440,16 @@ async function runSearch(): Promise<void> {
   renderList();
   const errs = mailRes.errors.map((er) => `${accountOf(er.accountId)?.email ?? ''}: ${er.message}`);
   if (mailRes.failed) errs.unshift(mailRes.failed);
-  const n = (searchResults?.length ?? 0) + eventHits.length + contactHits.length + taskHits.length;
+  const n = (searchResults?.length ?? 0) + eventHits.length + contactHits.length + taskHits.length + feedHits.length;
   setStatus([t('search.done', { n }), ...errs].join(' · '));
 }
 
 const HIT_PREVIEW = 3; // under "All": this many appointments/contacts, the rest behind "show more"
 
 // Contacts and appointments above the mail hits, clearly marked by kind
-function searchHitsHtml(evs: CalEvent[], cts: Contact[], tks: Task[], nMails: number): string {
-  const show = (k: typeof searchKind) => searchKind === 'all' || searchKind === k;
-  const group = (kind: 'contact' | 'event' | 'task', n: number, rows: string[]) => {
+function searchHitsHtml(evs: CalEvent[], cts: Contact[], tks: Task[], fds: RssItem[], nMails: number): string {
+  const show = (k: SearchKind) => searchKind === 'all' || searchKind === k;
+  const group = (kind: 'contact' | 'event' | 'task' | 'feed', n: number, rows: string[]) => {
     if (!n || !show(kind)) return '';
     const more = searchKind === 'all' && n > HIT_PREVIEW ? `<button type="button" class="hit-more" data-kind-go="${kind}">${esc(t('search.more', { n: n - HIT_PREVIEW }))}</button>` : '';
     return `<div class="hit-head"><span>${esc(t(`search.kind.${kind}`))}</span><span class="n">${n}</span></div>${rows.join('')}${more}`;
@@ -1400,12 +1483,23 @@ function searchHitsHtml(evs: CalEvent[], cts: Contact[], tks: Task[], nMails: nu
       <span class="hit-tag">${esc(t('search.tag.task'))}</span>
     </button>`;
   });
-  const html = group('contact', cts.length, contactRows) + group('event', evs.length, eventRows) + group('task', tks.length, taskRows);
+  const feedRows = limit(fds).map((item) => {
+    const feed = feedOf(item.feedId);
+    const sub = [item.date ? fmtShort(item.date) : '', feed?.name].filter(Boolean).join(' · ');
+    return `<button type="button" class="hit hit-feed${item.read ? ' read' : ''}" data-hit-feed="${esc(item.key)}" style="--ec:${feedColor(item.feedId)}">
+      <span class="hit-cal">${svgIco('<path d="M5 11a8 8 0 0 1 8 8M5 5a14 14 0 0 1 14 14"/><circle cx="6" cy="18" r="1.5"/>', 16)}</span>
+      <span class="hit-body"><b>${esc(item.title || t('rss.untitled'))}</b><span>${esc(sub)}</span></span>
+      <span class="hit-tag">${esc(t('search.tag.feed'))}</span>
+    </button>`;
+  });
+  const html = group('contact', cts.length, contactRows) + group('event', evs.length, eventRows) + group('task', tks.length, taskRows) + group('feed', fds.length, feedRows);
   // Heading for the mails only when other kinds are listed above them
   return html && searchKind === 'all' && nMails ? `${html}<div class="hit-head"><span>${esc(t('search.kind.mail'))}</span><span class="n">${nMails}</span></div>` : html;
 }
 
 el('#search').addEventListener('input', () => {
+  el('#search-clear').hidden = !el<HTMLInputElement>('#search').value;
+  openSearchPage();
   searchResults = null;
   searchSeq++;
   const pending = el<HTMLInputElement>('#search').value.trim().length >= 2;
@@ -1413,6 +1507,7 @@ el('#search').addEventListener('input', () => {
     eventHits = [];
     contactHits = [];
     taskHits = [];
+    feedHits = [];
   }
   setSearchPhase(pending ? 'typing' : 'idle');
   renderList();
@@ -1420,35 +1515,115 @@ el('#search').addEventListener('input', () => {
   if (pending) searchTimer = window.setTimeout(runSearch, 300);
   else setStatus('');
 });
+// Ctrl+K / Ctrl+F focus the search
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || !['k', 'f'].includes(e.key.toLowerCase())) return;
+  if (document.querySelector('dialog[open]')) return;
+  e.preventDefault();
+  el<HTMLInputElement>('#search').focus();
+  el<HTMLInputElement>('#search').select();
+});
+
 el('#search').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     clearTimeout(searchTimer);
     runSearch();
   } else if (e.key === 'Escape') {
-    clearTimeout(searchTimer);
-    resetSearch();
-    renderList();
-    setStatus('');
+    closeSearch();
   }
+});
+
+// X / Escape: close search, back to previous view
+function closeSearch(): void {
+  clearTimeout(searchTimer);
+  resetSearch();
+  setStatus('');
+  if (isSearchView()) setView(viewBeforeSearch);
+  el<HTMLInputElement>('#search').blur();
+}
+el('#search-clear').addEventListener('click', closeSearch);
+
+// focusing a filled search field shows the results again
+el('#search').addEventListener('focus', () => {
+  if (el<HTMLInputElement>('#search').value.trim().length >= 2) openSearchPage();
+});
+
+const searchPhaseBusy = () => searchPhase !== 'idle';
+const searchHitCount = () => (searchResults?.length ?? 0) + eventHits.length + contactHits.length + taskHits.length + feedHits.length;
+
+function openSearchPage(): void {
+  const view = el('.app').dataset.view as View;
+  if (view === 'search') return;
+  viewBeforeSearch = view;
+  setView('search');
+}
+
+// Search page sidebar
+const SEARCH_KINDS: [SearchKind, string][] = [
+  ['all', '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>'],
+  ['mail', '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>'],
+  ['event', '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>'],
+  ['contact', '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>'],
+  ['task', '<rect x="4" y="4" width="16" height="16" rx="4"/><path d="m8 12 3 3 5-6"/>'],
+  ['feed', '<path d="M5 11a8 8 0 0 1 8 8M5 5a14 14 0 0 1 14 14"/><circle cx="6" cy="18" r="1.5"/>'],
+];
+
+function renderSearchSide(q: string): void {
+  el('#list-heading').textContent = t('search.title');
+  el('#list-title').textContent = q.length >= 2 ? `„${el<HTMLInputElement>('#search').value.trim()}“` : '';
+  el('#search-kinds').innerHTML = SEARCH_KINDS.filter(([k]) => k !== 'feed' || rssFeeds.length)
+    .map(([k, ico]) => `<button class="box${searchKind === k ? ' active' : ''}" data-skind="${k}"><span class="vico">${svgIco(ico, 15)}</span><span class="name">${esc(t(`search.kind.${k}`))}</span><span class="count" data-skind-n="${k}"></span></button>`)
+    .join('');
+  el('#search-accounts').innerHTML = [
+    `<button class="box${searchAccount === null ? ' active' : ''}" data-sacc=""><span class="name">${esc(t('search.allAccounts'))}</span></button>`,
+    ...accounts.map((a) => `<button class="box${searchAccount === a.id ? ' active' : ''}" data-sacc="${esc(a.id)}"><span class="dot" style="background:${colorOf(a.id)}"></span><span class="name">${esc(accLabel(a))}</span></button>`),
+  ].join('');
+}
+
+// null while still searching
+function paintSearchCounts(n: Record<'mail' | 'event' | 'contact' | 'task' | 'feed', number | null>): void {
+  const known = Object.values(n).every((v) => v !== null);
+  const total = Object.values(n).reduce<number>((sum, v) => sum + (v ?? 0), 0);
+  document.querySelectorAll<HTMLElement>('#search-kinds [data-skind-n]').forEach((c) => {
+    const k = c.dataset.skindN as keyof typeof n | 'all';
+    const v = k === 'all' ? (known ? total : null) : n[k];
+    c.textContent = v ? String(v) : '';
+  });
+}
+
+el('#side-search').addEventListener('click', (e) => {
+  const tgt = e.target as HTMLElement;
+  const kind = tgt.closest<HTMLElement>('[data-skind]')?.dataset.skind as SearchKind | undefined;
+  if (kind) return setSearchKind(kind);
+  const acc = tgt.closest<HTMLElement>('[data-sacc]')?.dataset.sacc;
+  if (acc === undefined || (acc || null) === searchAccount) return;
+  searchAccount = acc || null;
+  searchResults = null;
+  renderList();
+  runSearch();
+});
+
+// mail and search share the list and reader
+document.addEventListener('viewchange', (e) => {
+  const v = (e as CustomEvent<View>).detail;
+  if (v !== 'mail' && v !== 'search') return;
+  clearReader();
+  setStatus(v === 'search' && el<HTMLInputElement>('#search').value.trim().length >= 2 && !searchPhaseBusy() ? t('search.done', { n: searchHitCount() }) : '');
+  listContext = '';
+  if (v === 'mail') renderAccounts();
+  renderList();
 });
 
 function paintSegs(): void {
   document.querySelectorAll<HTMLElement>('#filter-seg [data-filter]').forEach((b) => b.classList.toggle('on', b.dataset.filter === listFilter));
-  document.querySelectorAll<HTMLElement>('#scope-seg [data-scope]').forEach((b) => b.classList.toggle('on', b.dataset.scope === searchScope));
-  document.querySelectorAll<HTMLElement>('#kind-seg [data-kind]').forEach((b) => b.classList.toggle('on', b.dataset.kind === searchKind));
 }
 
-function setSearchKind(kind: typeof searchKind): void {
+function setSearchKind(kind: SearchKind): void {
   searchKind = kind;
   paintSegs();
   renderList();
   el('#mail-list').scrollTop = 0;
 }
-
-el('#kind-seg').addEventListener('click', (e) => {
-  const k = (e.target as HTMLElement).closest<HTMLElement>('[data-kind]')?.dataset.kind as typeof searchKind | undefined;
-  if (k && k !== searchKind) setSearchKind(k);
-});
 
 el('#filter-seg').addEventListener('click', (e) => {
   const f = (e.target as HTMLElement).closest<HTMLElement>('[data-filter]')?.dataset.filter;
@@ -1458,18 +1633,7 @@ el('#filter-seg').addEventListener('click', (e) => {
   renderList();
 });
 
-el('#scope-seg').addEventListener('click', (e) => {
-  const sc = (e.target as HTMLElement).closest<HTMLElement>('[data-scope]')?.dataset.scope as 'folder' | 'all' | undefined;
-  if (!sc || sc === searchScope) return;
-  searchScope = sc;
-  paintSegs();
-  searchResults = null;
-  renderList();
-  runSearch();
-});
-
-// ---------- Read / unread ----------
-
+// Read / unread
 async function markSeen(keys: string[], seen: boolean): Promise<void> {
   const groups = new Map<string, MailRef & { uids: number[] }>();
   for (const k of keys) {
@@ -1492,8 +1656,7 @@ async function markSeen(keys: string[], seen: boolean): Promise<void> {
   for (const id of new Set([...groups.values()].map((g) => g.accountId))) if (folderCache.has(id)) loadFolders(id);
 }
 
-// ---------- Star (important) ----------
-
+// Star (important)
 async function toggleFlag(keys: string[], force?: boolean): Promise<void> {
   const list = keys.map(summaryOf).filter(Boolean) as MailSummary[];
   const on = force ?? !list.every((m) => m.flagged);
@@ -1526,8 +1689,7 @@ async function toggleFlag(keys: string[], force?: boolean): Promise<void> {
   }
 }
 
-// ---------- Context menu (right-click on a mail) ----------
-
+// Context menu (right-click on a mail)
 const ctx = document.createElement('div');
 ctx.className = 'ctx-menu';
 ctx.hidden = true;
@@ -1628,8 +1790,7 @@ window.addEventListener('blur', hideCtx);
 window.addEventListener('resize', hideCtx);
 el('#mail-list').addEventListener('scroll', hideCtx);
 
-// ---------- Title bar: refresh, new (mail / event / contact) ----------
-
+// Title bar: refresh, new (mail / event / contact)
 async function refreshAll(): Promise<void> {
   const btn = el('#tb-refresh');
   if (btn.classList.contains('spin')) return;
@@ -1639,6 +1800,8 @@ async function refreshAll(): Promise<void> {
     if (view === 'cal') await loadCalendars();
     else if (view === 'contacts') await loadContacts();
     else if (view === 'tasks') await loadTasks();
+    else if (view === 'rss') await (rssLoading = loadRss());
+    else if (view === 'search') await runSearch();
     else {
       await loadAccounts();
       await Promise.all([
@@ -1693,8 +1856,7 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// ---------- Sound for new mail (default or per account, see Settings → Sounds) ----------
-
+// Sound for new mail (default or per account, see Settings → Sounds)
 let notify: NotifySettings = { enabled: true, sound: 'app:newMail_Arcade.wav', volume: 0.7, perAccount: {} };
 const soundCache = new Map<string, string | null>();
 let audioCtx: AudioContext | null = null;
@@ -1778,7 +1940,7 @@ window.api.onOpenMail(async (ref) => {
   setView('mail');
   currentAccount = ref.accountId;
   currentFolder = ref.folder;
-  resetSearch();
+  clearQuickFilter();
   listFilter = 'all';
   paintSegs();
   renderAccounts();
@@ -1797,9 +1959,7 @@ window.api.onNewMail((accountId, grew) => {
   }, 800);
 });
 
-// ---------- Private accounts: unlock with PIN, lock (manually or automatically) ----------
-
-
+// Private accounts: unlock with PIN, lock (manually or automatically)
 function renderPrivacy(): void {
   el('#privacy-row').innerHTML =
     (privacy.locked ? `<button class="box priv-btn" data-privacy="unlock"><span class="vico">${svgIco(LOCK_ICO, 14)}</span><span class="name">${esc(t('privacy.unlockBtn'))}</span></button>` : '') +
@@ -1868,9 +2028,8 @@ const activityPing = () => {
 };
 for (const ev of ['pointerdown', 'keydown', 'wheel', 'mousemove']) document.addEventListener(ev, activityPing, { capture: true, passive: true });
 
-// ---------- Views (mail / calendar / contacts) ----------
-
-type View = 'mail' | 'cal' | 'contacts' | 'tasks';
+// Views
+type View = 'mail' | 'search' | 'cal' | 'contacts' | 'tasks' | 'rss';
 
 function setView(view: View): void {
   el('.app').dataset.view = view;
@@ -1883,8 +2042,7 @@ document.querySelectorAll<HTMLElement>('.view-btn[data-view]').forEach((b) => {
   b.addEventListener('click', () => setView(b.dataset.view as View));
 });
 
-// ---------- Column widths (drag the dividers, double-click = default; saved) ----------
-
+// Column widths (drag the dividers, double-click = default; saved)
 const COLS = { side: { def: 228, min: 180, max: 380 }, list: { def: 340, min: 280, max: 640 } } as const;
 type ColName = keyof typeof COLS;
 const READER_MIN = 380;
@@ -1945,8 +2103,7 @@ document.querySelectorAll<HTMLElement>('.col-resizer').forEach((h) => {
   });
 });
 
-// ---------- Startup ----------
-
+// Startup
 (async () => {
   setView('mail');
   paintSegs();

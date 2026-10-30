@@ -310,8 +310,7 @@ async function check(res: Response): Promise<void> {
   if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
 }
 
-// ---------- Save ----------
-
+// Save
 const DAY_MS = 86_400_000;
 
 // New times: wall-clock shift of an existing time (keeps the series' time zone/TZID)
@@ -592,8 +591,7 @@ export function calEntry(url: string): { accountId: string; cal: DAVCalendar } |
   return calIndex.get(url);
 }
 
-// ---------- Accept invitations, apply replies, search ----------
-
+// Accept invitations, apply replies, search
 export function eventIcs(url: string): string | null {
   return rawObjects.get(url)?.data ?? null;
 }

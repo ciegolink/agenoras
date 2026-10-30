@@ -40,8 +40,7 @@ function tx(fn: () => void): void {
   }
 }
 
-// ---------- Mail ----------
-
+// Mail
 // Cache key per account and folder (INBOX keeps the old key = account ID)
 export const folderKey = (accountId: string, folder = 'INBOX') => (folder === 'INBOX' ? accountId : `${accountId}#${folder}`);
 
@@ -128,8 +127,7 @@ export function forgetMailAccount(accountId: string): void {
   });
 }
 
-// ---------- Addresses: who wrote to me / whom I wrote to (suggestions when composing) ----------
-
+// Addresses: who wrote to me / whom I wrote to (suggestions when composing)
 interface AddrSource {
   from?: string;
   fromAddress?: string;
@@ -179,8 +177,7 @@ export function cachedByMessageIds<T>(ids: string[]): T[] {
   return out;
 }
 
-// ---------- Key/value (calendar list, contacts) ----------
-
+// Key/value (calendar list, contacts)
 export function getKv<T>(key: string): T | null {
   const row = open().prepare('SELECT value FROM kv WHERE key = ?').get(key) as { value: string } | undefined;
   return row ? JSON.parse(row.value) : null;
@@ -190,8 +187,20 @@ export function setKv(key: string, value: unknown): void {
   open().prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)').run(key, JSON.stringify(value));
 }
 
-// ---------- Calendar (per calendar and week) ----------
+// Keys with a given prefix whose value contains text. LIKE ignores case for ASCII only.
+export function searchKv(prefix: string, text: string): string[] {
+  const esc = (v: string) => v.replace(/[\\%_]/g, '\\$&');
+  const rows = open().prepare("SELECT key FROM kv WHERE key LIKE ? ESCAPE '\\' AND value LIKE ? ESCAPE '\\'").all(`${esc(prefix)}%`, `%${esc(text)}%`) as { key: string }[];
+  return rows.map((r) => r.key.slice(prefix.length));
+}
 
+export function delKv(keys: string[]): void {
+  if (!keys.length) return;
+  const st = open().prepare('DELETE FROM kv WHERE key = ?');
+  tx(() => keys.forEach((k) => st.run(k)));
+}
+
+// Calendar (per calendar and week)
 export function cachedWeek<T>(calendarIds: string[], weekStart: string): T[] {
   if (!calendarIds.length) return [];
   const marks = calendarIds.map(() => '?').join(',');

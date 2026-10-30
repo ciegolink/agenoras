@@ -86,8 +86,7 @@ export function forgetCardAccount(id: string): void {
   for (const [url, v] of bookIndex) if (v.accountId === id) bookIndex.delete(url);
 }
 
-// ---------- Read vCard ----------
-
+// Read vCard
 function typeOf(p: ICAL.Property): string {
   const raw = p.getParameter('type');
   const types = (Array.isArray(raw) ? raw : raw ? [raw] : []).map((t) => String(t).toLowerCase());
@@ -151,8 +150,7 @@ export function parseVCard(data: string, url: string, bookId: string, accountId:
   };
 }
 
-// ---------- Write vCard (line based so photo, address etc. are preserved) ----------
-
+// Write vCard (line based so photo, address etc. are preserved)
 const MANAGED = new Set(['FN', 'N', 'EMAIL', 'TEL', 'ORG', 'TITLE', 'NOTE', 'REV', 'PRODID', 'END']);
 
 const escVal = (v: string) => v.replace(/\\/g, '\\\\').replace(/\r?\n/g, '\\n').replace(/,/g, '\\,').replace(/;/g, '\\;');
@@ -210,8 +208,7 @@ export function buildVCard(input: ContactInput, existing?: { data: string; conta
   return lines.map(fold).join('\r\n') + '\r\n';
 }
 
-// ---------- Fetch, save, delete ----------
-
+// Fetch, save, delete
 export async function listContacts(): Promise<{
   books: AddressBookInfo[];
   contacts: Contact[];

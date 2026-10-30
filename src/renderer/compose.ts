@@ -37,8 +37,7 @@ let sent = false;
 
 const setInfo = (text: string) => (el('#compose-error').textContent = text);
 
-// ---------- HTML helpers ----------
-
+// HTML helpers
 // sanitizeHtml() lives in common.ts (also used for signatures in the settings)
 
 // plain-text alternative for recipients without HTML
@@ -78,8 +77,7 @@ function htmlToText(html: string): string {
 const wrapOutgoing = (html: string) =>
   `<div style="font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.5; color: #1F2126">${html}</div>`;
 
-// ---------- Editor ----------
-
+// Editor
 let lastRange: Range | null = null;
 
 document.addEventListener('selectionchange', () => {
@@ -198,8 +196,7 @@ function insertAtCaret(text: string): void {
   document.execCommand('insertText', false, text);
 }
 
-// ---------- Recipients ----------
-
+// Recipients
 function parseRecipients(text: string): Recipient[] {
   return text
     .split(/[,;\n]+/)
@@ -244,8 +241,7 @@ function commitInput(f: RecipField): void {
   hideSuggest();
 }
 
-// ---------- Suggestions from contacts and previous senders ----------
-
+// Suggestions from contacts and previous senders
 let suggestField: RecipField | null = null;
 let suggestItems: Recipient[] = [];
 let suggestIndex = 0;
@@ -378,8 +374,7 @@ cform.querySelectorAll<HTMLElement>('[data-show]').forEach((b) => {
   });
 });
 
-// ---------- Attachments ----------
-
+// Attachments
 function renderComposeAtts(): void {
   const total = composeAtts.reduce((sum, a) => sum + a.size, 0);
   el('#compose-atts').innerHTML = composeAtts
@@ -469,8 +464,7 @@ document.addEventListener('drop', (e) => {
   addDroppedFiles(e.dataTransfer.files);
 });
 
-// ---------- Sender and signature ----------
-
+// Sender and signature
 const identityOf = (id: string) => identities.find((i) => i.id === id);
 // HTML signature takes precedence; text signature with the usual "-- " in front
 function sigHtml(idn?: Identity): string {
@@ -556,10 +550,8 @@ fromSelect().addEventListener('change', () => {
   paintFromDot();
 });
 
-// ---------- Templates ----------
-
-// ---------- Toolbar dropdown menus (templates, priority, placeholders) ----------
-
+// Templates
+// Toolbar dropdown menus (templates, priority, placeholders)
 interface MenuItem {
   value: string;
   label: string;
@@ -686,8 +678,7 @@ el('#btn-save-tpl-ok').addEventListener('click', async () => {
   }
 });
 
-// ---------- Placeholders ----------
-
+// Placeholders
 // The placeholder is inserted in the app language ({{Vorname}} or {{FirstName}})
 el('#btn-ph').addEventListener('mousedown', (e) => e.preventDefault());
 el('#btn-ph').addEventListener('click', () => {
@@ -706,8 +697,7 @@ el('#btn-ph').addEventListener('click', () => {
   );
 });
 
-// ---------- Priority (toolbar button) ----------
-
+// Priority (toolbar button)
 const prioInput = () => cform.elements.namedItem('priority') as HTMLInputElement;
 
 function paintPriority(): void {
@@ -739,8 +729,7 @@ el('#btn-prio').addEventListener('click', () => {
 });
 paintPriority();
 
-// ---------- Insert images into the text (button, drop onto the text, paste) ----------
-
+// Insert images into the text (button, drop onto the text, paste)
 const MAX_IMG_W = 1600;
 
 // Scale down large images so the mail does not get unnecessarily large
@@ -827,8 +816,7 @@ function personalizeHtml(html: string, r: Recipient): string {
   return html.replace(PLACEHOLDER_RE, (_m, key: string) => esc(v[PH_ALIASES[key.toLowerCase()]] ?? '')).replace(/ +([,.!?])/g, '$1');
 }
 
-// ---------- Send: split button "to all" / "individually to each" ----------
-
+// Send: split button "to all" / "individually to each"
 const toCount = () => recipients.to.length + (recipInput('to').value.trim() ? 1 : 0);
 
 function updateSendMenu(): void {
@@ -853,8 +841,7 @@ el('#send-menu').addEventListener('click', (e) => {
   cform.requestSubmit();
 });
 
-// ---------- Fill the window ----------
-
+// Fill the window
 function initCompose(o: ComposeOpts): void {
   const identity = pickIdentity(o.accountId, o.matchAddresses);
   fillFromSelect(identity?.id);
@@ -920,8 +907,7 @@ window.addEventListener('beforeunload', (e) => {
   }
 });
 
-// ---------- Send ----------
-
+// Send
 el('#btn-discard').addEventListener('click', () => window.close());
 
 // Send: Ctrl+Shift+S (Cmd+Shift+S). Not Ctrl+Enter – that generates the text in the AI panel,
@@ -1023,8 +1009,7 @@ cform.addEventListener('submit', async (e) => {
   }
 });
 
-// ---------- Send with undo (circle runs for the configured delay) ----------
-
+// Send with undo (circle runs for the configured delay)
 let undoMs = 2000; // Settings → Senders & signatures → delay (0–5 s)
 const sendOverlay = document.createElement('div');
 sendOverlay.className = 'send-undo';
@@ -1103,8 +1088,7 @@ function showSent(): Promise<void> {
   return new Promise((r) => setTimeout(r, 650));
 }
 
-// ---------- Startup: load everything the window needs ----------
-
+// Startup: load everything the window needs
 (async () => {
   const [opts, accs, settings, book, inbox] = await Promise.all([
     window.api.compose.init(),

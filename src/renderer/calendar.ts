@@ -10,8 +10,7 @@ let calLoaded = false;
 let hiddenCals = new Set<string>(readHidden());
 let editingEvent: CalEvent | null = null;
 
-// ---------- Date helpers ----------
-
+// Date helpers
 // Start of the week according to the setting (Monday, Sunday or Saturday)
 function weekStartOf(d: Date): Date {
   const m = new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -88,8 +87,7 @@ function setCalStatus(text: string): void {
   el('#cal-status').textContent = text;
 }
 
-// ---------- View ----------
-
+// View
 // Load once (also for "New event" from the title bar)
 let calLoading: Promise<void> | null = null;
 function ensureCalendars(): Promise<void> {
@@ -106,8 +104,7 @@ document.addEventListener('viewchange', (e) => {
   scrollToMorning();
 });
 
-// ---------- Load calendars ----------
-
+// Load calendars
 async function loadCalendars(): Promise<void> {
   // 1. straight from the cache
   try {
@@ -187,8 +184,7 @@ async function loadEvents(): Promise<void> {
   renderWeek();
 }
 
-// ---------- Draw the week ----------
-
+// Draw the week
 interface Placed {
   ev: CalEvent;
   top: number;
@@ -310,8 +306,7 @@ function scrollToMorning(): void {
   if (b && b.scrollTop === 0) b.scrollTop = 7 * HOUR_PX;
 }
 
-// ---------- Navigation ----------
-
+// Navigation
 el('#cal-prev').addEventListener('click', () => {
   weekStart = addDays(weekStart, -7);
   loadEvents();
@@ -329,8 +324,7 @@ setInterval(() => {
   if (el('.app').dataset.view === 'cal') renderWeek();
 }, 60_000);
 
-// ---------- Calendar list: show/hide, remove account ----------
-
+// Calendar list: show/hide, remove account
 el('#cal-list').addEventListener('change', (e) => {
   const input = e.target as HTMLInputElement;
   const id = input.dataset.cal;
@@ -341,8 +335,7 @@ el('#cal-list').addEventListener('change', (e) => {
   loadEvents();
 });
 
-// ---------- Add CalDAV account ----------
-
+// Add CalDAV account
 const calAddDlg = el<HTMLDialogElement>('#dlg-cal-add');
 const calAddForm = el<HTMLFormElement>('#form-cal-add');
 const calAddField = (n: string) => calAddForm.elements.namedItem(n) as HTMLInputElement;
@@ -425,8 +418,7 @@ calAddForm.addEventListener('submit', async (e) => {
   }
 });
 
-// ---------- Event dialog ----------
-
+// Event dialog
 const evDlg = el<HTMLDialogElement>('#dlg-event');
 const evForm = el<HTMLFormElement>('#form-event');
 const evField = (n: string) => evForm.elements.namedItem(n) as HTMLInputElement;
@@ -583,8 +575,7 @@ el('#btn-event-delete').addEventListener('click', async () => {
   }
 });
 
-// ---------- Recurrence in the event dialog ----------
-
+// Recurrence in the event dialog
 const WEEKDAYS = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU'];
 const recSel = (n: string) => evForm.elements.namedItem(n) as HTMLSelectElement;
 let customRule: RRuleInfo | null = null; // complex rule from the server: kept as long as "Custom" is selected
@@ -647,8 +638,7 @@ function readRecurrence(): RRuleInfo | null | undefined {
 recSel('repeat').addEventListener('change', syncRecUi);
 recSel('repeatEnd').addEventListener('change', syncRecUi);
 
-// ---------- Series: only this occurrence or all? ----------
-
+// Series: only this occurrence or all?
 function askScope(text: string): Promise<'series' | 'occurrence' | null> {
   const dlg = el<HTMLDialogElement>('#dlg-scope');
   el('#scope-text').textContent = text;
@@ -674,8 +664,7 @@ function askScope(text: string): Promise<'series' | 'occurrence' | null> {
   });
 }
 
-// ---------- Dragging: move events (also to other days) and change duration ----------
-
+// Dragging: move events (also to other days) and change duration
 const SNAP_MIN = 15;
 let dragJustEnded = false;
 
@@ -796,8 +785,7 @@ el('#week').addEventListener('pointerdown', (e) => {
 
 el('#btn-new-event').addEventListener('click', () => openEventDialog(null));
 
-// ---------- Empty area: hover shows the time, dragging creates a new event ----------
-
+// Empty area: hover shows the time, dragging creates a new event
 const minutesAt = (col: HTMLElement, clientY: number, step: number, round = Math.floor) =>
   Math.max(0, Math.min(24 * 60, round((((clientY - col.getBoundingClientRect().top) / HOUR_PX) * 60) / step) * step));
 const fmtMin = (m: number) => `${pad(Math.floor(m / 60) % 24)}:${pad(m % 60)}`;
@@ -899,8 +887,7 @@ el('#week').addEventListener('click', (e) => {
 
 
 
-// ---------- Month calendar at the bottom of the sidebar ----------
-
+// Month calendar at the bottom of the sidebar
 let calMiniMonth = new Date(weekStart.getFullYear(), weekStart.getMonth(), 1);
 
 function renderCalMini(): void {
@@ -943,8 +930,7 @@ function applyWeekStart(): void {
 renderCalMini();
 
 
-// ---------- Attendees / invitations ----------
-
+// Attendees / invitations
 let inviteIdentities: Identity[] = [];
 let attendeesBefore = '';
 window.api.settings
@@ -1019,8 +1005,7 @@ el('#btn-event-mail').addEventListener('click', async () => {
   window.api.compose.open({ subject: ev.title, quoteHtml: `<p>${lines}</p>`, attachData: [{ filename: `${ev.title.replace(/[\\/:*?"<>|]+/g, '_').slice(0, 60) || 'termin'}.ics`, content: b64, contentType: 'text/calendar' }] });
 });
 
-// ---------- Search events ----------
-
+// Search events
 let calSearchTimer: number | undefined;
 let calSearchSeq = 0;
 

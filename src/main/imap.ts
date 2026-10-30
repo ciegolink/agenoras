@@ -104,10 +104,21 @@ export async function testConnection(cfg: ConnCfg, pass: string): Promise<void> 
 }
 
 // One persistent connection per account. INBOX stays open → ImapFlow goes into IDLE automatically.
-async function getClient(acc: Account): Promise<ImapFlow> {
-  const existing = clients.get(acc.id);
-  if (existing && existing.usable) return existing;
+// Concurrent callers wait for the same connect, some servers limit connections per user.
+const connecting = new Map<string, Promise<ImapFlow>>();
 
+function getClient(acc: Account): Promise<ImapFlow> {
+  const existing = clients.get(acc.id);
+  if (existing && existing.usable) return Promise.resolve(existing);
+  let p = connecting.get(acc.id);
+  if (!p) {
+    p = connectClient(acc).finally(() => connecting.delete(acc.id));
+    connecting.set(acc.id, p);
+  }
+  return p;
+}
+
+async function connectClient(acc: Account): Promise<ImapFlow> {
   const c = makeClient(acc, await getPassword(acc.id));
   c.on('exists', (data: { path?: string; count?: number; prevCount?: number }) => {
     if (!data?.path || data.path === 'INBOX') onNew(acc.id, (data?.count ?? 0) > (data?.prevCount ?? 0));
@@ -131,7 +142,13 @@ async function getClient(acc: Account): Promise<ImapFlow> {
     log('error', 'IMAP', acc.email, t('log.connFailed', { host: `${acc.host}:${acc.port}`, msg: friendlyError(err) }));
     throw err;
   }
-  const box = await c.mailboxOpen('INBOX');
+  let box: Awaited<ReturnType<ImapFlow['mailboxOpen']>>;
+  try {
+    box = await c.mailboxOpen('INBOX');
+  } catch (err) {
+    c.close();
+    throw err;
+  }
   // From here on everything counts as "new" (for notifications); do not reset on reconnect
   if (!lastUid.has(acc.id)) lastUid.set(acc.id, Math.max(0, Number(box.uidNext ?? 1) - 1));
   clients.set(acc.id, c);
@@ -168,8 +185,7 @@ async function inFolder<T>(acc: Account, folder: string, fn: (c: ImapFlow) => Pr
   }
 }
 
-// ---------- Folders ----------
-
+// Folders
 const SPECIAL_ORDER = ['\\Inbox', '\\Drafts', '\\Sent', '\\Archive', '\\Junk', '\\Trash', '\\All', '\\Flagged', '\\Important'];
 
 // Servers without SPECIAL-USE: detect special folders by name (top level only)
@@ -258,8 +274,7 @@ export async function appendToSent(acc: Account, raw: Buffer): Promise<void> {
   if (sent) await c.append(sent, raw, ['\\Seen']);
 }
 
-// ---------- Mails ----------
-
+// Mails
 function hasAttachment(node?: MessageStructureObject): boolean {
   if (!node) return false;
   if (node.disposition === 'attachment') return true;
@@ -481,26 +496,55 @@ export async function markSeen(acc: Account, folder: string, uid: number): Promi
 }
 
 // Move several mails in one IMAP command (UID list "12,15,18")
-export async function moveMessages(acc: Account, folder: string, uids: number[], target: string): Promise<void> {
-  if (pop.isPop(acc)) return pop.moveMessages(acc, folder, uids, target);
-  if (target === folder || !uids.length) return;
-  await inFolder(acc, folder, async (c) => {
+// Returns the new UIDs in the target folder (needed for undo)
+export async function moveMessages(acc: Account, folder: string, uids: number[], target: string): Promise<number[]> {
+  if (pop.isPop(acc)) {
+    pop.moveMessages(acc, folder, uids, target);
+    return uids; // POP: UIDs stay the same
+  }
+  if (target === folder || !uids.length) return [];
+  // no UIDPLUS: remember the Message-IDs and look them up afterwards
+  const msgIds: string[] = [];
+  const res = await inFolder(acc, folder, async (c) => {
+    if (!c.capabilities.has('UIDPLUS')) {
+      for await (const m of c.fetch(uids.join(','), { envelope: true }, { uid: true })) if (m.envelope?.messageId) msgIds.push(m.envelope.messageId);
+    }
     const ok = await c.messageMove(uids.join(','), target, { uid: true });
     if (!ok) throw new Error(t('err.moveFailed'));
+    return ok;
+  });
+  if (res.uidMap?.size) return [...res.uidMap.values()];
+  if (!msgIds.length) return [];
+  return inFolder(acc, target, async (c) => {
+    const found: number[] = [];
+    for (const id of msgIds) {
+      const hit = await c.search({ header: { 'message-id': id } }, { uid: true });
+      if (hit) found.push(...hit);
+    }
+    return found;
   });
 }
 
 // Delete = move to trash; permanently inside the trash itself
-export async function deleteMessages(acc: Account, folder: string, uids: number[]): Promise<'trash' | 'deleted'> {
-  if (pop.isPop(acc)) return pop.deleteMessages(acc, folder, uids);
+// target/uids tell where the mails ended up (for undo)
+export interface DeleteResult {
+  result: 'trash' | 'deleted';
+  target?: string;
+  uids?: number[];
+}
+
+export async function deleteMessages(acc: Account, folder: string, uids: number[]): Promise<DeleteResult> {
+  if (pop.isPop(acc)) {
+    const result = pop.deleteMessages(acc, folder, uids);
+    return result === 'trash' ? { result, target: 'Trash', uids } : { result };
+  }
   const c = await getClient(acc);
   const trash = await findSpecial(c, '\\Trash', /^(trash|deleted items|deleted messages|papierkorb|gelöschte elemente|gelöschte objekte)$/i);
   if (trash && trash !== folder) {
-    await moveMessages(acc, folder, uids, trash);
-    return 'trash';
+    return { result: 'trash', target: trash, uids: await moveMessages(acc, folder, uids, trash) };
   }
   if (uids.length) await inFolder(acc, folder, (c2) => c2.messageDelete(uids.join(','), { uid: true }));
-  return 'deleted';
+  return { result: 'deleted' };
 }
 
 export async function trashFolder(acc: Account): Promise<string | null> {

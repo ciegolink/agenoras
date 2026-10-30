@@ -14,8 +14,7 @@ function setContactsStatus(text: string): void {
   el('#contacts-status').textContent = text;
 }
 
-// ---------- Load ----------
-
+// Load
 async function loadContacts(): Promise<void> {
   try {
     cardAccounts = await window.api.contacts.listAccounts();
@@ -57,8 +56,7 @@ document.addEventListener('viewchange', (e) => {
   if ((e as CustomEvent<string>).detail === 'contacts') ensureContacts();
 });
 
-// ---------- Sidebar ----------
-
+// Sidebar
 function renderBooks(): void {
   el('#book-list').innerHTML = cardAccounts
     .map((acc) => {
@@ -85,8 +83,7 @@ el('#side-contacts').addEventListener('click', async (e) => {
   renderContacts();
 });
 
-// ---------- List ----------
-
+// List
 function contactMatches(c: Contact, q: string): boolean {
   if (!q) return true;
   const hay = [c.name, c.org, c.title, ...c.emails.map((x) => x.value), ...c.phones.map((x) => x.value.replace(/\s/g, ''))].join(' ').toLowerCase();
@@ -108,7 +105,7 @@ function renderContacts(): void {
         <span class="who"><b>${esc(c.name)}</b><span>${esc(sub)}</span></span>
       </button>`;
     })
-    .join('');
+    .join('') + (q ? searchElsewhereHtml(el<HTMLInputElement>('#contact-search').value, shown.length > 0) : '');
   if (selectedContact && !contacts.some((c) => c.id === selectedContact)) {
     selectedContact = '';
     el('#contact-detail').innerHTML = `<div class="empty">${esc(t('contacts.noneSelected'))}</div>`;
@@ -118,6 +115,11 @@ function renderContacts(): void {
 }
 
 el('#contact-search').addEventListener('input', renderContacts);
+el('#contact-search').addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  el<HTMLInputElement>('#contact-search').value = '';
+  renderContacts();
+});
 
 // Show one contact (from the mail search): all books, no filter, scrolled into view
 async function showContact(id: string): Promise<void> {
@@ -138,8 +140,7 @@ el('#contact-list').addEventListener('click', (e) => {
   renderContacts();
 });
 
-// ---------- Detail ----------
-
+// Detail
 function renderContactDetail(): void {
   const c = contacts.find((x) => x.id === selectedContact);
   if (!c) return;
@@ -209,8 +210,7 @@ el('#contact-detail').addEventListener('click', (e) => {
   }
 });
 
-// ---------- Contact dialog ----------
-
+// Contact dialog
 const ctDlg = el<HTMLDialogElement>('#dlg-contact');
 const ctForm = el<HTMLFormElement>('#form-contact');
 const ctField = (n: string) => ctForm.elements.namedItem(n) as HTMLInputElement;
@@ -247,8 +247,7 @@ function openContactDialog(c: Contact | null): void {
 
 el('#btn-new-contact').addEventListener('click', () => openContactDialog(null));
 
-// ---------- Contact photo: upload (cropped square, 256 px), remove, view large ----------
-
+// Contact photo: upload (cropped square, 256 px), remove, view large
 let ctPhoto: string | null | undefined; // undefined = unchanged
 
 function showCtPhoto(src: string | null): void {
@@ -381,8 +380,7 @@ el('#btn-contact-delete').addEventListener('click', async () => {
   }
 });
 
-// ---------- Add CardDAV account ----------
-
+// Add CardDAV account
 const cardDlg = el<HTMLDialogElement>('#dlg-card-add');
 const cardForm = el<HTMLFormElement>('#form-card-add');
 const cardField = (n: string) => cardForm.elements.namedItem(n) as HTMLInputElement;

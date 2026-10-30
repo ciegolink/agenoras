@@ -12,6 +12,12 @@
 <header class="titlebar">
   <div class="brand"><img class="brand-logo" alt="" hidden><span class="logo">Agenoras<span class="dot">.</span></span></div>
   <div class="tb-actions" id="tb-actions"></div>
+  <div class="search-box tb-search" id="search-box">
+    <svg class="tb-search-ico" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <input type="search" id="search" data-i18n-ph="mail.search" data-i18n-aria="mail.searchAria">
+    <span class="search-spin" aria-hidden="true"></span>
+    <button type="button" class="tb-search-clear" id="search-clear" hidden data-i18n-title="search.close" data-i18n-aria="search.close"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+  </div>
   <div class="tb-fill"></div>
   <button type="button" class="tb-btn tb-log" id="btn-log" hidden data-i18n-aria="log.open" data-i18n-title="log.open">
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></svg>
@@ -67,7 +73,22 @@
         <span class="name" data-i18n="tasks.all"></span><span class="count" id="tasks-count"></span>
       </button>
       <div id="tlist-list"></div>
-      <label class="side-check"><input type="checkbox" id="tasks-show-done"> <span data-i18n="tasks.showDone"></span></label>
+    </div>
+
+    <div class="side-part" id="side-rss">
+      <button class="btn primary" id="btn-new-feed" data-i18n="rss.addFeed"></button>
+      <div class="label" data-i18n="rss.feeds"></div>
+      <button class="box" data-feed="">
+        <span class="name" data-i18n="rss.all"></span><span class="count" id="rss-count"></span>
+      </button>
+      <div id="feed-list"></div>
+    </div>
+
+    <div class="side-part" id="side-search">
+      <div class="label" data-i18n="search.side.kinds"></div>
+      <div id="search-kinds"></div>
+      <div class="label" data-i18n="search.side.accounts"></div>
+      <div id="search-accounts"></div>
     </div>
 
     <div class="side-foot">
@@ -75,35 +96,25 @@
       <button class="view-btn" data-view="cal"><span class="mono">Ca</span><span data-i18n="view.calendar"></span></button>
       <button class="view-btn" data-view="contacts"><span class="mono">Co</span><span data-i18n="view.contacts"></span></button>
       <button class="view-btn" data-view="tasks"><span class="mono">Ta</span><span data-i18n="view.tasks"></span></button>
+      <button class="view-btn" data-view="rss" hidden><span class="mono">Fe</span><span data-i18n="view.rss"></span></button>
     </div>
   </nav>
 
   <section class="list" data-i18n-aria="mail.listAria">
     <div class="list-head">
       <h1><span id="list-heading"></span> <em id="list-title"></em></h1>
-      <div class="search-box" id="search-box">
-        <input type="search" id="search" data-i18n-ph="mail.search" data-i18n-aria="mail.searchAria">
-        <span class="search-spin" aria-hidden="true"></span>
-      </div>
       <div class="list-tools">
-        <div class="seg mini" id="filter-seg" role="group" data-i18n-aria="filter.aria">
+        <div class="seg mini bar" id="filter-seg" role="group" data-i18n-aria="filter.aria">
           <button type="button" data-filter="all" data-i18n="filter.all"></button>
           <button type="button" data-filter="unread" data-i18n="filter.unread"></button>
-          <button type="button" data-filter="attach" data-i18n-title="filter.attachTip"><svg viewBox="0 0 24 24" class="seg-ico" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg><span data-i18n="filter.attach"></span></button>
-          <button type="button" data-filter="flagged" data-i18n-title="filter.flaggedTip"><svg viewBox="0 0 24 24" class="seg-ico" aria-hidden="true"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/></svg><span data-i18n="filter.flagged"></span></button>
+          <button type="button" data-filter="attach" data-i18n-title="filter.attachTip"><svg viewBox="0 0 24 24" class="seg-ico" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg><span class="sr" data-i18n="filter.attach"></span></button>
+          <button type="button" data-filter="flagged" data-i18n-title="filter.flaggedTip"><svg viewBox="0 0 24 24" class="seg-ico" aria-hidden="true"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/></svg><span class="sr" data-i18n="filter.flagged"></span></button>
+          <label class="seg-filter">
+            <svg viewBox="0 0 24 24" class="seg-ico" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input type="search" id="quick-filter" data-i18n-ph="mail.quickFilter" data-i18n-aria="mail.quickFilterAria" autocomplete="off">
+          </label>
         </div>
         <button type="button" class="icon-btn sm thread-toggle" id="btn-threads" aria-pressed="false" data-i18n-title="threads.tip" data-i18n-aria="threads.tip" hidden><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16M4 10h16"/><path d="M8 15h12M8 20h12"/><path d="M4 15v5"/></svg></button>
-        <div class="seg mini" id="scope-seg" role="group" data-i18n-aria="search.scopeAria" hidden>
-          <button type="button" data-scope="folder" data-i18n="search.thisFolder"></button>
-          <button type="button" data-scope="all" data-i18n="search.everywhere"></button>
-        </div>
-        <div class="seg mini" id="kind-seg" role="group" data-i18n-aria="search.kindAria" hidden>
-          <button type="button" data-kind="all" class="on"><span data-i18n="search.kind.all"></span></button>
-          <button type="button" data-kind="mail"><span data-i18n="search.kind.mail"></span><span class="seg-n" id="kind-n-mail"></span></button>
-          <button type="button" data-kind="event"><span data-i18n="search.kind.event"></span><span class="seg-n" id="kind-n-event"></span></button>
-          <button type="button" data-kind="contact"><span data-i18n="search.kind.contact"></span><span class="seg-n" id="kind-n-contact"></span></button>
-          <button type="button" data-kind="task"><span data-i18n="search.kind.task"></span><span class="seg-n" id="kind-n-task"></span></button>
-        </div>
       </div>
       <div class="status" id="status"></div>
     </div>
@@ -138,7 +149,14 @@
   <section class="clist" data-i18n-aria="contacts.listAria">
     <div class="list-head">
       <h1 data-i18n-html="contacts.heading"></h1>
-      <input type="search" id="contact-search" data-i18n-ph="contacts.search" data-i18n-aria="contacts.searchAria">
+      <div class="list-tools">
+        <div class="seg mini bar">
+          <label class="seg-filter">
+            <svg viewBox="0 0 24 24" class="seg-ico" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input type="search" id="contact-search" data-i18n-ph="mail.quickFilter" data-i18n-aria="contacts.searchAria" autocomplete="off">
+          </label>
+        </div>
+      </div>
       <div class="status" id="contacts-status"></div>
     </div>
     <div id="contact-list"></div>
@@ -146,6 +164,29 @@
 
   <article class="cdetail" id="contact-detail" data-i18n-aria="contacts.detailAria">
     <div class="empty" data-i18n="contacts.noneSelected"></div>
+  </article>
+
+  <section class="rlist" data-i18n-aria="rss.listAria">
+    <div class="list-head">
+      <h1><span id="rss-heading"></span> <em id="rss-title"></em></h1>
+      <div class="list-tools">
+        <div class="seg mini bar" id="rss-filter" role="group" data-i18n-aria="filter.aria">
+          <button type="button" data-rfilter="all" data-i18n="filter.all"></button>
+          <button type="button" data-rfilter="unread" data-i18n="filter.unread"></button>
+          <label class="seg-filter">
+            <svg viewBox="0 0 24 24" class="seg-ico" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input type="search" id="rss-search" data-i18n-ph="mail.quickFilter" data-i18n-aria="rss.search" autocomplete="off">
+          </label>
+        </div>
+        <button type="button" class="icon-btn sm" id="btn-rss-allread" data-i18n-title="rss.markAllRead" data-i18n-aria="rss.markAllRead"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m2 12 5 5L18 6"/><path d="m12 16 1 1L22 6"/></svg></button>
+      </div>
+      <div class="status" id="rss-status"></div>
+    </div>
+    <div id="rss-list"></div>
+  </section>
+
+  <article class="rdetail" id="rss-detail" data-i18n-aria="rss.detailAria">
+    <div class="empty" data-i18n="rss.noneSelected"></div>
   </article>
 
   <aside class="agenda" id="agenda" data-i18n-aria="agenda.title">
@@ -163,6 +204,16 @@
   <section class="tasks" data-i18n-aria="view.tasks">
     <div class="tasks-head">
       <h1 id="tasks-heading"></h1>
+      <div class="list-tools">
+        <div class="seg mini bar" id="task-filter" role="group" data-i18n-aria="filter.aria">
+          <button type="button" data-tfilter="open" data-i18n="tasks.filterOpen"></button>
+          <button type="button" data-tfilter="all" data-i18n="filter.all"></button>
+          <label class="seg-filter">
+            <svg viewBox="0 0 24 24" class="seg-ico" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input type="search" id="task-search" data-i18n-ph="mail.quickFilter" data-i18n-aria="tasks.searchAria" autocomplete="off">
+          </label>
+        </div>
+      </div>
       <div class="status" id="tasks-status"></div>
     </div>
     <form class="task-quick" id="task-quick">
@@ -257,6 +308,25 @@
     <div class="actions">
       <button type="button" class="btn ghost" id="btn-card-add-cancel" data-i18n="btn.cancel"></button>
       <button type="submit" class="btn primary" id="btn-card-add-save" data-i18n="btn.connect"></button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-rss-add">
+  <form id="form-rss-add">
+    <h2 id="rss-add-title"></h2>
+    <label><span data-i18n="rss.feedUrl"></span><input name="url" required placeholder="https://example.com/feed.xml"></label>
+    <label><span data-i18n="field.name"></span><input name="name" data-i18n-ph="rss.namePh"></label>
+    <label class="check"><input name="auth" type="checkbox"> <span data-i18n="rss.needsLogin"></span></label>
+    <div class="priv-fields" id="rss-auth" hidden>
+      <label><span data-i18n="field.username"></span><input name="username" autocomplete="off"></label>
+      <label><span data-i18n="field.password"></span><input name="password" type="password" autocomplete="new-password"></label>
+    </div>
+    <p class="hint" data-i18n="rss.addHint"></p>
+    <p class="error" id="rss-add-error"></p>
+    <div class="actions">
+      <button type="button" class="btn ghost" id="btn-rss-add-cancel" data-i18n="btn.cancel"></button>
+      <button type="submit" class="btn primary" id="btn-rss-add-save"></button>
     </div>
   </form>
 </dialog>
@@ -457,6 +527,7 @@
 <script src="../../dist/renderer/calendar.js"></script>
 <script src="../../dist/renderer/contacts.js"></script>
 <script src="../../dist/renderer/tasks.js"></script>
+<script src="../../dist/renderer/rss.js"></script>
 <div class="popup-dim" id="popup-dim" hidden></div>
 <script src="../../dist/renderer/labels.js"></script>
 <script src="../../dist/renderer/agenda.js"></script>

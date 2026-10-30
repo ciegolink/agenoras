@@ -96,12 +96,13 @@ function renderTasks(): void {
     })
     .join('');
   document.querySelector<HTMLElement>('#side-tasks .box[data-tlist=""]')?.classList.toggle('active', !currentTaskList);
-  el<HTMLInputElement>('#tasks-show-done').checked = showDoneTasks;
+  document.querySelectorAll<HTMLElement>('#task-filter [data-tfilter]').forEach((b) => b.classList.toggle('on', (b.dataset.tfilter === 'all') === showDoneTasks));
 
   const list = currentTaskList ? tlistOf(currentTaskList) : null;
-  el('#tasks-heading').innerHTML = list ? `${esc(list.name)} <em>${esc(t('tasks.open'))}</em>` : t('tasks.heading');
+  el('#tasks-heading').innerHTML = list ? `${esc(list.name)} <em>${esc(t(showDoneTasks ? 'tasks.allShort' : 'tasks.open'))}</em>` : t(showDoneTasks ? 'tasks.headingAll' : 'tasks.heading');
 
-  const mine = taskItems.filter((x) => !currentTaskList || x.listId === currentTaskList);
+  const q = el<HTMLInputElement>('#task-search').value.trim().toLowerCase();
+  const mine = taskItems.filter((x) => (!currentTaskList || x.listId === currentTaskList) && (!q || `${x.title} ${x.notes}`.toLowerCase().includes(q)));
   const today = dayKey(new Date());
   const byDue = (a: Task, b: Task) => (a.due || '9999').localeCompare(b.due || '9999') || (a.priority === 'high' ? -1 : 0) - (b.priority === 'high' ? -1 : 0);
   const pending = mine.filter((x) => !x.done);
@@ -116,12 +117,12 @@ function renderTasks(): void {
     .filter(([, , items]) => items.length)
     .map(([key, title, items]) => `<section class="task-group"><h3 class="${key}">${esc(title.toUpperCase())} <span class="n">${items.length}</span></h3>${items.map(taskRow).join('')}</section>`)
     .join('');
-  el('#task-groups').innerHTML = html || `<div class="tasks-empty">${esc(taskLists.length ? t('tasks.allDone') : t('tasks.noLists'))}</div>`;
+  const elsewhere = q && taskLists.length ? searchElsewhereHtml(el<HTMLInputElement>('#task-search').value, !!html) : '';
+  el('#task-groups').innerHTML = html + elsewhere || `<div class="tasks-empty">${esc(!taskLists.length ? t('tasks.noLists') : t('tasks.allDone'))}</div>`;
   if (typeof renderAgendaTasks === 'function') renderAgendaTasks();
 }
 
-// ---------- Check off as done, quick add ----------
-
+// Check off as done, quick add
 const toInput = (task: Task): TaskInput => ({ listId: task.listId, id: task.id, title: task.title, notes: task.notes, due: task.due, done: task.done, priority: task.priority });
 
 async function saveTaskInput(input: TaskInput): Promise<void> {
@@ -186,8 +187,11 @@ el('#side-tasks').addEventListener('click', (e) => {
   renderTasks();
 });
 
-el('#tasks-show-done').addEventListener('change', () => {
-  showDoneTasks = el<HTMLInputElement>('#tasks-show-done').checked;
+// Open / all and quick filter
+el('#task-filter').addEventListener('click', (e) => {
+  const f = (e.target as HTMLElement).closest<HTMLElement>('[data-tfilter]')?.dataset.tfilter;
+  if (!f || (f === 'all') === showDoneTasks) return;
+  showDoneTasks = f === 'all';
   try {
     localStorage.setItem('tasks.showDone', showDoneTasks ? '1' : '0');
   } catch {
@@ -195,9 +199,14 @@ el('#tasks-show-done').addEventListener('change', () => {
   }
   renderTasks();
 });
+el('#task-search').addEventListener('input', renderTasks);
+el('#task-search').addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  el<HTMLInputElement>('#task-search').value = '';
+  renderTasks();
+});
 
-// ---------- Dialog ----------
-
+// Dialog
 const tkDlg = el<HTMLDialogElement>('#dlg-task');
 const tkForm = el<HTMLFormElement>('#form-task');
 const tkField = (n: string) => tkForm.elements.namedItem(n) as HTMLInputElement;

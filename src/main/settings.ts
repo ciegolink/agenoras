@@ -48,7 +48,7 @@ interface Settings {
   rules: MailRule[]; // mail rules
 }
 
-// ---------- Mail rules ----------
+// Mail rules
 export interface RuleCondition {
   field: 'from' | 'to' | 'subject' | 'any';
   op: 'contains' | 'equals' | 'startsWith' | 'endsWith';
@@ -240,8 +240,7 @@ export function saveNotify(n: NotifySettings): NotifySettings {
   return clean;
 }
 
-// ---------- Categories (stored locally, per mail via Message-ID) ----------
-
+// Categories (stored locally, per mail via Message-ID)
 export function saveLabels(list: MailLabel[]): MailLabel[] {
   const clean = (list ?? [])
     .map((l) => ({ id: String(l.id || crypto.randomUUID()), name: String(l.name ?? '').trim().slice(0, 40), color: /^#[0-9a-f]{6}$/i.test(l.color) ? l.color : '#2BA89F' }))

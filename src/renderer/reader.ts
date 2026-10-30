@@ -25,8 +25,7 @@ const ACT_ICONS = {
   newContact: svgIco('<circle cx="10" cy="8" r="4"/><path d="M3 20a7 7 0 0 1 12.5-4.3"/><path d="M19 14v6M16 17h6"/>', 16),
 };
 
-// ---------- Sender picture: contact photo → website icon → initials ----------
-
+// Sender picture: contact photo → website icon → initials
 const avatarCache = new Map<string, string | null>();
 const avatarQueue = new Set<string>();
 let avatarTimer: number | undefined;
@@ -84,8 +83,7 @@ async function flushAvatars(): Promise<void> {
   }
 }
 
-// ---------- Body ----------
-
+// Body
 function wrapHtml(html: string): string {
   return `<!doctype html><html><head><meta charset="utf-8"><base target="_blank">
 <style>body{margin:18px;font-family:Manrope,system-ui,sans-serif;font-size:14px;line-height:1.5;color:#1F2126;background:#fff;overflow-wrap:anywhere}img{max-width:100%;height:auto}</style>
@@ -128,8 +126,7 @@ function metaHtml(msg: MailDetail, accLine: string, accColor: string, extra = ''
     </div>`;
 }
 
-// ---------- Recipients: clickable, each with its own menu (e.g. write to everyone in Cc individually) ----------
-
+// Recipients: clickable, each with its own menu (e.g. write to everyone in Cc individually)
 let readerOwn = new Set<string>(); // own addresses (accounts + aliases) – do not suggest as recipients
 // Mark external senders (Settings → Appearance); only active when switched on
 // Show mailboxes by name or address (Settings → Appearance)
@@ -340,8 +337,7 @@ async function attachmentAction(msg: MailDetail, target: HTMLElement, status: (s
   return true;
 }
 
-// ---------- Reply / forward ----------
-
+// Reply / forward
 function plainText(msg: MailDetail): string {
   if (msg.text.trim()) return msg.text;
   if (!msg.html) return '';
@@ -514,8 +510,7 @@ document.addEventListener('mousedown', (e) => {
   if (!(e.target as HTMLElement).closest('.react-wrap')) document.querySelectorAll<HTMLElement>('.react-pop').forEach((p) => (p.hidden = true));
 });
 
-// ---------- Meeting invitations in mails (accept / maybe / decline) ----------
-
+// Meeting invitations in mails (accept / maybe / decline)
 let inviteMsg: MailDetail | null = null;
 
 function inviteWhen(inv: InviteInfo): string {
@@ -614,7 +609,7 @@ document.addEventListener('click', async (e) => {
   }
 });
 
-// ---------- Right-click menu in the mail body ----------
+// Right-click menu in the mail body
 // Always: reply, reply all, reply to one participant, reactions. With selected text also "Copy" and
 // "Translate → <default language>" (mini AI); the translation opens in a panel with "Copy".
 // Works in the HTML frame and in plain-text mails.

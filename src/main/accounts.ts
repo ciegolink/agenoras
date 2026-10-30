@@ -84,7 +84,7 @@ export async function decrypt(stored: string): Promise<string> {
   return Buffer.from(stored.replace(/^plain:/, ''), 'base64').toString('utf8');
 }
 
-// ---------- Private accounts (PIN) ----------
+// Private accounts (PIN)
 // Unlocked state lives only in memory: after a restart every private account is locked again.
 // Locked accounts are left out of listAccounts/getAccount, so every IPC handler treats them as non-existent.
 

@@ -63,8 +63,7 @@ async function store(acc: Account, folder: string, raw: Buffer, uidl: string | n
   return { ...sum, seen };
 }
 
-// ---------- Fetching from the server ----------
-
+// Fetching from the server
 const cfgOf = (acc: Account): Pop3Cfg => ({ host: acc.host, port: acc.port, secure: acc.secure, user: acc.user });
 const running = new Map<string, Promise<MailSummary[]>>(); // one fetch per account at a time
 const timers = new Map<string, NodeJS.Timeout>();
@@ -148,8 +147,7 @@ export async function testConnection(cfg: Pop3Cfg, pass: string): Promise<void> 
   await c.quit();
 }
 
-// ---------- The local mailbox ----------
-
+// The local mailbox
 export function listFolders(acc: Account): FolderInfo[] {
   const counts = new Map(
     (open().prepare('SELECT folder, COUNT(*) AS n FROM msg WHERE account_id = ? AND seen = 0 GROUP BY folder').all(acc.id) as { folder: string; n: number }[]).map((r) => [r.folder, r.n]),

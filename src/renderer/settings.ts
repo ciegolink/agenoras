@@ -1,4 +1,4 @@
-// Settings: accounts (mail, CalDAV, CardDAV), senders/aliases with signature, templates.
+// Settings: accounts, senders/aliases with signature, templates.
 // Uses el, esc, errMsg from common.ts, account data/dialogs from renderer.ts, calendar.ts and contacts.ts.
 // New compose windows load senders and templates themselves when they open.
 
@@ -11,6 +11,7 @@ let editIdentities: Identity[] = [];
 let editTemplates: Template[] = [];
 let calAccs: CalAccount[] = [];
 let cardAccs: CalAccount[] = [];
+let rssAccs: RssFeed[] = [];
 let curTheme: ThemeChoice = 'dark';
 let soundList: { id: string; name: string }[] = [];
 let prefs: { uiScale: 'small' | 'medium' | 'large'; language: string; weekStart: number; sendDelay: number; composeMode: 'window' | 'popup' } = { uiScale: 'medium', language: 'system', weekStart: 1, sendDelay: 2, composeMode: 'window' };
@@ -20,7 +21,7 @@ let editRules: MailRule[] = [];
 let ruleFolders: Record<string, FolderInfo[]> = {};
 
 async function loadAccountLists(): Promise<void> {
-  [accounts, calAccs, cardAccs] = await Promise.all([window.api.listAccounts(), window.api.cal.listAccounts(), window.api.contacts.listAccounts()]);
+  [accounts, calAccs, cardAccs, rssAccs] = await Promise.all([window.api.listAccounts(), window.api.cal.listAccounts(), window.api.contacts.listAccounts(), window.api.rss.feeds()]);
 }
 
 async function openSettings(tab: SettingsTab = setTab): Promise<void> {
@@ -71,8 +72,7 @@ function renderSettings(): void {
   el('#btn-settings-save').hidden = setTab === 'accounts' || setTab === 'appearance' || setTab === 'sounds' || setTab === 'ai';
 }
 
-// ---------- Mini-KI (offline): switch on, download/delete models, pick the version ----------
-
+// Mini-KI (offline): switch on, download/delete models, pick the version
 let ai: AiState | null = null;
 const mb = (bytes: number) => `${Math.round(bytes / 1_000_000)} MB`;
 
@@ -158,8 +158,7 @@ el('#settings-body').addEventListener('click', async (e) => {
   }
 });
 
-// ---------- Sounds for new mail ----------
-
+// Sounds for new mail
 function soundOptions(selected: string, withDefault: boolean, builtinLabel = t('sounds.builtin')): string {
   const opt = (v: string, label: string) => `<option value="${esc(v)}"${v === selected ? ' selected' : ''}>${esc(label)}</option>`;
   // Selected file missing in sounds/ → show it anyway (the built-in sound plays then)
@@ -255,8 +254,7 @@ el('#settings-body').addEventListener('click', (e) => {
   if (tgt.closest('[data-sound-folder]')) window.api.sounds.openFolder();
 });
 
-// ---------- Appearance ----------
-
+// Appearance
 function appearanceHtml(): string {
   const opts: [ThemeChoice, string][] = [
     ['dark', t('settings.themeDark')],
@@ -390,8 +388,7 @@ el('#settings-body').addEventListener('change', async (e) => {
   }
 });
 
-// ---------- Categories ----------
-
+// Categories
 const CAT_COLORS = ['#2BA89F', '#7FA6CF', '#E0574B', '#E0A458', '#B48EAD', '#4DB37A', '#D9C35B', '#969993'];
 
 function labelsHtml(): string {
@@ -452,8 +449,7 @@ el('#settings-body').addEventListener('click', async (e) => {
   }
 });
 
-// ---------- Accounts ----------
-
+// Accounts
 function accountsHtml(): string {
   const line = (kind: string, id: string, color: string, title: string, sub: string) => `
     <div class="acc-line">
@@ -476,6 +472,7 @@ function accountsHtml(): string {
     ),
     section(t('settings.calAccounts'), calAccs.map((a) => line('cal', a.id, '#7FA6CF', a.name, a.serverUrl === 'local:' ? t('dav.localLine') : [a.serverUrl, a.username].filter(Boolean).join(' · '))).join(''), 'cal', t('cal.addAccount')),
     section(t('settings.cardAccounts'), cardAccs.map((a) => line('card', a.id, '#C1C8BE', a.name, a.serverUrl === 'local:' ? t('dav.localLine') : [a.serverUrl, a.username].filter(Boolean).join(' · '))).join(''), 'card', t('contacts.addAccount')),
+    section(t('settings.rssAccounts'), rssAccs.map((f) => line('rss', f.id, feedColor(f.id), f.name, [f.url, f.username].filter(Boolean).join(' · '))).join(''), 'rss', t('rss.addAccount')),
   ].join('');
 }
 
@@ -507,6 +504,10 @@ async function removeAccountFromSettings(ref: string): Promise<void> {
       await window.api.contacts.removeAccount(id);
       currentBook = null;
       if (contactsLoaded) loadContacts();
+    } else if (kind === 'rss') {
+      const feed = rssAccs.find((f) => f.id === id);
+      if (!feed || !confirm(t('rss.confirmRemove', { name: feed.name }))) return;
+      await removeFeedById(id);
     }
     await loadAccountLists();
     renderSettings();
@@ -530,10 +531,9 @@ async function refreshAfterAccountDialog(): Promise<void> {
   renderSettings();
 }
 
-['#dlg-add', '#dlg-cal-add', '#dlg-card-add'].forEach((sel) => el(sel).addEventListener('close', refreshAfterAccountDialog));
+['#dlg-add', '#dlg-cal-add', '#dlg-card-add', '#dlg-rss-add'].forEach((sel) => el(sel).addEventListener('close', refreshAfterAccountDialog));
 
-// ---------- Signature: text or HTML (load file, edit directly, source) ----------
-
+// Signature: text or HTML (load file, edit directly, source)
 const sigModes = new WeakMap<Identity, 'text' | 'html'>();
 const sigModeOf = (idn: Identity) => sigModes.get(idn) ?? (idn.signatureHtml ? 'html' : 'text');
 
@@ -712,6 +712,10 @@ el('#settings-body').addEventListener('click', (e) => {
   if (editAcc) {
     const [kind, id] = editAcc.split('|');
     if (kind === 'mail') return openEditMailAccount(id);
+    if (kind === 'rss') {
+      const feed = rssAccs.find((f) => f.id === id);
+      return feed ? openEditFeed(feed) : undefined;
+    }
     const list = kind === 'cal' ? calAccs : cardAccs;
     const acc = list.find((a) => a.id === id);
     if (acc) return kind === 'cal' ? openEditCalAccount(acc) : openEditCardAccount(acc);
@@ -761,6 +765,7 @@ el('#settings-body').addEventListener('click', (e) => {
   if (addAcc === 'mail') return openAddMailAccount();
   if (addAcc === 'cal') return openAddCalAccount();
   if (addAcc === 'card') return openAddCardAccount();
+  if (addAcc === 'rss') return openAddFeed();
   if (rmAcc) return void removeAccountFromSettings(rmAcc);
   if (add) {
     const acc = accounts.find((a) => a.id === add);
@@ -864,8 +869,7 @@ document.addEventListener('keydown', (e) => {
 });
 window.addEventListener('blur', () => (setMenu.hidden = true));
 
-// ---------- About ----------
-
+// About
 const REPO = 'https://github.com/ciegolink/agenoras';
 
 async function openAbout(): Promise<void> {
@@ -903,8 +907,7 @@ async function openAbout(): Promise<void> {
 }
 el('#btn-about-close').addEventListener('click', () => el<HTMLDialogElement>('#dlg-about').close());
 
-// ---------- Mail rules ----------
-
+// Mail rules
 const RULE_FIELDS: RuleCondition['field'][] = ['from', 'to', 'subject', 'any'];
 const RULE_OPS: RuleCondition['op'][] = ['contains', 'equals', 'startsWith', 'endsWith'];
 

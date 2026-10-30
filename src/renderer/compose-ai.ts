@@ -30,8 +30,7 @@ function ownText(): string {
   return (copy.innerText || '').replace(/\n{3,}/g, '\n\n').trim();
 }
 
-// ---------- Subject suggestions ----------
-
+// Subject suggestions
 const subjBox = el<HTMLUListElement>('#ai-subjects');
 
 el('#btn-ai-subject').addEventListener('click', async () => {
@@ -68,7 +67,7 @@ document.addEventListener('mousedown', (e) => {
   if (!(e.target as HTMLElement).closest('#ai-subjects, #btn-ai-subject')) subjBox.hidden = true;
 });
 
-// ---------- Proofreading ----------
+// Proofreading
 // Works on text pieces in place: formatting stays, and every change goes through the editor's
 // undo history (Ctrl+Z). With a selection only the selection is checked.
 
@@ -177,7 +176,7 @@ el('#btn-ai-proof').addEventListener('click', async () => {
   }
 });
 
-// ---------- Translate the selection ----------
+// Translate the selection
 // Replaces the selected text with its translation into the default language (Ctrl+Z undoes it).
 
 let trRange: Range | null = null;
@@ -213,7 +212,7 @@ async function translateSelection(lang: string): Promise<void> {
   }
 }
 
-// ---------- Write with AI ----------
+// Write with AI
 // Instruction → draft (shown first, nothing is changed yet) → insert at the cursor or above the
 // signature. When replying/forwarding, the quoted mail is passed as context.
 

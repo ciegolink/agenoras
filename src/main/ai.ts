@@ -221,8 +221,7 @@ export function cancelAiDownload(): void {
   download?.abort();
 }
 
-// ---------- Worker process and queue ----------
-
+// Worker process and queue
 let worker: UtilityProcess | null = null;
 let idleTimer: NodeJS.Timeout | undefined;
 let nextId = 1;

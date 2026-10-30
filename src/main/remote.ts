@@ -56,8 +56,7 @@ function sniffImage(buf: Buffer, declared: string): string | null {
 
 const toDataUrl = (type: string, buf: Buffer) => `data:${type};base64,${buf.toString('base64')}`;
 
-// ---------- External images in mails ----------
-
+// External images in mails
 const IMG_SRC = /(<img\b[^>]*?\bsrc\s*=\s*)(["']?)(https?:\/\/[^"'\s>]+)\2/gi;
 const CSS_URL = /url\(\s*(["']?)(https?:\/\/[^"')\s]+)\1\s*\)/gi;
 const BG_ATTR = /(\bbackground\s*=\s*)(["']?)(https?:\/\/[^"'\s>]+)\2/gi;
@@ -127,8 +126,7 @@ export async function loadSignatureFile(file: string): Promise<string> {
   return inlineRemoteImages(html);
 }
 
-// ---------- Sender icons: contact photo → website favicon → (renderer: initials) ----------
-
+// Sender icons: contact photo → website favicon → (renderer: initials)
 // For freemail addresses the favicon only shows the provider – initials are better then
 const FREEMAIL = new Set(
   (

@@ -1,6 +1,6 @@
 # Agenoras User Manual
 
-Agenoras brings mail, calendar, contacts and tasks together in one desktop app for Windows, Linux and macOS. It uses open standards (IMAP, POP3, SMTP, CalDAV, CardDAV), so it works with Nextcloud, iCloud, Gmail, your own mail server and most other providers. Calendars, tasks and contacts can also be kept on your computer without a server, and an optional offline AI helps you write, proofread and translate emails without sending your texts anywhere.
+Agenoras brings mail, calendar, contacts, tasks and news feeds together in one desktop app for Windows, Linux and macOS. It uses open standards (IMAP, POP3, SMTP, CalDAV, CardDAV), so it works with Nextcloud, iCloud, Gmail, your own mail server and most other providers. Calendars, tasks and contacts can also be kept on your computer without a server, and an optional offline AI helps you write, proofread and translate emails without sending your texts anywhere.
 
 This manual explains how to use the app. If you want to build or change Agenoras itself, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
@@ -15,10 +15,11 @@ This manual explains how to use the app. If you want to build or change Agenoras
 7. [Calendar](#7-calendar)
 8. [Tasks](#8-tasks)
 9. [Contacts](#9-contacts)
-10. [Settings](#10-settings)
-11. [Keyboard shortcuts](#11-keyboard-shortcuts)
-12. [Your data and privacy](#12-your-data-and-privacy)
-13. [Troubleshooting](#13-troubleshooting)
+10. [Feeds](#10-feeds)
+11. [Settings](#11-settings)
+12. [Keyboard shortcuts](#12-keyboard-shortcuts)
+13. [Your data and privacy](#13-your-data-and-privacy)
+14. [Troubleshooting](#14-troubleshooting)
 
 ---
 
@@ -38,7 +39,7 @@ The macOS version runs on both Intel and Apple Silicon Macs.
 
 ## 2. First start: adding accounts
 
-On first start, open **Settings → Accounts**. Agenoras has three kinds of accounts. Add only the ones you need.
+On first start, open **Settings → Accounts**. Agenoras has four kinds of accounts. Add only the ones you need.
 
 ### Email account (IMAP or POP3)
 
@@ -71,9 +72,13 @@ Click **+ CalDAV account**, enter a name, the **Server URL**, your username and 
 
 Click **+ CardDAV account** and fill in the same fields as for CalDAV.
 
+### RSS feed
+
+Click **+ RSS feed** and enter the address of a feed or simply of a website. See [Feeds](#10-feeds).
+
 ### Calendar, tasks and contacts without a server
 
-Don't have a CalDAV or CardDAV server? Choose **Only on this computer (no server)** when adding the account. Events, tasks or contacts are then stored only on this computer (file `local.db`, see [Your data and privacy](#12-your-data-and-privacy)). They are not synced to other devices, so include the file in your backup.
+Don't have a CalDAV or CardDAV server? Choose **Only on this computer (no server)** when adding the account. Events, tasks or contacts are then stored only on this computer (file `local.db`, see [Your data and privacy](#13-your-data-and-privacy)). They are not synced to other devices, so include the file in your backup.
 
 ### Server addresses for common providers
 
@@ -89,13 +94,25 @@ To change an account later, click **Edit** next to it. Leave the password field 
 
 ## 3. The main window
 
-The buttons at the bottom of the sidebar switch between **Mail**, **Calendar**, **Contacts** and **Tasks**; they always stay in place, only the list above them scrolls. **Settings** are in the gear menu at the top right.
+The buttons at the bottom of the sidebar switch between **Mail**, **Calendar**, **Contacts**, **Tasks** and **Feed** (only shown once you have added a feed); they always stay in place, only the list above them scrolls. **Settings** are in the gear menu at the top right.
 
 - **Columns** can be resized by dragging their edges. Double-click an edge to reset it. Agenoras remembers window size, position and column widths.
 - **My day** is a side panel with a small month calendar, today's and tomorrow's events and your tasks. Open or close it with the panel button in the toolbar. Use **+ Event** and **+ Task for today** to add items quickly.
 - **Tray icon**: if background mode is on (see [Notifications](#notifications)), closing the window keeps Agenoras running in the tray. Right-click the tray icon to open the app, write a new email or quit.
 - **About**: gear menu → **About Agenoras** shows the version and links to the wiki and bug reports.
-- **Problems**: when a connection to a mail, calendar or contacts server fails, a warning sign appears in the title bar, with the number of new problems. Click it to see what went wrong. The log contains errors only; you can **Copy** it (e.g. for a bug report) or **Clear** it. See also [Troubleshooting](#13-troubleshooting).
+- **Search**: the field in the title bar searches everything, see [Search](#search) below.
+- **Problems**: when a connection to a mail, calendar or contacts server fails, a warning sign appears in the title bar, with the number of new problems. Click it to see what went wrong. The log contains errors only; you can **Copy** it (e.g. for a bug report) or **Clear** it. See also [Troubleshooting](#14-troubleshooting).
+
+### Search
+
+The search field in the title bar searches everything: emails (full text on the server), appointments, contacts, tasks and feed articles. Press **Ctrl+K** or **Ctrl+F** to jump into it from anywhere. As soon as you type, the search page opens:
+
+- **Results** (left): **All**, **Mails**, **Appointments**, **Contacts**, **Tasks** and **Feeds**, each with its number of hits. Click one to see only that kind.
+- **Mails from** (left): all accounts or a single account. Emails are always searched in all folders.
+- The hits are in the middle, an email opens in the preview on the right. Appointments, contacts, tasks and feed articles open in their own view; click into the search field again to get back to the hits.
+- The **All**, **Unread**, attachment and star buttons above the hits filter the email results.
+
+Click **×** in the search field or press **Esc** to close the search and return to where you were.
 
 ## 4. Mail
 
@@ -171,19 +188,17 @@ Emails belong together when one answers another. Conversations are grouped per f
 
 **Delete** (or the **Del** key) moves emails to the trash. In the **Trash** folder, deleting removes them permanently after you confirm.
 
-### Search and filters
+Deleted something by mistake? **Ctrl+Z** moves the emails back to the folder they came from. This also undoes moving, archiving and **Move to spam**, step by step for up to 20 steps, until you quit the app. Permanently deleted emails can't be restored.
 
-Type into the search field at the top of the list and press **Enter**. Agenoras searches sender, subject and the full message text on the server, and also your **appointments**, **contacts** and **tasks**. A ring in the search field shows that the search is still running; the number of results appears when it is finished.
+### Filters and quick filter
 
-- **This folder** or **Everywhere** sets the scope for emails.
-- **All**, **Mails**, **Appointments**, **Contacts** and **Tasks** show only one kind of result. Appointments, contacts and tasks are marked so you can tell them apart; click one to open it.
-- Press **Esc** or click **×** to end the search.
+The bar above the list filters the current folder:
 
-The filter buttons above the list show only:
+- **All** or only **Unread** emails
+- the paper clip: emails with an attachment; the star: **Important** (starred) emails
+- **Filter …** narrows the list instantly by sender, recipient and subject. It only looks at the emails already loaded in this folder and doesn't search the message text. If nothing matches, click **Search everywhere for "…"** to run the full [search](#search); when there are matches, the link below the list does the same. **Esc** clears the field.
 
-- **Unread** emails
-- emails with an **Attachment**
-- **Important** (starred) emails
+Contacts, tasks and feeds have the same filter bar.
 
 ### Categories
 
@@ -323,7 +338,8 @@ Tasks are stored on your CalDAV server (e.g. Nextcloud Tasks or Apple Reminders 
 
 - Type into the quick field at the top and press **Enter** to add a task.
 - Click a task to edit it: title, **List**, **Due** date and optional time, priority and notes.
-- Click the checkbox to mark a task as done. **Show completed** shows finished tasks again.
+- Click the checkbox to mark a task as done.
+- The bar at the top switches between **Open** and **All** (including completed tasks). **Filter …** searches title and notes.
 - Tasks are grouped into **Overdue**, **Today**, **Upcoming** and **No date**.
 
 Today's tasks also appear in the **My day** side panel.
@@ -332,14 +348,36 @@ If no task list appears, your CalDAV server needs a calendar that supports tasks
 
 ## 9. Contacts
 
-The contacts view lists all address books from your CardDAV accounts and local address books. Search by name, company, email or phone.
+The contacts view lists all address books from your CardDAV accounts and local address books. The **Filter …** field above the list narrows it by name, company, email or phone.
 
 - **New contact**: first and last name, company, job title, emails and phone numbers (one per line), birthday, note and address book.
 - **Photo**: drop an image onto the photo area or click it. It is cropped to a square automatically. Contact photos are also shown next to emails from that person.
 - **Write email** starts a new email to the contact. **Recent emails** shows your latest correspondence.
 - To create a contact from an email, click the sender's name and choose **Add as contact**.
 
-## 10. Settings
+## 10. Feeds
+
+Follow websites, blogs and news sites (RSS 2.0, RSS 1.0 and Atom) right next to your mail. The **Feed** button in the sidebar appears as soon as you have added a feed, and disappears again when you remove the last one.
+
+### Adding a feed
+
+In **Settings → Accounts → RSS feeds**, click **+ RSS feed** (or **Add feed** in the Feed view).
+
+- **Feed or website address**: the feed's address, or simply the website's address – Agenoras finds the feed itself.
+- **Name**: optional; if empty, the feed's own title is used.
+- **Feed requires a login**: for protected feeds, enter username and password. The password is encrypted like your other passwords.
+
+Use **Edit** and **Remove** next to a feed to change or delete it. Removing a feed also deletes its stored articles.
+
+### Reading
+
+- **Left**: your feeds with the number of unread articles; **All feeds** shows everything.
+- **Middle**: the articles, newest first. The bar above them has **All** / **Unread** and a **Filter …** field that also searches the article text. The double-tick button marks all shown articles as read.
+- **Right**: the article. Opening it marks it as read. **Open in browser** shows the original page, **Mark as unread** marks it unread again.
+
+Feeds are refreshed when you open the view, with **F5** and every 30 minutes. Articles are stored on your computer (up to 300 per feed), so you can read them offline. Images in articles are loaded automatically; links open in your browser.
+
+## 11. Settings
 
 ### Senders & signatures
 
@@ -358,7 +396,7 @@ Create, rename and delete email templates. A template saved from the compose win
 
 ### Accounts
 
-Add, edit and remove email, CalDAV and CardDAV accounts (see [First start](#2-first-start-adding-accounts)). Under **Edit** you can also change an account's colour and make it private with a PIN.
+Add, edit and remove email, CalDAV and CardDAV accounts and RSS feeds (see [First start](#2-first-start-adding-accounts)). Under **Edit** you can also change an account's colour and make it private with a PIN.
 
 ### Categories
 
@@ -396,19 +434,23 @@ The optional offline AI writes email drafts, suggests subjects, proofreads and t
 - **AI language**: the language for generated texts and subject suggestions, independent of the app language – *Same as the mail*, German (Switzerland, with "ss"), German (Germany), English, French or Italian. Replies are always written in the language of the email you answer; for German, the spelling chosen here applies.
 - **Default translation**: the target language for **Translate** (right-click in an email, translate button when writing). All languages the model supports are available: German, English, French, Italian, Spanish, Portuguese, Dutch, Chinese, Japanese, Korean and Arabic.
 
-## 11. Keyboard shortcuts
+## 12. Keyboard shortcuts
 
 On macOS, use **Cmd** instead of **Ctrl**.
 
 | Where | Shortcut | Action |
 |---|---|---|
+| Everywhere | **Ctrl+K** / **Ctrl+F** | Jump into the search field |
 | Mail | **F5** / **Ctrl+R** | Refresh |
 | Mail | **Del** | Delete selected emails |
+| Mail | **Ctrl+Z** | Undo the last delete or move |
 | Mail | **Ctrl+A** | Select all emails in the list |
 | Mail | **Ctrl+click** / **Shift+click** | Select single emails / a range |
 | Mail | **Esc** | Clear selection, close menus |
 | Mail | Double-click | Open email in its own window |
-| Search | **Enter** / **Esc** | Start / end search |
+| Search | **Enter** | Search right away |
+| Search | **Esc** / **×** | Close the search and go back |
+| Filter fields | **Esc** | Clear the filter |
 | Compose | **Ctrl+Shift+S** | Send |
 | Compose | **Ctrl+B / I / U** | Bold / italic / underline |
 | Compose | **Ctrl+K** | Insert link |
@@ -420,7 +462,7 @@ On macOS, use **Cmd** instead of **Ctrl**.
 | Translation panel | **Esc** | Close |
 | Mail window | **Esc** | Close window |
 
-## 12. Your data and privacy
+## 13. Your data and privacy
 
 Agenoras talks only to your own mail, calendar and contacts servers. There is no Agenoras cloud and no tracking.
 
@@ -434,16 +476,17 @@ Your data is stored here:
 
 - **Passwords** are encrypted with your system's keychain. PINs of private accounts are stored only as a protected hash.
 - `settings.json` contains signatures, templates, rules and preferences. Back it up if you want to keep them.
-- `cache.db` is a local copy of your mail for fast start and offline reading. You can delete it at any time; it is rebuilt from the server.
+- `rss.json` holds your feeds (addresses and encrypted passwords for protected feeds).
+- `cache.db` is a local copy of your mail and feed articles for fast start and offline reading. You can delete it at any time; it is rebuilt from the server.
 - `pop3.db` holds the mail of POP3 accounts. If the copy on the server is deleted, this is the only copy – back it up.
 - `local.db` holds local calendars, tasks and address books (accounts without a server). This is the only copy – back it up.
 - `ai.json` and the folder `ai-models` hold the AI settings and the downloaded model. Delete the model under **Settings → AI**.
 
-HTML emails are shown in a protected area where scripts can't run. External content is only loaded when you allow it.
+HTML emails are shown in a protected area where scripts can't run. External content is only loaded when you allow it. Feed articles are shown in the same protected area; their images are loaded automatically.
 
 The offline AI runs only on your computer. Your texts are never sent anywhere; its only internet access is the one-time download of the model file from Hugging Face.
 
-## 13. Troubleshooting
+## 14. Troubleshooting
 
 **"Sign-in failed (check username/password)"**
 Check the address and password. For Gmail and iCloud you need an app password. Some providers require you to enable IMAP access in their web settings first.
@@ -456,6 +499,12 @@ This can happen after a system change or a new keyring. Enter the password again
 
 **"The event/contact was changed elsewhere in the meantime"**
 Someone or another device changed it at the same time. Refresh and make your change again.
+
+**One email account keeps losing its connection**
+Open **Settings → Accounts → Edit** and check the IMAP and SMTP server. Use the mail server your provider gives for mail programs, not your website's domain: the domain often points to the web server, not the mail server. Some providers also limit how many connections a mailbox may open at the same time. The warning sign in the title bar shows the exact error.
+
+**"No RSS or Atom feed found at this address"**
+The page doesn't link to a feed. Look for an RSS icon or a link like `/feed` or `/rss` on the website and enter that address.
 
 **Something doesn't load, or a warning sign appears in the title bar**
 Click the warning sign. The problem log shows which server failed and why (e.g. wrong password, server not reachable). **Copy** puts the log on the clipboard for a bug report.
@@ -473,7 +522,7 @@ External images are blocked on purpose. Click **Load images**.
 Start it with `AGENORAS_WAYLAND=1` to use native Wayland. `AGENORAS_GPU=1` turns on hardware acceleration, which is off by default on Linux.
 
 **Mail list looks wrong or outdated**
-Quit Agenoras, delete `cache.db` in your data folder (see [section 12](#12-your-data-and-privacy)) and start again.
+Quit Agenoras, delete `cache.db` in your data folder (see [section 13](#13-your-data-and-privacy)) and start again.
 
 **Still stuck?**
 Check the [Wiki](https://github.com/ciegolink/agenoras/wiki) or [report a bug](https://github.com/ciegolink/agenoras/issues). Please include your Agenoras version (gear menu → **About Agenoras**) and your operating system.
