@@ -107,8 +107,7 @@
     },
     "win": {
       "target": [
-        "nsis",
-        "portable"
+        "nsis"
       ],
       "icon": "build/icon.ico"
     },
@@ -118,9 +117,6 @@
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,
       "artifactName": "${productName}-Setup.${ext}"
-    },
-    "portable": {
-      "artifactName": "${productName}-Portable.${ext}"
     },
     "mac": {
       "target": [

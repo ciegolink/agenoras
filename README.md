@@ -15,7 +15,7 @@ Agenoras is an Electron + TypeScript client for standard protocols: IMAP or POP3
 
 | Platform | Download |
 |---|---|
-| Windows | [Installer (.exe)](https://github.com/ciegolink/agenoras/releases/latest/download/Agenoras-Setup.exe) · [Portable (.exe)](https://github.com/ciegolink/agenoras/releases/latest/download/Agenoras-Portable.exe) |
+| Windows | [Installer (.exe)](https://github.com/ciegolink/agenoras/releases/latest/download/Agenoras-Setup.exe) |
 | Linux | [Debian/Ubuntu (.deb)](https://github.com/ciegolink/agenoras/releases/latest/download/agenoras_amd64.deb) · [AppImage](https://github.com/ciegolink/agenoras/releases/latest/download/Agenoras-x86_64.AppImage) |
 | macOS | [Disk image (.dmg)](https://github.com/ciegolink/agenoras/releases/latest/download/Agenoras.dmg) · [Zip](https://github.com/ciegolink/agenoras/releases/latest/download/Agenoras-mac.zip) (Intel + Apple Silicon) |
 
@@ -48,7 +48,8 @@ All versions and release notes: [Releases](https://github.com/ciegolink/agenoras
 - External images blocked by default, with per-mail and per-sender approval
 - Optional marking of external senders (outside your own domains)
 - Sender pictures from contact photos or website favicons, initials as fallback
-- Desktop notifications, notification sounds per account, tray icon with background mode
+- Desktop notifications, notification sounds per account, tray icon with background mode (new email, event, task or contact right from the tray)
+- Can be the system's default email app: `mailto:` links on websites and in other apps open a new email in Agenoras
 - Problem log behind a warning sign in the title bar: connection and server errors only, can be copied and cleared
 
 **Compose**
@@ -121,7 +122,7 @@ See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for a full setup guide (Ubuntu an
 | `npm run watch` | Compile on every save |
 | `npm run icons` | Generate app and tray icons from `build/logo.png` |
 | `npm run dist:linux` | Build Linux packages (AppImage, .deb) into `release/` |
-| `npm run dist:win` | Build Windows installer and portable `.exe` into `release/` |
+| `npm run dist:win` | Build the Windows installer into `release/` |
 | `npm run dist:mac` | Build macOS `.dmg` and `.zip` (universal: Intel + Apple Silicon), run on a Mac |
 
 ### Releases

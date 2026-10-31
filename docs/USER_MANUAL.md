@@ -30,7 +30,6 @@ Download the right file for your system from the [latest release](https://github
 | System | File | How to install |
 |---|---|---|
 | Windows | `Agenoras-Setup.exe` | Run the installer. If SmartScreen warns about an unknown publisher, click **More info → Run anyway**. |
-| Windows (no install) | `Agenoras-Portable.exe` | Start the file directly. |
 | Ubuntu / Debian | `agenoras_amd64.deb` | `sudo apt install ./agenoras_amd64.deb` |
 | Other Linux | `Agenoras-x86_64.AppImage` | `chmod +x Agenoras-x86_64.AppImage`, then start it. |
 | macOS | `Agenoras.dmg` | Open it and drag Agenoras to **Applications**. |
@@ -102,7 +101,10 @@ The buttons at the bottom of the sidebar switch between **Mail**, **Calendar**, 
 
 - **Columns** can be resized by dragging their edges. Double-click an edge to reset it. Agenoras remembers window size, position and column widths.
 - **My day** is a side panel with a small month calendar, today's and tomorrow's events and your tasks. Open or close it with the panel button in the toolbar. Use **+ Event** and **+ Task for today** to add items quickly.
-- **Tray icon**: if background mode is on (see [Notifications](#notifications)), closing the window keeps Agenoras running in the tray. Right-click the tray icon to open the app, write a new email or quit.
+- **Tray icon**: if background mode is on (see [Notifications](#notifications)), closing the window keeps Agenoras running in the tray. Right-click the tray icon to open the app, write a new email, create an event, task or contact, or quit.
+- **Default email app**: Settings → Senders & signatures → *Default email app*. Then links like "Send email to …" on websites and in other apps open a new email in Agenoras, with recipient, subject and text already filled in.
+  - macOS and Linux: click *Make default*.
+  - Windows 10/11 doesn't let apps set this themselves: the button opens *Settings → Default apps*, choose Agenoras for *Email* (MAILTO) there.
 - **About**: gear menu → **About Agenoras** shows the version and links to the wiki and bug reports.
 - **Search**: the field in the title bar searches everything, see [Search](#search) below.
 - **Problems**: when a connection to a mail, calendar or contacts server fails, a warning sign appears in the title bar, with the number of new problems. Click it to see what went wrong. The log contains errors only; you can **Copy** it (e.g. for a bug report) or **Clear** it. See also [Troubleshooting](#14-troubleshooting).

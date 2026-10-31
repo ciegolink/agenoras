@@ -110,7 +110,7 @@ Passwords are encrypted with the system keychain (GNOME Keyring / libsecret on L
 | Platform | Command | Output in `release/` |
 |---|---|---|
 | Linux | `npm run dist:linux` | `Agenoras-x86_64.AppImage`, `agenoras_amd64.deb` |
-| Windows | `npm run dist:win` (run on Windows) | `Agenoras-Setup.exe`, `Agenoras-Portable.exe` |
+| Windows | `npm run dist:win` (run on Windows) | `Agenoras-Setup.exe` |
 | macOS | `npm run dist:mac` (run on a Mac) | `Agenoras.dmg`, `Agenoras-mac.zip` (universal) |
 
 Building the Windows installer on Linux requires Wine. The simpler way is GitHub Actions: push a tag (`npm version patch && git push --follow-tags`) and the workflow builds all three platforms and attaches the files to a draft release. Review the draft under **Releases** and publish it.
