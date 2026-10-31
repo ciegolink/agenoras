@@ -162,6 +162,8 @@ contextBridge.exposeInMainWorld('api', {
     runRules: (accountId: string | null) => ipcRenderer.invoke('rules:run', accountId),
     languages: () => ipcRenderer.invoke('settings:languages'),
     relaunch: () => ipcRenderer.invoke('app:relaunch'),
+    mailtoStatus: () => ipcRenderer.invoke('mailto:status'),
+    setDefaultMail: () => ipcRenderer.invoke('mailto:setDefault'),
     setMailLabel: (keys: string[], labelId: string, on: boolean) => ipcRenderer.invoke('labels:set', keys, labelId, on),
   },
   compose: {
@@ -186,6 +188,9 @@ contextBridge.exposeInMainWorld('api', {
   },
   onMailSent: (cb: () => void) => {
     ipcRenderer.on('mail:sent', () => cb());
+  },
+  onCreate: (cb: (kind: 'event' | 'task' | 'contact') => void) => {
+    ipcRenderer.on('app:create', (_e, kind) => cb(kind));
   },
   onOpenMail: (cb: (ref: { accountId: string; folder: string; uid: number }) => void) => {
     ipcRenderer.on('mail:open', (_e, ref) => cb(ref));

@@ -68,6 +68,7 @@ function renderSettings(): void {
                   ? aiHtml()
                   : appearanceHtml();
   if (setTab === 'identities' && idnFilter) applyIdnFilter();
+  if (setTab === 'identities') void paintDefaultMail();
   // accounts, appearance and sounds apply immediately
   el('#btn-settings-save').hidden = setTab === 'accounts' || setTab === 'appearance' || setTab === 'sounds' || setTab === 'ai';
 }
@@ -243,6 +244,27 @@ el('#settings-body').addEventListener('change', (e) => {
     playSound(notify.sound);
   } else return;
   saveNotifyNow();
+});
+
+// Default mail app: state and button are filled in after rendering (asks the main process)
+async function paintDefaultMail(): Promise<void> {
+  const state = document.querySelector<HTMLElement>('[data-default-mail-state]');
+  const btn = document.querySelector<HTMLButtonElement>('[data-default-mail]');
+  if (!state || !btn) return;
+  const st = await window.api.settings.mailtoStatus();
+  if (st.isDefault) state.textContent = t('settings.defaultMailIs');
+  else if (!st.packaged) state.textContent = t('settings.defaultMailDev');
+  else state.textContent = t(st.platform === 'win32' ? 'settings.defaultMailWin' : 'settings.defaultMailHint');
+  btn.hidden = st.isDefault || !st.packaged;
+}
+
+// back from the Windows settings: show the new state
+window.addEventListener('focus', () => void paintDefaultMail());
+
+el('#settings-body').addEventListener('click', async (e) => {
+  if (!(e.target as HTMLElement).closest('[data-default-mail]')) return;
+  await window.api.settings.setDefaultMail();
+  await paintDefaultMail();
 });
 
 el('#settings-body').addEventListener('click', (e) => {
@@ -622,7 +644,11 @@ function identitiesHtml(): string {
         .map((n) => `<option value="${n}"${n === readDelay ? ' selected' : ''}>${esc(n === 0 ? t('settings.readNow') : n < 0 ? t('settings.readManual') : t('settings.readAfter', { n }))}</option>`)
         .join('')}</select></div>
     </div>`;
-  return `${filter}${sections.join('')}<p class="hint">${esc(t('settings.aliasHint'))}</p>${general}`;
+  const defaultMail = `<h3 class="set-sub">${esc(t('settings.defaultMail'))}</h3>
+    <div class="set-card">
+      <div class="sound-row"><span class="sound-acc" data-default-mail-state>${esc(t('settings.defaultMailHint'))}</span><button type="button" class="btn ghost" data-default-mail hidden>${esc(t('settings.defaultMailSet'))}</button></div>
+    </div>`;
+  return `${filter}${sections.join('')}<p class="hint">${esc(t('settings.aliasHint'))}</p>${general}${defaultMail}`;
 }
 
 // Filter without re-rendering (keeps the focus in the field)

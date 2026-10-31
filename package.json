@@ -94,6 +94,9 @@
       "syncDesktopName": true,
       "executableArgs": [
         "--ozone-platform=x11"
+      ],
+      "mimeTypes": [
+        "x-scheme-handler/mailto"
       ]
     },
     "appImage": {
@@ -110,6 +113,7 @@
       "icon": "build/icon.ico"
     },
     "nsis": {
+      "include": "build/installer.nsh",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,
@@ -134,6 +138,14 @@
         }
       ],
       "icon": "build/icon-mac.png",
+      "protocols": [
+        {
+          "name": "Email",
+          "schemes": [
+            "mailto"
+          ]
+        }
+      ],
       "category": "public.app-category.productivity",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,

@@ -863,13 +863,15 @@ function initCompose(o: ComposeOpts): void {
   const notOwn = (r: Recipient) => !own.has(r.address.toLowerCase());
   recipients.to = parseRecipients(toList(o.to));
   recipients.cc = parseRecipients(toList(o.cc)).filter(notOwn);
-  recipients.bcc = [];
+  recipients.bcc = parseRecipients(toList(o.bcc)).filter(notOwn);
   el('#row-cc').toggleAttribute('hidden', !recipients.cc.length);
+  el('#row-bcc').toggleAttribute('hidden', !recipients.bcc.length);
   (['to', 'cc', 'bcc'] as RecipField[]).forEach((f) => renderRecipients(f));
 
   cfield('subject').value = o.subject ?? '';
   // Layout: space to write – signature – quote
-  editor.innerHTML = '<p><br></p><p><br></p>' + sigHtml(identity) + (o.quoteHtml ? `<div data-quote="1">${sanitizeHtml(o.quoteHtml)}</div>` : '');
+  const text = o.body ? o.body.split(/\r?\n/).map((l) => `<p>${esc(l) || '<br>'}</p>`).join('') + '<p><br></p>' : '<p><br></p><p><br></p>';
+  editor.innerHTML = text + sigHtml(identity) + (o.quoteHtml ? `<div data-quote="1">${sanitizeHtml(o.quoteHtml)}</div>` : '');
   threadInfo = { inReplyTo: o.inReplyTo, references: o.references };
 
   const fw = o.forward;

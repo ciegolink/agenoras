@@ -4,6 +4,8 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, No
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { clearLog, flushLog, getLog, log, logState, markLogSeen, setOnLogChange } from './log';
 import {
   AccountUpdate,
@@ -55,6 +57,7 @@ import {
   reconnectAll,
 } from './imap';
 import { OutgoingMail, sendMail, testSmtp } from './smtp';
+import { mailtoArg, parseMailto } from './mailto';
 import { closeStore as closePopStore, forgetAccount as forgetPopAccount } from './pop3';
 import { closeLocal, forgetLocal, isLocalDav, renameLocal } from './localdav';
 import { aiState, cancelAiDownload, deleteAiModel, downloadAiModel, proofread, setAiEnabled, setAiLang, setAiModel, setAiTranslateLang, stopWorker as stopAi, suggestSubjects, writeText, translate } from './ai';
@@ -106,6 +109,16 @@ if (process.platform === 'linux' && !process.env.AGENORAS_WAYLAND && !process.ar
 if (!app.requestSingleInstanceLock()) {
   app.exit(0);
 }
+// mailto: links. Windows/Linux pass them on the command line (also to a second instance),
+// macOS sends open-url, possibly before the app is ready
+let pendingMailto: string | null = mailtoArg(process.argv) ?? null;
+app.on('open-url', (e, url) => {
+  if (!/^mailto:/i.test(url)) return;
+  e.preventDefault();
+  if (app.isReady()) openMailto(url);
+  else pendingMailto = url;
+});
+
 // Windows: without an app ID no notifications appear
 if (process.platform === 'win32') app.setAppUserModelId('ch.ciegolink.agenoras');
 
@@ -150,7 +163,8 @@ function lockDown(w: BrowserWindow): void {
   w.on('unmaximize', sendState);
   w.setMenuBarVisibility(false);
   w.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^(https?|mailto):/i.test(url)) shell.openExternal(url);
+    if (/^mailto:/i.test(url)) openMailto(url); // our own compose window, no detour through the system
+    else if (/^https?:/i.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
   w.webContents.on('will-navigate', (e) => e.preventDefault());
@@ -161,6 +175,8 @@ function lockDown(w: BrowserWindow): void {
     });
   }
 }
+
+const execFileP = promisify(execFile);
 
 const BUILD_DIR = path.join(__dirname, '../../build');
 // Custom logo (build/logo.png) takes precedence over the bundled icon
@@ -219,7 +235,32 @@ function showWindow(): void {
   setTrayUnread(false);
 }
 
-app.on('second-instance', showWindow);
+app.on('second-instance', (_e, argv) => {
+  const url = mailtoArg(argv);
+  if (url) openMailto(url);
+  else showWindow();
+});
+
+// Runs fn once the main window has loaded (messages sent earlier would get lost)
+function whenMainReady(fn: () => void): void {
+  if (!win) createWindow();
+  const w = win!;
+  if (w.webContents.isLoading()) w.webContents.once('did-finish-load', fn);
+  else fn();
+}
+
+function openMailto(url: string): void {
+  const m = parseMailto(url);
+  if (!m) return;
+  showWindow();
+  whenMainReady(() => openComposeWindow({ mode: 'new', to: m.to, cc: m.cc, bcc: m.bcc, subject: m.subject, body: m.body }));
+}
+
+// New event, task or contact from the tray: the main window opens the dialog
+function createFromTray(kind: 'event' | 'task' | 'contact'): void {
+  showWindow();
+  whenMainReady(() => win?.webContents.send('app:create', kind));
+}
 
 // Tray
 let tray: Tray | null = null;
@@ -256,6 +297,9 @@ function createTray(): void {
           openComposeWindow({});
         },
       },
+      { label: t('tb.newEvent'), click: () => createFromTray('event') },
+      { label: t('tb.newTask'), click: () => createFromTray('task') },
+      { label: t('tb.newContact'), click: () => createFromTray('contact') },
       { type: 'separator' },
       {
         label: t('tray.quit'),
@@ -450,6 +494,31 @@ ipcMain.handle('win:close', (e) => senderWindow(e)?.close()); // close() → the
 ipcMain.handle('win:isMaximized', (e) => senderWindow(e)?.isMaximized() ?? false);
 
 ipcMain.handle('compose:open', (_e, opts: unknown) => openComposeWindow(opts));
+
+// Default mail app (mailto:)
+async function isDefaultMail(): Promise<boolean> {
+  if (!app.isPackaged) return false;
+  if (process.platform !== 'win32') return app.isDefaultProtocolClient('mailto');
+  // Windows: what the user picked in Settings → Default apps (our own registry entry says nothing about that)
+  try {
+    const { stdout } = await execFileP('reg', ['query', 'HKCU\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\mailto\\UserChoice', '/v', 'ProgId']);
+    return /Agenoras\.mailto/.test(stdout);
+  } catch {
+    return false;
+  }
+}
+
+ipcMain.handle('mailto:status', async () => ({ isDefault: await isDefaultMail(), packaged: app.isPackaged, platform: process.platform }));
+ipcMain.handle('mailto:setDefault', async () => {
+  if (!app.isPackaged) return false;
+  // Windows 10/11 only lets the user choose: open the page with Agenoras' entries (registered by the installer)
+  if (process.platform === 'win32') {
+    await shell.openExternal('ms-settings:defaultapps?registeredAppUser=Agenoras').catch(() => shell.openExternal('ms-settings:defaultapps'));
+    return false;
+  }
+  app.setAsDefaultProtocolClient('mailto');
+  return isDefaultMail();
+});
 ipcMain.handle('compose:init', (e) => composeOpts.get(e.sender.id) ?? {});
 // Sent: play the sound in the main window (the compose window closes right away)
 ipcMain.handle('compose:sent', () => win?.webContents.send('mail:sent'));
@@ -1339,6 +1408,11 @@ ipcMain.handle('rules:run', async (_e, accountId: string | null) => {
 app.whenReady().then(() => {
   nativeTheme.themeSource = getSettings().theme;
   powerMonitor.on('resume', () => setTimeout(reconnectAll, 3000)); // give the network a moment to come back
+  if (pendingMailto) {
+    const url = pendingMailto;
+    pendingMailto = null;
+    setTimeout(() => openMailto(url), 0); // after the main window exists
+  }
   createWindow();
   createTray();
   // Private accounts start locked: remove whatever copies a crash may have left behind

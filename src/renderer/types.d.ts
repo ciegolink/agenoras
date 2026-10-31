@@ -128,7 +128,9 @@ interface ComposeOpts {
   matchAddresses?: string[]; // addresses of the original mail → pick the matching sender (alias)
   to?: string | string[];
   cc?: string | string[];
+  bcc?: string | string[];
   subject?: string;
+  body?: string; // plain text, e.g. from a mailto: link
   quoteHtml?: string; // quoted/forwarded part, goes below the signature
   inReplyTo?: string;
   references?: string[];
@@ -513,6 +515,8 @@ interface Window {
       runRules(accountId: string | null): Promise<{ matched: number; moved: number }>;
       languages(): Promise<string[]>;
       relaunch(): Promise<void>;
+      mailtoStatus(): Promise<{ isDefault: boolean; packaged: boolean; platform: string }>;
+      setDefaultMail(): Promise<boolean>;
       setMailLabel(keys: string[], labelId: string, on: boolean): Promise<Record<string, string[]>>;
       saveNotify(n: NotifySettings): Promise<NotifySettings>;
       setTheme(theme: 'dark' | 'light' | 'system'): Promise<string>;
@@ -576,6 +580,7 @@ interface Window {
     };
     onNewMail(cb: (accountId: string, grew: boolean) => void): void;
     onOpenMail(cb: (ref: MailRef) => void): void;
+    onCreate(cb: (kind: 'event' | 'task' | 'contact') => void): void;
     onMailSent(cb: () => void): void;
     sounds: {
       list(): Promise<{ id: string; name: string }[]>;

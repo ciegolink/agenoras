@@ -1898,23 +1898,29 @@ function setupTitlebarActions(): void {
   ].join('');
   el('#tb-refresh').addEventListener('click', refreshAll);
   el('#tb-new-mail').addEventListener('click', () => openCompose());
-  el('#tb-new-event').addEventListener('click', async () => {
+  el('#tb-new-event').addEventListener('click', () => createNew('event'));
+  el('#tb-new-task').addEventListener('click', () => createNew('task'));
+  el('#tb-new-contact').addEventListener('click', () => createNew('contact'));
+}
+setupTitlebarActions();
+
+// New event, task or contact: from the title bar and from the tray menu
+async function createNew(kind: 'event' | 'task' | 'contact'): Promise<void> {
+  if (kind === 'event') {
     setView('cal');
     await ensureCalendars();
     openEventDialog(null);
-  });
-  el('#tb-new-task').addEventListener('click', async () => {
+  } else if (kind === 'task') {
     setView('tasks');
     await ensureTasks();
     openTaskDialog(null);
-  });
-  el('#tb-new-contact').addEventListener('click', async () => {
+  } else {
     setView('contacts');
     await ensureContacts();
     openContactDialog(null);
-  });
+  }
 }
-setupTitlebarActions();
+window.api.onCreate((kind) => void createNew(kind));
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r')) {
