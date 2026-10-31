@@ -30,7 +30,7 @@ All versions and release notes: [Releases](https://github.com/ciegolink/agenoras
 
 **Mail**
 - Multiple IMAP/SMTP accounts with a unified inbox and live updates (IDLE)
-- Sign in with Microsoft or Google (OAuth 2.0 with PKCE, token in the system keychain, renewed automatically) as an alternative to passwords
+- Sign in with Microsoft (Outlook.com, Hotmail, Microsoft 365) via OAuth 2.0 with PKCE instead of a password; token in the system keychain, renewed automatically. Google sign-in is implemented in the source code but not enabled in the released builds
 - POP3 accounts (SSL/TLS or STARTTLS): the inbox is fetched every 2 minutes and kept locally, optionally leaving a copy on the server
 - Private accounts: hidden until unlocked with a PIN, locked again by hand or automatically after a few minutes
 - A colour per account (preset or custom)
@@ -145,7 +145,16 @@ The workflow can also be started manually under **Actions → Build → Run work
 | Nextcloud | CalDAV and CardDAV: `https://<host>/remote.php/dav` |
 | iCloud | CalDAV `https://caldav.icloud.com`, CardDAV `https://contacts.icloud.com`, app password |
 
-Microsoft 365 / Outlook.com and Gmail can also sign in with OAuth (browser sign-in, no password) once client IDs are set in `src/main/oauth.ts`, see [DEVELOPMENT.md](docs/DEVELOPMENT.md#oauth-microsoft-and-google). Google Calendar/Contacts and Microsoft calendars/contacts are not supported yet.
+**OAuth sign-in**
+
+| Provider | Released builds | Source code |
+|---|---|---|
+| Microsoft (Outlook.com, Hotmail, Microsoft 365) | ✅ built in: **Sign in with Microsoft** | ✅ |
+| Google (Gmail) | ❌ not enabled – use an app password | ✅ implemented, enable it with your own Google client ID |
+
+Google sign-in is not enabled in the official builds because Google requires a paid yearly security assessment (CASA) for apps with full Gmail access. The code is complete: register your own Google OAuth client (*Desktop app*), set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `src/main/oauth.ts` (or the environment variables `AGENORAS_GOOGLE_CLIENT_ID` / `AGENORAS_GOOGLE_CLIENT_SECRET`) and build Agenoras yourself, see [DEVELOPMENT.md](docs/DEVELOPMENT.md#oauth-microsoft-and-google).
+
+OAuth covers email only: calendars and contacts from Google or Microsoft are not supported yet.
 
 **Logo**
 
@@ -215,7 +224,7 @@ The AI model runs locally in a separate process (`utilityProcess`). Texts are pr
    │  ├─ remote.ts       Favicons, external images, HTML signatures
    │  ├─ settings.ts     Identities, signatures, templates, preferences
    │  ├─ accounts.ts     Mail accounts
-   │  ├─ oauth.ts        Sign-in with Microsoft and Google (OAuth)
+   │  ├─ oauth.ts        Sign-in with Microsoft (enabled) and Google (needs own client ID)
    │  ├─ davaccounts.ts  CalDAV/CardDAV accounts
    │  ├─ sounds.ts       Notification sounds
    │  ├─ winstate.ts     Window state

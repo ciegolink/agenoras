@@ -129,6 +129,8 @@ Only the macOS job gets these secrets. Entitlements for the hardened runtime are
 
 ### OAuth (Microsoft and Google)
 
+**Status:** Microsoft is enabled in the official builds (Agenoras' own client ID). Google is fully implemented but not enabled: the official builds ship without a Google client ID, because full Gmail access needs Google's paid yearly security assessment.
+
 The **Sign in with Microsoft / Google** buttons in the account dialog only appear when a client ID is set in `src/main/oauth.ts` (`MICROSOFT_CLIENT_ID`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`). Desktop apps are public clients, so these values are not secret and ship with the app. For a quick test, set `AGENORAS_MS_CLIENT_ID`, `AGENORAS_GOOGLE_CLIENT_ID` and `AGENORAS_GOOGLE_CLIENT_SECRET` instead.
 
 **Microsoft** ([entra.microsoft.com](https://entra.microsoft.com) → App registrations → New registration)
@@ -159,4 +161,4 @@ Install on Ubuntu: `sudo apt install ./release/agenoras_amd64.deb`. The AppImage
 | No title bar on Wayland | The app starts via XWayland by default; `AGENORAS_WAYLAND=1` forces native Wayland |
 | Tray icon missing on Ubuntu | Requires the AppIndicator extension (preinstalled on Ubuntu) |
 | Gmail login fails | Use an app password (Google account → Security → App passwords) |
-| Microsoft 365 | Sign in with Microsoft needs a client ID in `src/main/oauth.ts`, see [OAuth](#oauth-microsoft-and-google) |
+| Google sign-in button missing | Not enabled in the official builds; set your own Google client ID, see [OAuth](#oauth-microsoft-and-google) |

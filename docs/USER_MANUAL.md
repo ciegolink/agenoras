@@ -43,7 +43,9 @@ On first start, open **Settings → Accounts**. Agenoras has four kinds of accou
 
 ### Email account (IMAP or POP3)
 
-Click **+ Email account**. For Microsoft (Outlook.com, Microsoft 365) and Gmail you can click **Sign in with Microsoft** or **Sign in with Google** at the top, if your version offers them: your browser opens, you sign in there, and Agenoras sets up the account by itself – no password and no server settings needed. To renew the sign-in later, open the account with **Edit** and click **Sign in again**.
+Click **+ Email account**. For Microsoft accounts (Outlook.com, Hotmail, Microsoft 365) click **Sign in with Microsoft** at the top: your browser opens, you sign in there, and Agenoras sets up the account by itself – no password and no server settings needed. To renew the sign-in later, open the account with **Edit** and click **Sign in again**. Microsoft 365 work accounts may need a one-time approval by your IT administrator.
+
+Gmail is set up by hand with an [app password](https://myaccount.google.com/apppasswords). Sign-in with Google exists in the source code but is not enabled in the official downloads.
 
 Otherwise fill in:
 
@@ -90,7 +92,7 @@ Don't have a CalDAV or CardDAV server? Choose **Only on this computer (no server
 | Nextcloud | CalDAV and CardDAV: `https://<your-server>/remote.php/dav` |
 | iCloud | CalDAV `https://caldav.icloud.com`, CardDAV `https://contacts.icloud.com`. Use an app password from your Apple ID settings. |
 
-> **Not supported yet:** calendars and contacts from Google or Microsoft. Their email works with **Sign in with Google / Microsoft** (see above).
+> **Not supported yet:** calendars and contacts from Google or Microsoft. Microsoft email works with **Sign in with Microsoft**, Gmail with an app password (see above).
 
 To change an account later, click **Edit** next to it. Leave the password field empty to keep the current password.
 
