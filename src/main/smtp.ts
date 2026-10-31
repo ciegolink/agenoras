@@ -4,6 +4,7 @@ import addressparser from 'nodemailer/lib/addressparser';
 import fs from 'node:fs';
 import path from 'node:path';
 import { Account, getAccount, getPassword } from './accounts';
+import { accessToken } from './oauth';
 import { appendToSent, getAttachmentFiles } from './imap';
 import { Identity } from './settings';
 import { i18nData, t } from './i18n';
@@ -41,17 +42,18 @@ interface SmtpCfg {
   user: string;
 }
 
-function transport(cfg: SmtpCfg, pass: string) {
+// Password or OAuth access token
+function transport(cfg: SmtpCfg, secret: string | { accessToken: string }) {
   return nodemailer.createTransport({
     host: cfg.smtpHost,
     port: cfg.smtpPort,
     secure: cfg.smtpSecure, // false → STARTTLS
-    auth: { user: cfg.user, pass },
+    auth: typeof secret === 'string' ? { user: cfg.user, pass: secret } : { type: 'OAuth2', user: cfg.user, accessToken: secret.accessToken },
   });
 }
 
-export async function testSmtp(cfg: SmtpCfg, pass: string): Promise<void> {
-  await transport(cfg, pass).verify();
+export async function testSmtp(cfg: SmtpCfg, secret: string | { accessToken: string }): Promise<void> {
+  await transport(cfg, secret).verify();
 }
 
 // Accepts "a@b.ch", "Name <a@b.ch>" and lists separated by , or ;
@@ -112,7 +114,7 @@ export async function sendMail(
 ): Promise<SendResult> {
   const attachments = await collectAttachments(mail);
   const from = { name: identity.name || acc.name, address: identity.email };
-  const transporter = transport(acc, await getPassword(acc.id));
+  const transporter = transport(acc, acc.oauth ? { accessToken: await accessToken(acc) } : await getPassword(acc.id));
 
   // Build once: the same message is sent and stored in "Sent".
   // Bcc is only in the envelope, never in the header – the other recipients do not see it.

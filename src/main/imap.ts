@@ -1,6 +1,7 @@
 import { ImapFlow, MessageStructureObject } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import { Account, getAccount, getPassword } from './accounts';
+import { accessToken, forgetToken } from './oauth';
 import { t } from './i18n';
 import { log } from './log';
 import type { InviteInfo } from './invites';
@@ -86,19 +87,22 @@ export function friendlyError(err: unknown): string {
   return e?.responseText || e?.message || String(err);
 }
 
-function makeClient(cfg: ConnCfg, pass: string): ImapFlow {
+// Password or OAuth access token
+export type Secret = string | { accessToken: string };
+
+function makeClient(cfg: ConnCfg, secret: Secret): ImapFlow {
   return new ImapFlow({
     host: cfg.host,
     port: cfg.port,
     secure: cfg.secure,
-    auth: { user: cfg.user, pass },
+    auth: typeof secret === 'string' ? { user: cfg.user, pass: secret } : { user: cfg.user, accessToken: secret.accessToken },
     logger: false,
   });
 }
 
-export async function testConnection(cfg: ConnCfg, pass: string): Promise<void> {
-  if (cfg.protocol === 'pop3') return pop.testConnection(cfg, pass);
-  const c = makeClient(cfg, pass);
+export async function testConnection(cfg: ConnCfg, secret: Secret): Promise<void> {
+  if (cfg.protocol === 'pop3' && typeof secret === 'string') return pop.testConnection(cfg, secret);
+  const c = makeClient(cfg, secret);
   await c.connect();
   await c.logout();
 }
@@ -119,7 +123,7 @@ function getClient(acc: Account): Promise<ImapFlow> {
 }
 
 async function connectClient(acc: Account): Promise<ImapFlow> {
-  const c = makeClient(acc, await getPassword(acc.id));
+  const c = makeClient(acc, acc.oauth ? { accessToken: await accessToken(acc) } : await getPassword(acc.id));
   c.on('exists', (data: { path?: string; count?: number; prevCount?: number }) => {
     if (!data?.path || data.path === 'INBOX') onNew(acc.id, (data?.count ?? 0) > (data?.prevCount ?? 0));
   });
@@ -139,6 +143,7 @@ async function connectClient(acc: Account): Promise<ImapFlow> {
   try {
     await c.connect();
   } catch (err) {
+    if (acc.oauth) forgetToken(acc.id); // next attempt gets a fresh token
     log('error', 'IMAP', acc.email, t('log.connFailed', { host: `${acc.host}:${acc.port}`, msg: friendlyError(err) }));
     throw err;
   }

@@ -43,7 +43,9 @@ On first start, open **Settings → Accounts**. Agenoras has four kinds of accou
 
 ### Email account (IMAP or POP3)
 
-Click **+ Email account** and fill in:
+Click **+ Email account**. For Microsoft (Outlook.com, Microsoft 365) and Gmail you can click **Sign in with Microsoft** or **Sign in with Google** at the top, if your version offers them: your browser opens, you sign in there, and Agenoras sets up the account by itself – no password and no server settings needed. To renew the sign-in later, open the account with **Edit** and click **Sign in again**.
+
+Otherwise fill in:
 
 - **Display name**: the name others see as the sender (e.g. your name or company)
 - **Email** and **Password**
@@ -88,7 +90,7 @@ Don't have a CalDAV or CardDAV server? Choose **Only on this computer (no server
 | Nextcloud | CalDAV and CardDAV: `https://<your-server>/remote.php/dav` |
 | iCloud | CalDAV `https://caldav.icloud.com`, CardDAV `https://contacts.icloud.com`. Use an app password from your Apple ID settings. |
 
-> **Not supported yet:** Microsoft 365 / Outlook.com and Google Calendar/Contacts need OAuth2 sign-in, which Agenoras doesn't support yet.
+> **Not supported yet:** calendars and contacts from Google or Microsoft. Their email works with **Sign in with Google / Microsoft** (see above).
 
 To change an account later, click **Edit** next to it. Leave the password field empty to keep the current password.
 
@@ -517,6 +519,12 @@ This can happen after a system change or a new keyring. Enter the password again
 
 **"The event/contact was changed elsewhere in the meantime"**
 Someone or another device changed it at the same time. Refresh and make your change again.
+
+**"Access expired or revoked. Please sign in again"**
+The sign-in with Microsoft or Google is no longer valid, for example after a password change or when access was removed in the account settings. Open **Settings → Accounts → Edit** and click **Sign in again**.
+
+**Microsoft 365: sign-in works, but sending fails ("SmtpClientAuthentication is disabled")**
+Many companies turn off sending from mail programs. Your Microsoft 365 administrator has to enable **Authenticated SMTP** for your mailbox.
 
 **One email account keeps losing its connection**
 Open **Settings → Accounts → Edit** and check the IMAP and SMTP server. Use the mail server your provider gives for mail programs, not your website's domain: the domain often points to the web server, not the mail server. Some providers also limit how many connections a mailbox may open at the same time. The warning sign in the title bar shows the exact error.

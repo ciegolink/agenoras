@@ -972,9 +972,75 @@ function setAccountDialogMode(edit: boolean): void {
   el('#btn-save').textContent = t(edit ? 'btn.saveConnect' : 'btn.connect');
 }
 
+// OAuth (Microsoft, Google): offered only for providers with a client ID
+let oauthAvail: ('microsoft' | 'google')[] = [];
+let oauthBusy = false;
+const OAUTH_LABEL = { microsoft: 'Microsoft', google: 'Google' } as const;
+window.api.oauth
+  .providers()
+  .then((p) => (oauthAvail = p))
+  .catch(() => {});
+
+function showOAuth(acc: Account | null): void {
+  dlg.classList.toggle('is-oauth', !!acc?.oauth);
+  el('#oauth-row').hidden = !!acc || !oauthAvail.length;
+  dlg.querySelectorAll<HTMLElement>('[data-oauth]').forEach((b) => (b.hidden = !oauthAvail.includes(b.dataset.oauth as 'microsoft' | 'google')));
+  el('#oauth-info').hidden = !acc?.oauth;
+  if (acc?.oauth) el('#oauth-info-text').textContent = t('oauth.signedInAs', { provider: OAUTH_LABEL[acc.oauth], email: acc.email });
+  el('#add-error').classList.remove('info');
+}
+
+// Show the result of a sign-in like a newly connected account
+async function oauthDone(acc: Account, renewed: boolean): Promise<void> {
+  dlg.close();
+  folderCache.delete(acc.id);
+  await loadAccounts();
+  markActive();
+  await loadMails();
+  setStatus(t(renewed ? 'account.updated' : 'account.connected', { email: acc.email }));
+}
+
+function oauthWaiting(on: boolean): void {
+  oauthBusy = on;
+  dlg.querySelectorAll<HTMLButtonElement>('[data-oauth], #btn-oauth-reauth, #btn-save').forEach((b) => (b.disabled = on));
+  el('#add-error').classList.toggle('info', on);
+  el('#add-error').textContent = on ? t('oauth.waiting') : '';
+}
+
+dlg.addEventListener('click', async (e) => {
+  const tgt = e.target as HTMLElement;
+  const provider = tgt.closest<HTMLElement>('[data-oauth]')?.dataset.oauth as 'microsoft' | 'google' | undefined;
+  const reauth = tgt.closest('#btn-oauth-reauth');
+  if ((!provider && !reauth) || oauthBusy) return;
+  let priv: ReturnType<typeof readPrivacyFields> | null = null;
+  try {
+    if (provider) priv = readPrivacyFields(false);
+  } catch (err) {
+    el('#add-error').textContent = errMsg(err);
+    return;
+  }
+  oauthWaiting(true);
+  try {
+    const acc = provider
+      ? await window.api.oauth.signIn(provider, { name: field('name').value.trim(), color: accColor, ...(priv?.on ? { pin: priv.pin, autoLockMin: priv.min } : {}) })
+      : await window.api.oauth.reauth(editingAccountId!);
+    oauthWaiting(false);
+    await oauthDone(acc, !!reauth || accounts.some((a) => a.id === acc.id));
+  } catch (err) {
+    oauthWaiting(false);
+    el('#add-error').textContent = errMsg(err);
+  }
+});
+
+// Closing the dialog stops a sign-in that is still waiting for the browser
+dlg.addEventListener('close', () => {
+  if (oauthBusy) window.api.oauth.cancel().catch(() => {});
+});
+
 function openAddMailAccount(): void {
   editingAccountId = null;
   form.reset();
+  showOAuth(null);
   accColor = ACC_COLORS[accounts.length % ACC_COLORS.length];
   paintAccColors();
   fillPrivacyFields(null);
@@ -989,6 +1055,7 @@ function openEditMailAccount(id: string): void {
   if (!acc) return;
   editingAccountId = id;
   form.reset();
+  showOAuth(acc);
   accColor = acc.color;
   paintAccColors();
   fillPrivacyFields(acc);

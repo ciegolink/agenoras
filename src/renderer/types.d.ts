@@ -15,6 +15,7 @@ interface Account {
   protocol?: 'imap' | 'pop3'; // incoming mail (missing = IMAP)
   leaveOnServer?: boolean; // POP3: keep a copy on the server
   deleteAfterDays?: number; // POP3: delete the server copy after N days (0 = never)
+  oauth?: 'microsoft' | 'google'; // signed in via Microsoft/Google instead of a password
 }
 
 interface AiState {
@@ -423,6 +424,12 @@ interface Window {
       close(): Promise<void>;
       isMaximized(): Promise<boolean>;
       onState(cb: (maximized: boolean) => void): void;
+    };
+    oauth: {
+      providers(): Promise<('microsoft' | 'google')[]>;
+      signIn(provider: 'microsoft' | 'google', extra: { name?: string; color?: string; pin?: string; autoLockMin?: number }): Promise<Account>;
+      reauth(id: string): Promise<Account>;
+      cancel(): Promise<void>;
     };
     listAccounts(): Promise<Account[]>;
     addAccount(input: NewAccountInput): Promise<Account>;

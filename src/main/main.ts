@@ -1,4 +1,5 @@
 import './migrate'; // must run first: moves the old user data folder
+import './netretry';
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, shell, Tray } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -20,6 +21,7 @@ import {
   unlockedPrivate,
   unlockWithPin,
   updateAccount,
+  setSecret,
 } from './accounts';
 import {
   closeAccount,
@@ -60,6 +62,7 @@ import { listSounds, openSoundFolder, soundData } from './sounds';
 import { flushWinState, loadWinState, trackWinState } from './winstate';
 import { cachedTasks, deleteTask, listTasks, saveTask, TaskInput } from './tasks';
 import { getLists, MailList, removeList, saveList } from './lists';
+import { cancelSignIn, forgetToken, isOAuthProvider, oauthProviders, rememberToken, serverFor, signIn } from './oauth';
 import { addFeed, article as rssArticle, cachedItems as cachedRss, listFeeds, NewRssFeed, refreshFeeds, removeFeed, searchItems as searchRss, setRead as setRssRead, updateFeed } from './rss';
 import { runRulesForNew, runRulesNow } from './rules';
 import { parseInvite, sendInvitations, sendReply } from './invites';
@@ -476,8 +479,63 @@ ipcMain.handle('accounts:add', async (_e, input: NewAccount) => {
   return acc;
 });
 
+// OAuth accounts: sign in in the browser, server settings come from the provider
+ipcMain.handle('oauth:providers', () => oauthProviders());
+ipcMain.handle('oauth:cancel', () => cancelSignIn());
+
+ipcMain.handle('oauth:signin', async (_e, provider: string, extra: { name?: string; color?: string; pin?: string; autoLockMin?: number }) => {
+  if (!isOAuthProvider(provider)) throw new Error(t('oauth.notConfigured'));
+  const res = await signIn(provider);
+  const server = serverFor(provider);
+  const cfg = { ...server, user: res.email, protocol: 'imap' as const };
+  try {
+    await testConnection(cfg, { accessToken: res.accessToken });
+  } catch (err) {
+    log('error', 'IMAP', res.email, t('log.testFailed', { msg: friendlyError(err) }));
+    throw new Error('IMAP: ' + friendlyError(err));
+  }
+  try {
+    await testSmtp(cfg, { accessToken: res.accessToken });
+  } catch (err) {
+    log('error', 'SMTP', res.email, t('log.testFailed', { msg: friendlyError(err) }));
+    throw new Error('SMTP: ' + friendlyError(err));
+  }
+  // Same address already there: just renew the sign-in
+  const existing = listAccounts().find((a) => a.oauth === provider && a.email.toLowerCase() === res.email.toLowerCase());
+  if (existing) return reconnectOAuth(existing.id, res);
+  const acc = await addAccount({ ...cfg, email: res.email, name: String(extra?.name ?? '').trim() || res.name || res.email, pass: res.refreshToken, oauth: provider, color: extra?.color, pin: extra?.pin, autoLockMin: extra?.autoLockMin });
+  rememberToken(acc.id, res.accessToken, res.expiresAt);
+  startAccount(acc).catch((err) => console.error(friendlyError(err)));
+  return acc;
+});
+
+// "Sign in again" on an OAuth account (access revoked or expired)
+ipcMain.handle('oauth:reauth', async (_e, id: string) => {
+  const acc = getAccount(id);
+  if (!acc?.oauth) throw new Error(t('err.accountNotFound'));
+  const res = await signIn(acc.oauth);
+  if (res.email.toLowerCase() !== acc.email.toLowerCase()) throw new Error(t('oauth.otherAccount', { email: acc.email }));
+  return reconnectOAuth(id, res);
+});
+
+async function reconnectOAuth(id: string, res: { refreshToken: string; accessToken: string; expiresAt: number }) {
+  await setSecret(id, res.refreshToken);
+  rememberToken(id, res.accessToken, res.expiresAt);
+  await closeAccount(id);
+  const acc = getAccount(id)!;
+  startAccount(acc).catch((err) => console.error(friendlyError(err)));
+  return acc;
+}
+
 ipcMain.handle('accounts:update', async (_e, id: string, input: AccountUpdate) => {
-  if (!getAccount(id)) throw new Error(t('err.accountNotFound'));
+  const current = getAccount(id);
+  if (!current) throw new Error(t('err.accountNotFound'));
+  // OAuth: only name and colour can change, the rest belongs to the provider
+  if (current.oauth) {
+    const acc = await updateAccount(id, { ...current, name: input?.name ?? current.name, color: input?.color });
+    win?.webContents.send('mail:status', '');
+    return acc;
+  }
   if (!input?.email || !input.host || !input.user) throw new Error(t('err.fillAll'));
   const pass = input.pass || (await getPassword(id));
   try {
@@ -564,6 +622,7 @@ ipcMain.handle('accounts:remove', async (_e, id: string) => {
   removeAccount(id);
   forgetMailAccount(id);
   forgetPopAccount(id); // POP3: the local mailbox belongs to the account
+  forgetToken(id);
 });
 
 // Mail

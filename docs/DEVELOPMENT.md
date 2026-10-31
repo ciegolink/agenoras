@@ -127,6 +127,23 @@ The macOS build in GitHub Actions is signed with a Developer ID certificate and 
 
 Only the macOS job gets these secrets. Entitlements for the hardened runtime are in `build/entitlements.mac.plist`. A local `npm run dist:mac` without a certificate in the keychain builds an unsigned app; on first start right-click it → **Open** (or `xattr -cr /Applications/Agenoras.app`).
 
+### OAuth (Microsoft and Google)
+
+The **Sign in with Microsoft / Google** buttons in the account dialog only appear when a client ID is set in `src/main/oauth.ts` (`MICROSOFT_CLIENT_ID`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`). Desktop apps are public clients, so these values are not secret and ship with the app. For a quick test, set `AGENORAS_MS_CLIENT_ID`, `AGENORAS_GOOGLE_CLIENT_ID` and `AGENORAS_GOOGLE_CLIENT_SECRET` instead.
+
+**Microsoft** ([entra.microsoft.com](https://entra.microsoft.com) → App registrations → New registration)
+- Supported account types: *Accounts in any organizational directory and personal Microsoft accounts*
+- Redirect URI: platform *Public client/native (mobile & desktop)*, `http://localhost`
+- API permissions: `IMAP.AccessAsUser.All`, `SMTP.Send` (Office 365 Exchange Online), `offline_access`, `openid`, `email`, `profile`
+- Copy the **Application (client) ID**. No client secret.
+
+**Google** ([console.cloud.google.com](https://console.cloud.google.com))
+- Enable the Gmail API, set up the OAuth consent screen (*External*)
+- Credentials → OAuth client ID → *Desktop app*; copy client ID and client secret
+- The scope `https://mail.google.com/` is restricted: in testing mode only listed test users can sign in and the sign-in expires after 7 days. Publishing for everyone needs Google's verification including a yearly security assessment (CASA).
+
+Sign-in flow: authorization code with PKCE, redirect to a short-lived local port (`http://localhost:<port>` / `http://127.0.0.1:<port>`). The refresh token is stored encrypted like a password; access tokens are kept in memory and renewed automatically.
+
 Install on Ubuntu: `sudo apt install ./release/agenoras_amd64.deb`. The AppImage runs directly after `chmod +x`.
 
 ## 9. Troubleshooting
@@ -142,4 +159,4 @@ Install on Ubuntu: `sudo apt install ./release/agenoras_amd64.deb`. The AppImage
 | No title bar on Wayland | The app starts via XWayland by default; `AGENORAS_WAYLAND=1` forces native Wayland |
 | Tray icon missing on Ubuntu | Requires the AppIndicator extension (preinstalled on Ubuntu) |
 | Gmail login fails | Use an app password (Google account → Security → App passwords) |
-| Microsoft 365 | Requires OAuth2, not supported yet |
+| Microsoft 365 | Sign in with Microsoft needs a client ID in `src/main/oauth.ts`, see [OAuth](#oauth-microsoft-and-google) |

@@ -30,6 +30,7 @@ All versions and release notes: [Releases](https://github.com/ciegolink/agenoras
 
 **Mail**
 - Multiple IMAP/SMTP accounts with a unified inbox and live updates (IDLE)
+- Sign in with Microsoft or Google (OAuth 2.0 with PKCE, token in the system keychain, renewed automatically) as an alternative to passwords
 - POP3 accounts (SSL/TLS or STARTTLS): the inbox is fetched every 2 minutes and kept locally, optionally leaving a copy on the server
 - Private accounts: hidden until unlocked with a PIN, locked again by hand or automatically after a few minutes
 - A colour per account (preset or custom)
@@ -144,7 +145,7 @@ The workflow can also be started manually under **Actions → Build → Run work
 | Nextcloud | CalDAV and CardDAV: `https://<host>/remote.php/dav` |
 | iCloud | CalDAV `https://caldav.icloud.com`, CardDAV `https://contacts.icloud.com`, app password |
 
-Microsoft 365 and Google Calendar require OAuth2, which is not supported yet.
+Microsoft 365 / Outlook.com and Gmail can also sign in with OAuth (browser sign-in, no password) once client IDs are set in `src/main/oauth.ts`, see [DEVELOPMENT.md](docs/DEVELOPMENT.md#oauth-microsoft-and-google). Google Calendar/Contacts and Microsoft calendars/contacts are not supported yet.
 
 **Logo**
 
@@ -214,6 +215,7 @@ The AI model runs locally in a separate process (`utilityProcess`). Texts are pr
    │  ├─ remote.ts       Favicons, external images, HTML signatures
    │  ├─ settings.ts     Identities, signatures, templates, preferences
    │  ├─ accounts.ts     Mail accounts
+   │  ├─ oauth.ts        Sign-in with Microsoft and Google (OAuth)
    │  ├─ davaccounts.ts  CalDAV/CardDAV accounts
    │  ├─ sounds.ts       Notification sounds
    │  ├─ winstate.ts     Window state

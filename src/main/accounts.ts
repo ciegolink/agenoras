@@ -21,6 +21,7 @@ export interface Account {
   deleteAfterDays?: number; // POP3 + copy on the server: delete it there after this many days (0 = never)
   private?: boolean; // protected by a PIN – invisible while locked
   autoLockMin?: number; // private: lock after this many minutes without use
+  oauth?: 'microsoft' | 'google'; // signed in via OAuth: pass holds the refresh token
 }
 
 export type NewAccount = Omit<Account, 'id' | 'color' | 'private'> & { pass: string; color?: string; pin?: string };
@@ -126,6 +127,16 @@ export function getAccount(id: string): Account | undefined {
   return listAccounts().find((a) => a.id === id);
 }
 
+// OAuth: store a renewed refresh token
+export async function setSecret(id: string, plain: string): Promise<void> {
+  const enc = await encrypt(plain);
+  const all = readAll();
+  const acc = all.find((a) => a.id === id);
+  if (!acc) return;
+  acc.pass = enc;
+  writeAll(all);
+}
+
 export async function getPassword(id: string): Promise<string> {
   const acc = readAll().find((a) => a.id === id);
   if (!acc || isLockedRaw(acc)) throw new Error(t('err.accountNotFound'));
@@ -206,6 +217,7 @@ export async function addAccount(input: NewAccount): Promise<Account> {
     smtpSecure: input.smtpSecure,
     color: isColor(input.color) ? input.color : COLORS[all.length % COLORS.length],
     ...protocolFields(input),
+    ...(input.oauth === 'microsoft' || input.oauth === 'google' ? { oauth: input.oauth } : {}),
     pass,
   };
   if (input.pin) {

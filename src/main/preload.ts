@@ -15,6 +15,12 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('win:state', (_e, maximized: boolean) => cb(maximized));
     },
   },
+  oauth: {
+    providers: () => ipcRenderer.invoke('oauth:providers'),
+    signIn: (provider: string, extra: unknown) => ipcRenderer.invoke('oauth:signin', provider, extra),
+    reauth: (id: string) => ipcRenderer.invoke('oauth:reauth', id),
+    cancel: () => ipcRenderer.invoke('oauth:cancel'),
+  },
   listAccounts: () => ipcRenderer.invoke('accounts:list'),
   addAccount: (input: unknown) => ipcRenderer.invoke('accounts:add', input),
   removeAccount: (id: string) => ipcRenderer.invoke('accounts:remove', id),

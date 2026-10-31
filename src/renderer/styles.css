@@ -74,6 +74,15 @@ em { color: var(--accent-text); }
 .priv-fields { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
 .priv-fields[hidden] { display: none; }
 #dlg-add .proto { width: 92px; flex: none; }
+/* OAuth sign-in (Microsoft, Google) */
+.oauth-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.oauth-row[hidden], .oauth-info[hidden] { display: none; }
+.oauth-btn { flex: 1 1 180px; display: inline-flex; align-items: center; justify-content: center; gap: 9px; height: 36px; font-weight: 600; }
+.oauth-or { flex-basis: 100%; display: flex; align-items: center; gap: 10px; margin-top: 4px; font: 9.5px var(--mono); letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); }
+.oauth-or::before, .oauth-or::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+.oauth-info { display: flex; align-items: center; gap: 10px; justify-content: space-between; padding: 10px 12px; border-radius: 8px; background: var(--accent-soft); font-size: 13px; }
+#dlg-add.is-oauth .manual-only { display: none !important; }
+#add-error.info { color: var(--text-2); }
 .dav-server { display: flex; flex-direction: column; gap: inherit; }
 .dav-server[hidden] { display: none; }
 .pin-dlg { width: 340px; }
