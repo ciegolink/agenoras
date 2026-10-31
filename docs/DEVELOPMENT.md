@@ -133,6 +133,8 @@ Only the macOS job gets these secrets. Entitlements for the hardened runtime are
 
 The **Sign in with Microsoft / Google** buttons in the account dialog only appear when a client ID is set in `src/main/oauth.ts` (`MICROSOFT_CLIENT_ID`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`). Desktop apps are public clients, so these values are not secret and ship with the app. For a quick test, set `AGENORAS_MS_CLIENT_ID`, `AGENORAS_GOOGLE_CLIENT_ID` and `AGENORAS_GOOGLE_CLIENT_SECRET` instead.
 
+**Forks:** the Microsoft client ID in the code belongs to CiegoLink GmbH and is shown as the publisher when users sign in. If you distribute your own build, register your own app (below) and replace `MICROSOFT_CLIENT_ID`. Like Thunderbird, Agenoras keeps the ID in the source code; it is not a secret, it only names the app.
+
 **Microsoft** ([entra.microsoft.com](https://entra.microsoft.com) → App registrations → New registration)
 - Supported account types: *Accounts in any organizational directory and personal Microsoft accounts*
 - Redirect URI: platform *Public client/native (mobile & desktop)*, `http://localhost`

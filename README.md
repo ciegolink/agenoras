@@ -270,3 +270,5 @@ The optional offline AI uses [Ministral 3 3B Instruct](https://huggingface.co/mi
 ## License
 
 [MIT](LICENSE) © 2026 CiegoLink GmbH
+
+**Forks:** the MIT license covers the code, not the name or the logo. If you publish your own build, give it a different name and icon, and register your own Microsoft app instead of using Agenoras' client ID (see [DEVELOPMENT.md](docs/DEVELOPMENT.md#oauth-microsoft-and-google)). Otherwise your users would see "Agenoras – CiegoLink GmbH" when they sign in.
