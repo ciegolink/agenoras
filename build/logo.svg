@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="mid" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22C6D6"/><stop offset="1" stop-color="#0A7FB5"/></linearGradient>
+    <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#E3EEF6"/></linearGradient>
+    <linearGradient id="cal" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#E6F0F7"/></linearGradient>
+    <linearGradient id="calTop" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#3FD0E8"/><stop offset="1" stop-color="#0A7FB5"/></linearGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#C9DDEA"/></linearGradient>
+    <linearGradient id="stroke" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#0A7FB5"/><stop offset="1" stop-color="#14A6B8"/></linearGradient>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="4" stdDeviation="7" flood-color="#06223A" flood-opacity=".28"/></filter>
+    <filter id="tiny" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="1.5" stdDeviation="1.5" flood-color="#06223A" flood-opacity=".35"/></filter>
+  </defs>
+  <g transform="translate(128 128) scale(1.14) translate(-129 -124)">
+    <g transform="rotate(-9 108 96)">
+      <g filter="url(#soft)">
+        <rect x="34" y="40" width="148" height="104" rx="24" fill="url(#cal)"/>
+        <path d="M34 64a24 24 0 0 1 24-24h100a24 24 0 0 1 24 24v4H34z" fill="url(#calTop)"/>
+      </g>
+      <g fill="#8CC4E0"><circle cx="58" cy="82" r="5.5"/><circle cx="78" cy="82" r="5.5"/><circle cx="98" cy="82" r="5.5"/><circle cx="118" cy="82" r="5.5"/><circle cx="138" cy="82" r="5.5"/><circle cx="58" cy="100" r="5.5"/></g>
+      <g filter="url(#tiny)"><rect x="62" y="28" width="12" height="26" rx="6" fill="url(#ring)"/><rect x="142" y="28" width="12" height="26" rx="6" fill="url(#ring)"/></g>
+    </g>
+    <g filter="url(#soft)" transform="rotate(-3 132 136)"><rect x="60" y="94" width="140" height="94" rx="24" fill="url(#mid)"/></g>
+    <g filter="url(#soft)"><rect x="84" y="126" width="140" height="96" rx="24" fill="url(#paper)"/></g>
+    <path d="M104 150 154 183 204 150" fill="none" stroke="url(#stroke)" stroke-width="13" stroke-linejoin="round" stroke-linecap="round"/>
+  </g>
+</svg>

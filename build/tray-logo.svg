@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <mask id="front"><rect width="256" height="256" fill="#fff"/><path d="M48 124 118 174 188 124" fill="none" stroke="#000" stroke-width="22" stroke-linejoin="round" stroke-linecap="round"/></mask>
+    <mask id="back"><rect width="256" height="256" fill="#fff"/><rect x="10" y="78" width="228" height="166" rx="40" fill="#000"/></mask>
+  </defs>
+  <rect x="44" y="20" width="200" height="140" rx="30" fill="#8FD8F5" transform="rotate(-8 144 90)" mask="url(#back)"/>
+  <rect x="24" y="92" width="200" height="140" rx="30" fill="#2A9FD0" mask="url(#front)"/>
+</svg>
