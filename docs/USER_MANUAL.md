@@ -33,7 +33,7 @@ Download the right file for your system from the [latest release](https://github
 | Windows (no install) | `Agenoras-Portable.exe` | Start the file directly. |
 | Ubuntu / Debian | `agenoras_amd64.deb` | `sudo apt install ./agenoras_amd64.deb` |
 | Other Linux | `Agenoras-x86_64.AppImage` | `chmod +x Agenoras-x86_64.AppImage`, then start it. |
-| macOS | `Agenoras.dmg` | Open it and drag Agenoras to **Applications**. The app is not signed: on first start, right-click it and choose **Open**, or run `xattr -cr /Applications/Agenoras.app`. |
+| macOS | `Agenoras.dmg` | Open it and drag Agenoras to **Applications**. |
 
 The macOS version runs on both Intel and Apple Silicon Macs.
 

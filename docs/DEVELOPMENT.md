@@ -115,7 +115,17 @@ Passwords are encrypted with the system keychain (GNOME Keyring / libsecret on L
 
 Building the Windows installer on Linux requires Wine. The simpler way is GitHub Actions: push a tag (`npm version patch && git push --follow-tags`) and the workflow builds all three platforms and attaches the files to a draft release. Review the draft under **Releases** and publish it.
 
-The macOS build is unsigned: on first start right-click the app → **Open** (or `xattr -cr /Applications/Agenoras.app`). Signing and notarization need an Apple Developer account.
+The macOS build in GitHub Actions is signed with a Developer ID certificate and notarized by Apple. It needs five repository secrets (Settings → Secrets and variables → Actions):
+
+| Secret | Content |
+|---|---|
+| `CSC_LINK` | the Developer ID Application certificate as `.p12`, base64-encoded |
+| `CSC_KEY_PASSWORD` | password of the `.p12` |
+| `APPLE_ID` | Apple ID of the developer account |
+| `APPLE_APP_SPECIFIC_PASSWORD` | app-specific password from appleid.apple.com |
+| `APPLE_TEAM_ID` | team ID from developer.apple.com → Membership |
+
+Only the macOS job gets these secrets. Entitlements for the hardened runtime are in `build/entitlements.mac.plist`. A local `npm run dist:mac` without a certificate in the keychain builds an unsigned app; on first start right-click it → **Open** (or `xattr -cr /Applications/Agenoras.app`).
 
 Install on Ubuntu: `sudo apt install ./release/agenoras_amd64.deb`. The AppImage runs directly after `chmod +x`.
 

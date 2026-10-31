@@ -135,7 +135,11 @@
       ],
       "icon": "build/icon.png",
       "category": "public.app-category.productivity",
-      "identity": null,
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": true,
       "x64ArchFiles": "**/node_modules/{@node-llama-cpp,@reflink}/**",
       "artifactName": "${productName}-mac.${ext}"
     },

@@ -24,7 +24,7 @@ All versions and release notes: [Releases](https://github.com/ciegolink/agenoras
 - **Windows:** run the installer; SmartScreen may warn about an unknown publisher → **More info → Run anyway**.
 - **Ubuntu/Debian:** `sudo apt install ./agenoras_amd64.deb`
 - **AppImage:** `chmod +x Agenoras-x86_64.AppImage`, then start it.
-- **macOS:** open the `.dmg` and drag Agenoras to Applications. The app is not signed: on first start right-click it → **Open**, or run `xattr -cr /Applications/Agenoras.app`.
+- **macOS:** open the `.dmg` and drag Agenoras to Applications. The app is signed and notarized by Apple (universal: Apple silicon and Intel).
 
 ## Features
 
