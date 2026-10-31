@@ -75,7 +75,7 @@
   "log.copied": "Protokoll kopiert.",
   "log.empty": "Keine Probleme protokolliert.",
   "log.cleared": "Protokoll geleert.",
-  "log.connLost": "Verbindung unterbrochen – neuer Versuch in 30 s.",
+  "log.connLost": "Verbindung unterbrochen – wird neu aufgebaut",
   "log.connFailed": "Keine Verbindung zu {host}: {msg}",
   "log.searchFolder": "Suche in Ordner „{folder}“ fehlgeschlagen: {msg}",
   "log.testFailed": "Verbindungstest fehlgeschlagen: {msg}",
@@ -878,5 +878,6 @@
   "err.netReset": "Verbindung zum Server unterbrochen – wird beim nächsten Aktualisieren erneut versucht",
   "err.netOffline": "Keine Internetverbindung",
   "err.netFailed": "Verbindung zum Server fehlgeschlagen",
-  "err.netCert": "Das Zertifikat des Servers ist ungültig"
+  "err.netCert": "Das Zertifikat des Servers ist ungültig",
+  "err.davDiscovery": "Der Server hat nicht als CalDAV/CardDAV-Server geantwortet – er ist evtl. überlastet oder die Adresse stimmt nicht"
 }

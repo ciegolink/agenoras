@@ -1,5 +1,6 @@
 import { ImapFlow, MessageStructureObject } from 'imapflow';
 import { simpleParser } from 'mailparser';
+import type { Socket } from 'node:net';
 import { Account, getAccount, getPassword } from './accounts';
 import { accessToken, forgetToken } from './oauth';
 import { t } from './i18n';
@@ -90,14 +91,27 @@ export function friendlyError(err: unknown): string {
 // Password or OAuth access token
 export type Secret = string | { accessToken: string };
 
+// ImapFlow turns on TCP keepalive after 5 s; with Electron's libuv that means a probe every second and
+// "dead" after 10 missed ones, so a short network hiccup kills every idle connection (read ETIMEDOUT).
+// Like other mail clients we rely on IDLE being renewed every 4 minutes instead.
+type SocketHook = { configureSocket(socket: Socket): void };
+
 function makeClient(cfg: ConnCfg, secret: Secret): ImapFlow {
-  return new ImapFlow({
+  const c = new ImapFlow({
     host: cfg.host,
     port: cfg.port,
     secure: cfg.secure,
     auth: typeof secret === 'string' ? { user: cfg.user, pass: secret } : { user: cfg.user, accessToken: secret.accessToken },
     logger: false,
+    maxIdleTime: 4 * 60_000,
   });
+  const hook = c as unknown as SocketHook;
+  const configure = hook.configureSocket;
+  hook.configureSocket = function (socket) {
+    configure.call(this, socket);
+    socket?.setKeepAlive?.(false);
+  };
+  return c;
 }
 
 export async function testConnection(cfg: ConnCfg, secret: Secret): Promise<void> {
@@ -110,6 +124,7 @@ export async function testConnection(cfg: ConnCfg, secret: Secret): Promise<void
 // One persistent connection per account. INBOX stays open → ImapFlow goes into IDLE automatically.
 // Concurrent callers wait for the same connect, some servers limit connections per user.
 const connecting = new Map<string, Promise<ImapFlow>>();
+const DROPPED = new Set(['ETIMEDOUT', 'ECONNRESET', 'EPIPE', 'EHOSTUNREACH', 'ENETUNREACH', 'NoConnection']);
 
 function getClient(acc: Account): Promise<ImapFlow> {
   const existing = clients.get(acc.id);
@@ -127,16 +142,23 @@ async function connectClient(acc: Account): Promise<ImapFlow> {
   c.on('exists', (data: { path?: string; count?: number; prevCount?: number }) => {
     if (!data?.path || data.path === 'INBOX') onNew(acc.id, (data?.count ?? 0) > (data?.prevCount ?? 0));
   });
-  c.on('error', (err) => log('error', 'IMAP', acc.email, friendlyError(err)));
+  // A dropped connection (timeout, reset) is followed by "close" and a reconnect: one warning is enough.
+  // Only a failing reconnect is logged as an error (in connectClient).
+  let dropReason = '';
+  c.on('error', (err) => {
+    const code = (err as { code?: string })?.code ?? '';
+    if (DROPPED.has(code)) dropReason = code;
+    else log('error', 'IMAP', acc.email, friendlyError(err));
+  });
   c.on('close', () => {
     const wasActive = clients.get(acc.id) === c;
     if (wasActive) clients.delete(acc.id);
     if (!stopping && getAccount(acc.id)) {
-      if (wasActive) log('warn', 'IMAP', acc.email, t('log.connLost'));
+      if (wasActive) log('warn', 'IMAP', acc.email, t('log.connLost') + (dropReason ? ` (${dropReason})` : ''));
       setTimeout(() => {
         const still = getAccount(acc.id);
         if (still && !stopping) getClient(still).catch(() => {}); // failure is logged in getClient
-      }, 30_000);
+      }, wasActive ? 5_000 : 30_000);
     }
   });
 
@@ -596,6 +618,16 @@ export async function closeAccount(id: string): Promise<void> {
   const c = clients.get(id);
   clients.delete(id);
   if (c) await c.logout().catch(() => c.close());
+}
+
+// After sleep the sockets are usually dead without noticing: start fresh right away, without a warning
+export function reconnectAll(): void {
+  for (const [id, c] of clients) {
+    clients.delete(id);
+    c.close();
+    const acc = getAccount(id);
+    if (acc) getClient(acc).catch(() => {});
+  }
 }
 
 export async function closeAll(): Promise<void> {

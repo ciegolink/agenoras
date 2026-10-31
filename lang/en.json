@@ -75,7 +75,7 @@
   "log.copied": "Log copied.",
   "log.empty": "No problems logged.",
   "log.cleared": "Log cleared.",
-  "log.connLost": "Connection lost – retrying in 30 s.",
+  "log.connLost": "Connection lost – reconnecting",
   "log.connFailed": "Cannot connect to {host}: {msg}",
   "log.searchFolder": "Search in folder “{folder}” failed: {msg}",
   "log.testFailed": "Connection test failed: {msg}",
@@ -878,5 +878,6 @@
   "err.netReset": "Connection to the server was interrupted – it will be retried on the next refresh",
   "err.netOffline": "No internet connection",
   "err.netFailed": "Connection to the server failed",
-  "err.netCert": "The server's certificate is invalid"
+  "err.netCert": "The server's certificate is invalid",
+  "err.davDiscovery": "The server did not answer as a CalDAV/CardDAV server – it may be overloaded or the address is wrong"
 }

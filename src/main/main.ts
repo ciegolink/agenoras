@@ -1,6 +1,6 @@
 import './migrate'; // must run first: moves the old user data folder
 import './netretry';
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, shell, Tray } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, shell, Tray } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -52,6 +52,7 @@ import {
   startAccount,
   testConnection,
   markFolderSeen,
+  reconnectAll,
 } from './imap';
 import { OutgoingMail, sendMail, testSmtp } from './smtp';
 import { closeStore as closePopStore, forgetAccount as forgetPopAccount } from './pop3';
@@ -1337,6 +1338,7 @@ ipcMain.handle('rules:run', async (_e, accountId: string | null) => {
 
 app.whenReady().then(() => {
   nativeTheme.themeSource = getSettings().theme;
+  powerMonitor.on('resume', () => setTimeout(reconnectAll, 3000)); // give the network a moment to come back
   createWindow();
   createTray();
   // Private accounts start locked: remove whatever copies a crash may have left behind
