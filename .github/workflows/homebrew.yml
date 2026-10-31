@@ -13,9 +13,11 @@ jobs:
       - name: Update the cask
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          TAG: ${{ github.event.release.tag_name || github.ref_name }}
+          TAG: ${{ github.event.release.tag_name }}
         run: |
           if [ -z "$GH_TOKEN" ]; then echo "HOMEBREW_TAP_TOKEN is not set, skipping"; exit 0; fi
+          # started by hand: the latest release
+          [ -n "$TAG" ] || TAG=$(gh release view -R "$GITHUB_REPOSITORY" --json tagName -q .tagName)
           VERSION="${TAG#v}"
           gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p Agenoras.dmg
           SHA=$(sha256sum Agenoras.dmg | cut -d' ' -f1)
