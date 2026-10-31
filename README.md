@@ -17,7 +17,7 @@ Agenoras is an Electron + TypeScript client for standard protocols: IMAP or POP3
 |---|---|
 | Windows | [Installer (.exe)](https://github.com/ciegolink/agenoras/releases/latest/download/Agenoras-Setup.exe) |
 | Linux | [Debian/Ubuntu (.deb)](https://github.com/ciegolink/agenoras/releases/latest/download/agenoras_amd64.deb) · [AppImage](https://github.com/ciegolink/agenoras/releases/latest/download/Agenoras-x86_64.AppImage) |
-| macOS | [Disk image (.dmg)](https://github.com/ciegolink/agenoras/releases/latest/download/Agenoras.dmg) · [Zip](https://github.com/ciegolink/agenoras/releases/latest/download/Agenoras-mac.zip) (Intel + Apple Silicon) |
+| macOS | [Disk image (.dmg)](https://github.com/ciegolink/agenoras/releases/latest/download/Agenoras.dmg) · [Zip](https://github.com/ciegolink/agenoras/releases/latest/download/Agenoras-mac.zip) (Intel + Apple Silicon) · Homebrew: `brew install --cask ciegolink/tap/agenoras` |
 
 All versions and release notes: [Releases](https://github.com/ciegolink/agenoras/releases).
 

@@ -1,0 +1,29 @@
+name: Homebrew
+
+# When a release is published: new version and checksum into ciegolink/homebrew-tap
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  cask:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update the cask
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ github.event.release.tag_name || github.ref_name }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then echo "HOMEBREW_TAP_TOKEN is not set, skipping"; exit 0; fi
+          VERSION="${TAG#v}"
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p Agenoras.dmg
+          SHA=$(sha256sum Agenoras.dmg | cut -d' ' -f1)
+          gh repo clone ciegolink/homebrew-tap tap
+          cd tap
+          sed -i -E "s/^  version \".*\"/  version \"$VERSION\"/; s/^  sha256 \".*\"/  sha256 \"$SHA\"/" Casks/agenoras.rb
+          if git diff --quiet; then echo "Cask is up to date"; exit 0; fi
+          git config user.name "CiegoLink"
+          git config user.email "contact@ciegolink.com"
+          git commit -am "agenoras $VERSION"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/ciegolink/homebrew-tap.git" HEAD

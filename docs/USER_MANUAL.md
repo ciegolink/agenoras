@@ -33,6 +33,7 @@ Download the right file for your system from the [latest release](https://github
 | Ubuntu / Debian | `agenoras_amd64.deb` | `sudo apt install ./agenoras_amd64.deb` |
 | Other Linux | `Agenoras-x86_64.AppImage` | `chmod +x Agenoras-x86_64.AppImage`, then start it. |
 | macOS | `Agenoras.dmg` | Open it and drag Agenoras to **Applications**. |
+| macOS (Homebrew) | – | `brew install --cask ciegolink/tap/agenoras`, update with `brew upgrade --cask agenoras`. |
 
 The macOS version runs on both Intel and Apple Silicon Macs.
 
