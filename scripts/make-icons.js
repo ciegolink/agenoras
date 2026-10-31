@@ -1,5 +1,6 @@
 // Builds all app icons from build/logo.svg (or logo.png): build/logo.png, build/icon.png (1024), build/icons/*.png, build/icon.ico, tray icons
-// Optional: logo-small.svg for 16–32 px, tray-logo.svg for the tray (needs transparent parts for the macOS template)
+// Optional: logo-small.svg for 16–32 px, tray-logo.svg for the tray, tray-template.svg for the macOS menu bar (black lines),
+// logo-mac.png for macOS (Apple grid: 824 px tile with shadow on a 1024 canvas) → build/icon-mac.png
 // Usage: npm run icons   (the logo may be rectangular – it is centered on a square canvas)
 const { app, BrowserWindow } = require('electron');
 const fs = require('fs');
@@ -47,6 +48,7 @@ app.whenReady().then(async () => {
   }
   const small = source('logo-small') ?? data;
   const trayData = source('tray-logo') ?? data;
+  const templateData = source('tray-template') ?? trayData; // macOS menu bar: own line drawing if there is one
   const w = new BrowserWindow({ show: false, webPreferences: { offscreen: true } });
   await w.loadURL('data:text/html,<canvas></canvas>');
   // the title bar and window icon use logo.png
@@ -71,6 +73,16 @@ app.whenReady().then(async () => {
   }
   fs.writeFileSync(path.join(BUILD, 'icon.ico'), ico(out));
 
+  // macOS draws no margin of its own: the icon brings the Apple grid with it
+  const mac = source('logo-mac');
+  if (mac) {
+    const b64 = await w.webContents.executeJavaScript(`new Promise((res) => { const img = new Image(); img.onload = () => {
+      const c = document.querySelector('canvas'); c.width = c.height = 1024; const x = c.getContext('2d'); x.clearRect(0, 0, 1024, 1024);
+      x.imageSmoothingQuality = 'high'; x.drawImage(img, 0, 0, 1024, 1024);
+      res(c.toDataURL('image/png').split(',')[1]); }; img.src = ${JSON.stringify(mac)}; })`);
+    fs.writeFileSync(path.join(BUILD, 'icon-mac.png'), Buffer.from(b64, 'base64'));
+  }
+
   // Tray: logo 22 px (+ @2x); variant with a dot for new mail; macOS template = black silhouette
   const tray = [
     ['tray', false, false],
@@ -89,10 +101,10 @@ app.whenReady().then(async () => {
         if (${unread}) { const r = ${size} * 0.22; const cx = ${size} - r - 0.5, cy = r + 0.5;
           x.globalCompositeOperation = 'destination-out'; x.beginPath(); x.arc(cx, cy, r + ${f} * 1.5, 0, Math.PI * 2); x.fill();
           x.globalCompositeOperation = 'source-over'; x.fillStyle = '#2BA89F'; x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); x.fill(); }
-        res(c.toDataURL('image/png').split(',')[1]); }; img.src = ${JSON.stringify(trayData)}; })`);
+        res(c.toDataURL('image/png').split(',')[1]); }; img.src = ${JSON.stringify(template ? templateData : trayData)}; })`);
       fs.writeFileSync(path.join(BUILD, `${base}${f === 2 ? '@2x' : ''}.png`), Buffer.from(b64, 'base64'));
     }
   }
-  console.log('Done: build/logo.png, build/icon.png, build/icons/, build/icon.ico, build/tray*.png');
+  console.log('Done: build/logo.png, build/icon.png, build/icon-mac.png, build/icons/, build/icon.ico, build/tray*.png');
   app.exit(0);
 });

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- macOS menu bar (template image): the folded A and the letter as lines, a gap where they overlap -->
+  <defs>
+    <mask id="gap">
+      <rect width="256" height="256" fill="#fff"/>
+      <rect x="80" y="100" width="172" height="130" rx="28" fill="#000"/>
+    </mask>
+  </defs>
+  <path d="M30 222 104 58c11-24 37-24 48 0l40 88" fill="none" stroke="#000" stroke-width="30" stroke-linecap="round" stroke-linejoin="round" mask="url(#gap)"/>
+  <rect x="100" y="120" width="132" height="90" rx="14" fill="none" stroke="#000" stroke-width="18"/>
+  <path d="M110 130 166 170 222 130" fill="none" stroke="#000" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
