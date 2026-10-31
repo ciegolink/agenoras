@@ -1,4 +1,5 @@
 import ICAL from 'ical.js';
+import { failedAgain, succeeded } from './netretry';
 import crypto from 'node:crypto';
 import { listDavAccounts, getDavAccount } from './davaccounts';
 import { calEntry, davError, getConn, hasTodos, registerTz } from './caldav';
@@ -91,9 +92,12 @@ export async function listTasks(): Promise<{ lists: TaskList[]; tasks: Task[]; e
           }
         }
       }
+      succeeded(`tasks:${acc.id}`);
     } catch (err) {
-      errors.push({ accountId: acc.id, message: davError(err) });
-      log('error', 'CalDAV', acc.name, errors[errors.length - 1].message);
+      if (failedAgain(`tasks:${acc.id}`)) {
+        errors.push({ accountId: acc.id, message: davError(err) });
+        log('error', 'CalDAV', acc.name, errors[errors.length - 1].message);
+      }
       lists.push(...cached.lists.filter((l) => l.accountId === acc.id)); // offline: last state
       const ids = new Set(cached.lists.filter((l) => l.accountId === acc.id).map((l) => l.id));
       tasks.push(...cached.tasks.filter((x) => ids.has(x.listId)));

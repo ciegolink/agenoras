@@ -1,5 +1,5 @@
 import { DAVCalendar, DAVClient } from 'tsdav';
-import { netReason } from './netretry';
+import { failedAgain, netReason, succeeded } from './netretry';
 import ICAL from 'ical.js';
 import crypto from 'node:crypto';
 import { DavAccount, getDavAccount, getDavPassword, listDavAccounts } from './davaccounts';
@@ -109,9 +109,31 @@ export async function testCalDav(serverUrl: string, username: string, password: 
   return cals.length;
 }
 
-export async function getConn(acc: CalAccount, refresh = false): Promise<Conn> {
+const connecting = new Map<string, Promise<Conn>>();
+
+// Discovery (principal, calendar home) runs once per account; a refresh only reloads the calendar list.
+// Calendar and task refresh share one attempt instead of logging in twice.
+export function getConn(acc: CalAccount, refresh = false): Promise<Conn> {
   const existing = conns.get(acc.id);
-  if (existing && !refresh) return existing;
+  if (existing && !refresh) return Promise.resolve(existing);
+  let p = connecting.get(acc.id);
+  if (!p) {
+    p = connect(acc, existing).finally(() => connecting.delete(acc.id));
+    connecting.set(acc.id, p);
+  }
+  return p;
+}
+
+async function connect(acc: CalAccount, existing?: Conn): Promise<Conn> {
+  if (existing) {
+    try {
+      existing.calendars = await loadCalendars(existing.client);
+      for (const cal of existing.calendars) calIndex.set(cal.url, { accountId: acc.id, cal });
+      return existing;
+    } catch {
+      // session gone or server moved: log in again below
+    }
+  }
   const client = isLocalDav(acc) ? (localClient(acc.id, acc.name) as DAVClient) : davClient(acc.serverUrl, acc.username, await getCalPassword(acc.id));
   await client.login();
   const conn = { client, calendars: await loadCalendars(client) };
@@ -139,9 +161,12 @@ export async function listCalendars(): Promise<{ calendars: CalendarInfo[]; erro
         calendars.push({ id: cal.url, accountId: acc.id, accountName: acc.name, name, color });
         i++;
       }
+      succeeded(`cal:${acc.id}`);
     } catch (err) {
-      errors.push({ accountId: acc.id, message: davError(err) });
-      log('error', 'CalDAV', acc.name, errors[errors.length - 1].message);
+      if (failedAgain(`cal:${acc.id}`)) {
+        errors.push({ accountId: acc.id, message: davError(err) });
+        log('error', 'CalDAV', acc.name, errors[errors.length - 1].message);
+      }
       calendars.push(...cached.filter((c) => c.accountId === acc.id)); // offline: last known calendars
     }
   }
@@ -170,10 +195,11 @@ const NET: Record<string, string> = {
 export function davError(err: unknown): string {
   const reason = netReason(err);
   if (reason && /^(CERT_|ERR_TLS|UNABLE_TO_VERIFY|DEPTH_ZERO|SELF_SIGNED)/.test(reason)) return t('err.netCert');
-  if (reason) return NET[reason] ? t(NET[reason]) : `${t('err.netFailed')} (${reason})`;
+  if (reason) return `${NET[reason] ? t(NET[reason]) : t('err.netFailed')} (${reason})`;
   const m = (err as Error)?.message ?? String(err);
   if (/401|unauthori[sz]ed/i.test(m)) return t('err.authFailed');
   if (/412|precondition/i.test(m)) return t('err.eventChanged');
+  if (/cannot find (principalUrl|homeUrl)/.test(m)) return t('err.davDiscovery');
   return m;
 }
 

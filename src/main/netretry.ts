@@ -22,3 +22,20 @@ export function netReason(err: unknown): string | null {
   if (!cause || (err as Error)?.message !== 'fetch failed') return null;
   return cause.code ?? cause.message ?? null;
 }
+
+// A single dropout falls back to the cache without a message. Reported only when it still fails
+// at least 20 s after the first failure (several loads in one refresh count as one).
+const firstFail = new Map<string, number>();
+
+export function failedAgain(key: string): boolean {
+  const first = firstFail.get(key);
+  if (first === undefined) {
+    firstFail.set(key, Date.now());
+    return false;
+  }
+  return Date.now() - first >= 20_000;
+}
+
+export function succeeded(key: string): void {
+  firstFail.delete(key);
+}

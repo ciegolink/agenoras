@@ -1,5 +1,6 @@
 import { DAVAddressBook, DAVClient } from 'tsdav';
 import { davError } from './caldav';
+import { failedAgain, succeeded } from './netretry';
 import ICAL from 'ical.js';
 import crypto from 'node:crypto';
 import { DavAccount, getDavAccount, getDavPassword, listDavAccounts } from './davaccounts';
@@ -71,9 +72,30 @@ export async function testCardDav(serverUrl: string, username: string, password:
   if (!books.length) throw new Error(t('err.noBooks'));
 }
 
-async function getConn(acc: DavAccount, refresh = false): Promise<Conn> {
+const connecting = new Map<string, Promise<Conn>>();
+
+// Discovery runs once per account; a refresh only reloads the address book list
+function getConn(acc: DavAccount, refresh = false): Promise<Conn> {
   const existing = conns.get(acc.id);
-  if (existing && !refresh) return existing;
+  if (existing && !refresh) return Promise.resolve(existing);
+  let p = connecting.get(acc.id);
+  if (!p) {
+    p = connect(acc, existing).finally(() => connecting.delete(acc.id));
+    connecting.set(acc.id, p);
+  }
+  return p;
+}
+
+async function connect(acc: DavAccount, existing?: Conn): Promise<Conn> {
+  if (existing) {
+    try {
+      existing.books = await existing.client.fetchAddressBooks();
+      for (const book of existing.books) bookIndex.set(book.url, { accountId: acc.id, book });
+      return existing;
+    } catch {
+      // session gone or server moved: log in again below
+    }
+  }
   const client = isLocalDav(acc) ? (localClient(acc.id, acc.name) as DAVClient) : davClient(acc.serverUrl, acc.username, await getDavPassword('carddav', acc.id));
   await client.login();
   const conn = { client, books: await client.fetchAddressBooks() };
@@ -238,9 +260,12 @@ export async function listContacts(): Promise<{
           }
         }
       }
+      succeeded(`card:${acc.id}`);
     } catch (err) {
-      errors.push({ accountId: acc.id, message: davError(err) });
-      log('error', 'CardDAV', acc.name, errors[errors.length - 1].message);
+      if (failedAgain(`card:${acc.id}`)) {
+        errors.push({ accountId: acc.id, message: davError(err) });
+        log('error', 'CardDAV', acc.name, errors[errors.length - 1].message);
+      }
       books.push(...cached.books.filter((b) => b.accountId === acc.id)); // offline: cache
       contacts.push(...cached.contacts.filter((c) => c.accountId === acc.id));
     }
