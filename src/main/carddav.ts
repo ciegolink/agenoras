@@ -1,4 +1,5 @@
 import { DAVAddressBook, DAVClient } from 'tsdav';
+import { davError } from './caldav';
 import ICAL from 'ical.js';
 import crypto from 'node:crypto';
 import { DavAccount, getDavAccount, getDavPassword, listDavAccounts } from './davaccounts';
@@ -238,7 +239,7 @@ export async function listContacts(): Promise<{
         }
       }
     } catch (err) {
-      errors.push({ accountId: acc.id, message: (err as Error)?.message ?? String(err) });
+      errors.push({ accountId: acc.id, message: davError(err) });
       log('error', 'CardDAV', acc.name, errors[errors.length - 1].message);
       books.push(...cached.books.filter((b) => b.accountId === acc.id)); // offline: cache
       contacts.push(...cached.contacts.filter((c) => c.accountId === acc.id));

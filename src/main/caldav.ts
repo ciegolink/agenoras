@@ -1,4 +1,5 @@
 import { DAVCalendar, DAVClient } from 'tsdav';
+import { netReason } from './netretry';
 import ICAL from 'ical.js';
 import crypto from 'node:crypto';
 import { DavAccount, getDavAccount, getDavPassword, listDavAccounts } from './davaccounts';
@@ -154,7 +155,22 @@ export function cachedCalendarView(calendarIds: string[], startIso: string): { c
   return { calendars, events: cachedWeek<CalEvent>(calendarIds, startIso) };
 }
 
+const NET: Record<string, string> = {
+  ENOTFOUND: 'err.netNotFound',
+  EAI_AGAIN: 'err.netNotFound',
+  ECONNREFUSED: 'err.netRefused',
+  ETIMEDOUT: 'err.netTimeout',
+  UND_ERR_CONNECT_TIMEOUT: 'err.netTimeout',
+  ECONNRESET: 'err.netReset',
+  UND_ERR_SOCKET: 'err.netReset',
+  ENETUNREACH: 'err.netOffline',
+  EHOSTUNREACH: 'err.netOffline',
+};
+
 export function davError(err: unknown): string {
+  const reason = netReason(err);
+  if (reason && /^(CERT_|ERR_TLS|UNABLE_TO_VERIFY|DEPTH_ZERO|SELF_SIGNED)/.test(reason)) return t('err.netCert');
+  if (reason) return NET[reason] ? t(NET[reason]) : `${t('err.netFailed')} (${reason})`;
   const m = (err as Error)?.message ?? String(err);
   if (/401|unauthori[sz]ed/i.test(m)) return t('err.authFailed');
   if (/412|precondition/i.test(m)) return t('err.eventChanged');
