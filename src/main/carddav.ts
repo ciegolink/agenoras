@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import { DavAccount, getDavAccount, getDavPassword, listDavAccounts } from './davaccounts';
 import { getKv, setKv } from './cache';
 import { t } from './i18n';
-import { log } from './log';
+import { log, resolved } from './log';
 import { isLocalDav, localClient } from './localdav';
 
 export interface AddressBookInfo {
@@ -261,6 +261,7 @@ export async function listContacts(): Promise<{
         }
       }
       succeeded(`card:${acc.id}`);
+      resolved('CardDAV', acc.name);
     } catch (err) {
       if (failedAgain(`card:${acc.id}`)) {
         errors.push({ accountId: acc.id, message: davError(err) });

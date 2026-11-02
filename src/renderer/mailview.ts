@@ -23,6 +23,7 @@ async function showMail(ref: MailRef, loadImages = false): Promise<void> {
     <div id="body"></div>
     ${attachmentsHtml(msg)}`;
   mountMailBody(el('#body'), msg, () => showMail(ref, true));
+  void fillAnswered(reader, msg, undefined);
   fillInviteCalendars();
 }
 

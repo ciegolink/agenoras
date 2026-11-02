@@ -100,9 +100,13 @@ Linux: `~/.config/agenoras/` · Windows: `%APPDATA%\agenoras\`
 Passwords are encrypted with the system keychain (GNOME Keyring / libsecret on Linux, DPAPI on Windows, Keychain on macOS).
 
 - `accounts.json`, `calendars.json`, `contacts.json`: accounts (passwords encrypted)
-- `settings.json`: identities, signatures, templates, rules, preferences
+- `settings.json`: identities, signatures, templates, rules, categories, preferences (incl. spell check)
+- `lists.json`: distribution lists · `rss.json`: feeds
 - `window-state.json`: window size and position
-- `cache.db`: local cache, safe to delete
+- `problems.json`: problem log
+- `cache.db`: local cache (SQLite, key-value table `kv`). Mostly rebuilt from the servers, but the pin sidebar (`pins`) and the archive and star state of feed articles (`rss.archived`, `rss.flagged`) exist only here. Tables `offline_mail` / `offline_body` / `offline_fts` (FTS5, trigram) hold the offline copy of a period per account (`offline.ts`), separate from the newest-mails cache in `mail` / `mail_body`, which is overwritten on every fetch
+- `pop3.db`: POP3 mail · `local.db`: local calendars, tasks, address books
+- `ai.json`, `ai-models/`: AI settings and models (`AI_MODELS` in `src/main/ai.ts`; the 8B model is only offered from 13 GiB of memory)
 - `sounds/`: custom notification sounds
 
 ## 8. Build installers
@@ -113,7 +117,7 @@ Passwords are encrypted with the system keychain (GNOME Keyring / libsecret on L
 | Windows | `npm run dist:win` (run on Windows) | `Agenoras-Setup.exe` |
 | macOS | `npm run dist:mac` (run on a Mac) | `Agenoras.dmg`, `Agenoras-mac.zip` (universal) |
 
-Building the Windows installer on Linux requires Wine. The simpler way is GitHub Actions: push a tag (`npm version patch && git push --follow-tags`) and the workflow builds all three platforms and attaches the files to a draft release. Review the draft under **Releases** and publish it.
+Building the Windows installer on Linux requires Wine. The simpler way is GitHub Actions: push a tag (`npm version patch && git push --follow-tags`) and the workflow builds all three platforms and attaches the files to a draft release. Review the draft under **Releases** and publish it. Installed copies only see a release once it is published (not as a draft): Agenoras checks once at start and announces it in a small window (update, later, skip this version); on Windows, macOS and with the AppImage it downloads and installs it (`electron-updater`, reading the `latest*.yml` files of the release), the .deb links to the release page.
 
 The macOS build in GitHub Actions is signed with a Developer ID certificate and notarized by Apple. It needs five repository secrets (Settings → Secrets and variables → Actions):
 

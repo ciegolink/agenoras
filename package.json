@@ -36,6 +36,7 @@
     "dist:mac": "tsc && electron-builder --mac"
   },
   "dependencies": {
+    "electron-updater": "^6.8.11",
     "ical.js": "^2.2.1",
     "imapflow": "^2.9.1",
     "mailparser": "^3.12.4",

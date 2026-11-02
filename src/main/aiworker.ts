@@ -3,7 +3,11 @@
 // process after a few idle minutes, which frees the RAM again. Everything runs offline.
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-type Job = { id: number; kind: 'subjects' | 'proofread' | 'write' | 'translate'; text: string; modelPath: string; lang: string; ctx?: { original?: string; subject?: string } };
+type Job = { id: number; kind: 'subjects' | 'proofread' | 'write' | 'translate'; text: string; modelPath: string; lang: string; german?: string; ctx?: { original?: string; subject?: string } };
+
+// German without a chosen spelling ("auto", or "de" as translation target): the one of the user's
+// region – Switzerland "ss", Germany/Austria "ß". For other languages nothing changes.
+const deVariant = (job: Job, lang: string) => (lang === 'auto' || lang === 'de' ? job.german ?? lang : lang);
 
 // node-llama-cpp is an ES module; tsc turns import() into require() for CommonJS → keep a real import
 const esmImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
@@ -82,7 +86,7 @@ function detectLang(text: string | undefined): string | null {
 // New mails use the setting, with "auto" the language of the instruction.
 function writeLang(job: Job): string {
   const mail = detectLang(job.ctx?.original);
-  const german = job.lang === 'de-CH' || job.lang === 'de-DE' ? job.lang : 'de';
+  const german = job.lang === 'de-CH' || job.lang === 'de-DE' ? job.lang : job.german ?? 'de';
   if (mail) return mail === 'de' ? german : mail;
   if (job.lang !== 'auto') return job.lang;
   const own = detectLang(job.text);
@@ -153,7 +157,7 @@ async function run(job: Job): Promise<unknown> {
     const words = (x: string) => x.split(/\s+/).filter(Boolean).length;
     const body = job.text.toLowerCase();
     return subjects
-      .map((x) => finish(x, job.lang).replace(/^["'„“]+|["'“”.]+$/g, '').trim())
+      .map((x) => finish(x, deVariant(job, job.lang)).replace(/^["'„“]+|["'“”.]+$/g, '').trim())
       // a subject is short and not a sentence copied from the mail
       .filter((x) => x && words(x) <= 10 && !(words(x) > 3 && body.includes(x.toLowerCase())))
       .slice(0, 3);
@@ -168,11 +172,13 @@ async function run(job: Job): Promise<unknown> {
     return finish(answer.replace(/^(subject|betreff):.*\n+/i, ''), lang).trim();
   }
   if (job.kind === 'translate') {
-    const answer = await ask(translateSystem(job.lang), job.text, { maxTokens: Math.min(2048, Math.ceil(job.text.length / 2) + 128), temperature: 0 });
-    return finish(answer, job.lang).trim();
+    const target = deVariant(job, job.lang);
+    const answer = await ask(translateSystem(target), job.text, { maxTokens: Math.min(2048, Math.ceil(job.text.length / 2) + 128), temperature: 0 });
+    return finish(answer, target).trim();
   }
-  const answer = await ask(proofSystem(job.lang), job.text, { maxTokens: Math.min(2048, Math.ceil(job.text.length / 2) + 64), temperature: 0 });
-  return finish(answer, job.lang, false).trim();
+  const lang = deVariant(job, job.lang);
+  const answer = await ask(proofSystem(lang), job.text, { maxTokens: Math.min(2048, Math.ceil(job.text.length / 2) + 64), temperature: 0 });
+  return finish(answer, lang, false).trim();
 }
 
 // Jobs arrive one after another (the main process queues them)

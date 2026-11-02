@@ -420,7 +420,7 @@ ctForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const lines = (n: string) => ctField(n).value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
   const btn = el<HTMLButtonElement>('#btn-contact-save');
-  btn.disabled = true;
+  savingBtn(btn, true);
   el('#contact-error').textContent = '';
   try {
     await window.api.contacts.save({
@@ -441,7 +441,7 @@ ctForm.addEventListener('submit', async (e) => {
   } catch (err) {
     el('#contact-error').textContent = errMsg(err);
   } finally {
-    btn.disabled = false;
+    savingBtn(btn, false);
   }
 });
 

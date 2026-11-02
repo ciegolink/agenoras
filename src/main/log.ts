@@ -1,5 +1,5 @@
 // Problem log (IMAP, SMTP, CalDAV/CardDAV): shown behind the warning sign in the title bar.
-// Kept in a small JSON file so problems from before a restart are still visible; the user can clear it.
+// Kept in a small JSON file so problems from before a restart are still visible; the user can clear it. Entries go away by themselves once the account works again.
 import { app } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -75,6 +75,16 @@ export function log(level: LogLevel, source: string, account: string, message: s
     list.push({ id: nextId++, time: now.toISOString(), level, source, account, message, count: 1 });
     if (list.length > MAX) list.splice(0, list.length - MAX);
   }
+  save();
+  onChange(logState());
+}
+
+// Works again: its problems are over, drop them from the log (only lasting problems stay)
+export function resolved(source: string, account: string): void {
+  const list = load();
+  const rest = list.filter((e) => e.source !== source || e.account !== account);
+  if (rest.length === list.length) return;
+  entries = rest;
   save();
   onChange(logState());
 }

@@ -69,21 +69,19 @@ document.addEventListener('mousedown', (e) => {
 
 // Proofreading
 // Works on text pieces in place: formatting stays, and every change goes through the editor's
-// undo history (Ctrl+Z). With a selection only the selection is checked.
+// undo history (Ctrl+Z). Without a selection: all own text above the signature (also one-word lines,
+// e.g. a greeting); with a selection only the selection.
 
 function ownTextNodes(): Text[] {
   const out: Text[] = [];
   const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT, {
     acceptNode: (n) =>
-      (n.parentElement?.closest('[data-sig],[data-quote]') ? NodeFilter.FILTER_REJECT : /\p{L}{2,}.*\s.*\p{L}{2,}/su.test(n.textContent ?? '') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP),
+      (n.parentElement?.closest('[data-sig],[data-quote]') ? NodeFilter.FILTER_REJECT : /\p{L}{3,}/u.test(n.textContent ?? '') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP),
   });
   for (let n = walker.nextNode(); n; n = walker.nextNode()) out.push(n as Text);
   return out;
 }
 
-// A small model can drift (reorder or rewrite words). Only accept real corrections: same words in
-// the same order, each changed at most a little (typos, case, punctuation). A missing/extra short
-// word (e.g. a comma word like "es") is allowed once.
 // Edit distance where swapped neighbours ("tets" → "test") count as one typo
 function editDistance(a: string, b: string): number {
   const d = Array.from({ length: a.length + 1 }, (_, i) => Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
@@ -96,26 +94,48 @@ function editDistance(a: string, b: string): number {
   return d[a.length][b.length];
 }
 
-function plausible(before: string, after: string): boolean {
-  if (!after || after === before) return false;
-  const words = (s: string) => s.toLowerCase().split(/\s+/).map((w) => w.replace(/[^\p{L}\p{N}]/gu, '')).filter(Boolean);
-  const a = words(before);
-  const b = words(after);
-  let i = 0;
-  let j = 0;
-  let skips = 0;
-  while (i < a.length && j < b.length) {
-    const close = editDistance(a[i], b[j]) <= Math.max(1, Math.floor(a[i].length / 3));
-    if (close) {
+// Take the model's corrections word by word. Words are aligned (longest common sequence, a word may
+// differ a little: typo, case, ä/ae, punctuation); an aligned word is taken from the correction, every
+// other word stays as the user wrote it. Reordered, added or rewritten parts are ignored, the rest counts.
+const core = (w: string) => w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+const similar = (a: string, b: string) => a === b || (!!a && !!b && editDistance(a, b) <= Math.max(1, Math.floor(a.length / 3)));
+// Letters from the correction; brackets and quotes as the user had them; a comma or sentence end from the
+// correction, or the user's sentence end if the correction lost it (e.g. a moved word took it along)
+function takeWord(orig: string, fixed: string): string {
+  const lead = orig.match(/^[^\p{L}\p{N}]*/u)![0];
+  const body = fixed.replace(/^[^\p{L}\p{N}]+/u, '').replace(/[^\p{L}\p{N}]+$/u, '');
+  const oTrail = orig.match(/[^\p{L}\p{N}]*$/u)![0];
+  const fTrail = fixed.match(/[^\p{L}\p{N}]*$/u)![0].replace(/[^,.;:!?]/g, '');
+  const trail = /[^,.;:!?]/.test(oTrail) ? oTrail : fTrail || (/[.!?]/.test(oTrail) ? oTrail : '');
+  return lead + (body || orig) + trail;
+}
+
+function mergeCorrections(before: string, after: string): { tok: string[]; out: string[] } {
+  const tok = before.match(/\s+|\S+/g) ?? [];
+  const bw = tok.map((t, i) => [t, i] as const).filter(([t]) => /\S/.test(t));
+  const aw = after.split(/\s+/).filter(Boolean);
+  const n = bw.length;
+  const m = aw.length;
+  if (!n || !m) return { tok, out: [...tok] };
+  // dp[i][j]: best number of aligned words for bw[i..] and aw[j..]
+  const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      dp[i][j] = Math.max(dp[i + 1][j], dp[i][j + 1], similar(core(bw[i][0]), core(aw[j])) ? dp[i + 1][j + 1] + 1 : 0);
+  const out = [...tok];
+  for (let i = 0, j = 0; i < n && j < m; ) {
+    if (similar(core(bw[i][0]), core(aw[j])) && dp[i][j] === dp[i + 1][j + 1] + 1) {
+      out[bw[i][1]] = takeWord(bw[i][0], aw[j]);
       i++;
       j++;
-    } else if (++skips > 1) return false;
-    else if (b.length > a.length && b[j].length <= 4) j++; // one inserted short word
-    else if (a.length > b.length && a[i].length <= 4) i++; // one dropped short word
-    else return false;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) i++;
+    else j++;
   }
-  return a.length - i + (b.length - j) + skips <= 1;
+  return { tok, out };
 }
+
+// Swiss region (also with an English interface): no "ß" unless the user wrote one (the model likes to "correct" weiss → weiß)
+const swissSpelling = (before: string, text: string) => (/-(CH|LI)$/i.test(LOCALE) && !before.includes('ß') ? text.replace(/ß/g, 'ss') : text);
 
 // Several lines → real paragraphs/line breaks; one line → plain text (keeps the formatting around it)
 function replaceRange(range: Range, text: string): void {
@@ -130,50 +150,183 @@ function replaceRange(range: Range, text: string): void {
   document.execCommand('insertHTML', false, html);
 }
 
+// Proofreading runs in a panel above the text: progress first, then every correction to check.
+// The small model goes sentence by sentence (it drifts less on short pieces), the bigger one takes whole
+// paragraphs (more context, fewer requests); afterwards the
+// spell checker (Settings → Writing & reading) flags words that are still unknown. Nothing changes in
+// the mail until "Apply"; AI corrections start ticked, dictionary suggestions unticked (names, jargon).
+interface ProofJob {
+  range: Range;
+  before: string;
+  tok: string[]; // the text in words and spaces
+  ai: string[]; // the same with the AI's corrections
+}
+interface ProofItem {
+  job: number;
+  kind: 'ai' | 'spell';
+  at?: number; // spell: token index
+  word?: string; // spell: replacement
+  html: string;
+  on: boolean;
+}
+let proofJobs: ProofJob[] = [];
+let proofItems: ProofItem[] = [];
+let proofRun = 0; // a new run or "Cancel" makes the running one stop
+
+const proofPanel = el('#ai-proof');
+const norm = (s: string) => s.replace(/\s+/g, '');
+const WORD = /[\p{L}\p{N}](?:[\p{L}\p{N}'’-]*[\p{L}\p{N}])?/u;
+
+function paintProof(state: 'busy' | 'done', step = ''): void {
+  proofPanel.hidden = false;
+  el('#ai-proof-busy').hidden = state !== 'busy';
+  el('#ai-proof-step').textContent = step;
+  el('#ai-proof-actions').hidden = state !== 'done';
+  const n = proofItems.length;
+  el('#ai-proof-count').textContent = state === 'done' ? (n ? t('ai.proofFound', { n }) : t('ai.proofNone')) : '';
+  el('#btn-ai-proof-apply').hidden = !n;
+  el('#btn-ai-proof-discard').textContent = t(n ? 'ai.proofDiscard' : 'btn.close');
+  el('#ai-proof-list').innerHTML = proofItems
+    .map(
+      (f, i) =>
+        `<label class="ai-fix${f.kind === 'spell' ? ' spell' : ''}"><input type="checkbox" data-fix="${i}"${f.on ? ' checked' : ''}><span>${f.kind === 'spell' ? `<small>${esc(t('ai.proofSpell'))}</small> ` : ''}${f.html}</span></label>`,
+    )
+    .join('');
+}
+
+function closeProof(): void {
+  proofRun++;
+  proofJobs = [];
+  proofItems = [];
+  proofPanel.hidden = true;
+  el('#ai-proof-list').innerHTML = '';
+}
+
+// Sentences as token ranges [from, to): a sentence ends after . ! ? : or at a line break
+function sentences(tok: string[]): [number, number][] {
+  const out: [number, number][] = [];
+  let from = 0;
+  tok.forEach((w, i) => {
+    const end = /\n/.test(w) || (/\S/.test(w) && /[.!?:]["“”»)]*$/.test(w));
+    if (end || i === tok.length - 1) {
+      out.push([from, i + 1]);
+      from = i + 1;
+    }
+  });
+  return out;
+}
+
+// Preview of one paragraph: old words struck through, new ones highlighted
+const diffHtml = (tok: string[], fixed: string[]) => tok.map((o, i) => (fixed[i] === o ? esc(o) : `<del>${esc(o)}</del><ins>${esc(fixed[i])}</ins>`)).join('');
+
+// Dictionary suggestion for one word: a few words around it as context
+function spellHtml(tok: string[], at: number, word: string): string {
+  const words = tok.map((w, i) => [w, i] as const).filter(([w]) => /\S/.test(w));
+  const k = words.findIndex(([, i]) => i === at);
+  const ctx = (list: (readonly [string, number])[]) => list.map(([w]) => esc(w)).join(' ');
+  return `${k > 3 ? '… ' : ''}${ctx(words.slice(Math.max(0, k - 3), k))} <del>${esc(tok[at])}</del><ins>${esc(word)}</ins> ${ctx(words.slice(k + 1, k + 4))}${k + 4 < words.length ? ' …' : ''}`;
+}
+
 el('#btn-ai-proof').addEventListener('click', async () => {
   const btn = el<HTMLButtonElement>('#btn-ai-proof');
   const sel = getSelection();
   const inEditor = sel && sel.rangeCount && !sel.isCollapsed && editor.contains(sel.getRangeAt(0).commonAncestorContainer);
+  const run = ++proofRun;
+  proofJobs = [];
+  proofItems = [];
   btn.disabled = true;
   setInfo('');
-  let changed = 0;
   try {
+    // what to check: the selection, or every own text piece above the signature
+    const pieces: { range: Range; before: string }[] = [];
     if (inEditor) {
-      const range = sel!.getRangeAt(0).cloneRange();
       // Selection.toString keeps the line breaks between paragraphs, Range.toString does not
-      const before = sel!.toString();
-      aiProgress(t('ai.proofreading', { i: 1, n: 1 }));
-      const after = await window.api.ai.proofread(before);
-      if (plausible(before, after)) {
-        replaceRange(range, after);
-        changed++;
-      }
+      pieces.push({ range: sel!.getRangeAt(0).cloneRange(), before: sel!.toString() });
     } else {
-      const nodes = ownTextNodes();
-      for (let i = 0; i < nodes.length; i++) {
-        aiProgress(t('ai.proofreading', { i: i + 1, n: nodes.length }));
-        const node = nodes[i];
-        const before = node.textContent ?? '';
+      for (const node of ownTextNodes()) {
+        const all = node.textContent ?? '';
         // keep leading/trailing spaces exactly – the model tends to trim them
-        const lead = before.match(/^\s*/)![0];
-        const trail = before.match(/\s*$/)![0];
-        const core = before.trim();
-        const after = (await window.api.ai.proofread(core)).trim();
-        if (!node.isConnected || !plausible(core, after)) continue;
+        const lead = all.match(/^\s*/)![0].length;
+        const trail = all.match(/\s*$/)![0].length;
         const range = document.createRange();
-        range.setStart(node, lead.length);
-        range.setEnd(node, before.length - trail.length);
-        replaceRange(range, after);
-        changed++;
+        range.setStart(node, lead);
+        range.setEnd(node, all.length - trail);
+        pieces.push({ range, before: all.trim() });
       }
     }
-    setInfo(changed ? t('ai.proofDone', { n: changed }) : t('ai.proofNone'));
+    if (!pieces.length) return void setInfo(t('ai.proofEmpty'));
+    proofJobs = pieces.map(({ range, before }) => {
+      const tok = before.match(/\s+|\S+/g) ?? [];
+      return { range, before, tok, ai: [...tok] };
+    });
+    const bySentence = aiNow?.proofBySentence ?? true;
+    const todo = proofJobs.flatMap((job, j) => (bySentence ? sentences(job.tok) : [[0, job.tok.length] as [number, number]]).map(([from, to]) => ({ j, from, to })));
+    let done = 0;
+    for (const { j, from, to } of todo) {
+      paintProof('busy', t('ai.proofreading', { i: ++done, n: todo.length }));
+      const job = proofJobs[j];
+      const text = job.tok.slice(from, to).join('').trim();
+      if (!/\p{L}{3,}/u.test(text)) continue;
+      const res = mergeCorrections(text, (await window.api.ai.proofread(text)).trim());
+      if (run !== proofRun) return; // cancelled
+      // the sentence's words in the paragraph (leading spaces of the slice are skipped by trim)
+      let k = from;
+      while (k < to && !/\S/.test(job.tok[k])) k++;
+      res.out.forEach((w, i) => (job.ai[k + i] = swissSpelling(job.before, w)));
+    }
+    // AI corrections: one item per paragraph
+    proofJobs.forEach((job, j) => {
+      if (job.ai.join('') !== job.before) proofItems.push({ job: j, kind: 'ai', html: diffHtml(job.tok, job.ai), on: true });
+    });
+    // Dictionary: words that are still unknown after the AI (off when spell check is off)
+    const spots = proofJobs.flatMap((job, j) => job.ai.map((w, at) => ({ j, at, word: w.match(WORD)?.[0] ?? '' })))
+      .filter(({ word }) => word.length >= 3 && !/\d/.test(word) && word !== word.toUpperCase());
+    const wrong = new Map(window.api.spell.check([...new Set(spots.map((x) => x.word))]).filter((x) => x.suggestions.length).map((x) => [x.word, x.suggestions[0]]));
+    for (const { j, at, word } of spots) {
+      const sugg = wrong.get(word);
+      if (!sugg) continue;
+      const job = proofJobs[j];
+      const fixed = job.ai[at].replace(word, sugg);
+      proofItems.push({ job: j, kind: 'spell', at, word: sugg, html: spellHtml(job.ai, at, fixed), on: false });
+    }
+    paintProof('done');
   } catch (err) {
-    setInfo(errMsg(err));
+    if (run === proofRun) {
+      closeProof();
+      setInfo(errMsg(err));
+    }
   } finally {
-    btn.disabled = false;
-    aiProgress('');
+    if (run === proofRun) btn.disabled = false;
   }
+});
+
+el('#ai-proof-list').addEventListener('change', (e) => {
+  const box = (e.target as HTMLElement).closest<HTMLInputElement>('[data-fix]');
+  if (box) proofItems[Number(box.dataset.fix)].on = box.checked;
+});
+
+// Apply the ticked corrections per paragraph; a piece the user changed in the meantime is left alone
+el('#btn-ai-proof-apply').addEventListener('click', () => {
+  editor.focus(); // the edits go through the editor (and its undo history)
+  let n = 0;
+  for (let j = proofJobs.length - 1; j >= 0; j--) {
+    const job = proofJobs[j];
+    const mine = proofItems.filter((f) => f.job === j && f.on);
+    if (!mine.length || !editor.contains(job.range.commonAncestorContainer) || norm(job.range.toString()) !== norm(job.before)) continue;
+    const final = mine.some((f) => f.kind === 'ai') ? [...job.ai] : [...job.tok];
+    for (const f of mine) if (f.kind === 'spell') final[f.at!] = final[f.at!].replace(WORD, f.word!);
+    const text = final.join('');
+    if (text === job.before) continue;
+    replaceRange(job.range, text);
+    n += mine.length;
+  }
+  closeProof();
+  setInfo(n ? t('ai.proofDone', { n }) : '');
+});
+el('#btn-ai-proof-discard').addEventListener('click', closeProof);
+el('#btn-ai-proof-stop').addEventListener('click', () => {
+  closeProof();
+  el<HTMLButtonElement>('#btn-ai-proof').disabled = false;
 });
 
 // Translate the selection

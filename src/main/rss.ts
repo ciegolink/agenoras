@@ -7,7 +7,8 @@ import { decrypt, encrypt } from './accounts';
 import { delKv, getKv, searchKv, setKv } from './cache';
 import { inlineRemoteImages } from './remote';
 import { t } from './i18n';
-import { log } from './log';
+import { log, resolved } from './log';
+import { writeFileSafe } from './files';
 
 // RSS/Atom feeds, stored in rss.json. Articles live in the cache.
 
@@ -34,6 +35,8 @@ export interface RssItem {
   author: string;
   snippet: string;
   read?: boolean;
+  archived?: boolean; // out of the inbox, still kept and searchable
+  flagged?: boolean; // star, never dropped by the 300 limit
 }
 
 interface Parsed {
@@ -57,7 +60,7 @@ function readAll(): StoredFeed[] {
 }
 
 function writeAll(list: StoredFeed[]): void {
-  fs.writeFileSync(file(), JSON.stringify(list, null, 2), 'utf8');
+  writeFileSafe(file(), JSON.stringify(list, null, 2));
 }
 
 const pub = ({ password, ...f }: StoredFeed): RssFeed => f;
@@ -245,6 +248,8 @@ const hash = (s: string) => crypto.createHash('sha1').update(s).digest('hex').sl
 const bodyKey = (key: string) => `rss.body:${key}`;
 const cachedList = () => getKv<RssItem[]>('rss.items') ?? [];
 const readSet = () => new Set(getKv<string[]>('rss.read') ?? []);
+const archivedSet = () => new Set(getKv<string[]>('rss.archived') ?? []);
+const flaggedSet = () => new Set(getKv<string[]>('rss.flagged') ?? []);
 
 function store(feedId: string, feed: Parsed): void {
   const old = cachedList();
@@ -257,15 +262,19 @@ function store(feedId: string, feed: Parsed): void {
     mine.set(key, { ...rest, key, feedId, date: p.date || mine.get(key)?.date || now });
     setKv(bodyKey(key), html);
   }
+  const flagged = flaggedSet();
   const sorted = [...mine.values()].sort((a, b) => b.date.localeCompare(a.date));
-  delKv(sorted.slice(MAX_PER_FEED).map((i) => bodyKey(i.key)));
-  setKv('rss.items', [...old.filter((i) => i.feedId !== feedId), ...sorted.slice(0, MAX_PER_FEED)]);
+  const keep = sorted.filter((i, n) => n < MAX_PER_FEED || flagged.has(i.key));
+  delKv(sorted.filter((i, n) => n >= MAX_PER_FEED && !flagged.has(i.key)).map((i) => bodyKey(i.key)));
+  setKv('rss.items', [...old.filter((i) => i.feedId !== feedId), ...keep]);
 }
 
 function withRead(items: RssItem[]): RssItem[] {
   const read = readSet();
+  const archived = archivedSet();
+  const flagged = flaggedSet();
   const ids = new Set(listFeeds().map((f) => f.id));
-  return items.filter((i) => ids.has(i.feedId)).map((i) => ({ ...i, read: read.has(i.key) })).sort((a, b) => b.date.localeCompare(a.date));
+  return items.filter((i) => ids.has(i.feedId)).map((i) => ({ ...i, read: read.has(i.key), archived: archived.has(i.key), flagged: flagged.has(i.key) })).sort((a, b) => b.date.localeCompare(a.date));
 }
 
 export function cachedItems(): { feeds: RssFeed[]; items: RssItem[] } {
@@ -282,6 +291,7 @@ export async function refreshFeeds(): Promise<{ feeds: RssFeed[]; items: RssItem
         try {
           const { feed } = await load(f.url, f.username, f.password ? await decrypt(f.password) : '');
           store(f.id, feed);
+          resolved('RSS', f.name);
         } catch (err) {
           errors.push({ feedId: f.id, message: (err as Error).message });
           log('error', 'RSS', f.name, (err as Error).message);
@@ -307,6 +317,24 @@ export function setRead(keys: string[], read: boolean): void {
     else set.delete(k);
   }
   setKv('rss.read', [...set].slice(-MAX_READ));
+}
+
+export function setArchived(keys: string[], archived: boolean): void {
+  const set = archivedSet();
+  for (const k of keys) {
+    set.delete(k);
+    if (archived) set.add(k);
+  }
+  setKv('rss.archived', [...set].slice(-MAX_READ));
+}
+
+export function setFlagged(keys: string[], flagged: boolean): void {
+  const set = flaggedSet();
+  for (const k of keys) {
+    if (flagged) set.add(k);
+    else set.delete(k);
+  }
+  setKv('rss.flagged', [...set]);
 }
 
 // Article HTML with absolute links and embedded images (CSP blocks remote ones)
@@ -381,6 +409,10 @@ export function removeFeed(id: string): void {
   delKv(gone.map(bodyKey));
   setKv('rss.items', old.filter((i) => i.feedId !== id));
   const read = readSet();
-  gone.forEach((k) => read.delete(k));
+  const archived = archivedSet();
+  const flagged = flaggedSet();
+  gone.forEach((k) => (read.delete(k), archived.delete(k), flagged.delete(k)));
   setKv('rss.read', [...read]);
+  setKv('rss.archived', [...archived]);
+  setKv('rss.flagged', [...flagged]);
 }

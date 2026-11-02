@@ -1,12 +1,12 @@
 import './migrate'; // must run first: moves the old user data folder
 import './netretry';
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, shell, Tray } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, session, shell, Tray } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { clearLog, flushLog, getLog, log, logState, markLogSeen, setOnLogChange } from './log';
+import { clearLog, flushLog, getLog, log, logState, markLogSeen, resolved, setOnLogChange } from './log';
 import {
   AccountUpdate,
   addAccount,
@@ -50,24 +50,33 @@ import {
   setSeen,
   setFlagged,
   fetchFlagged,
+  findByMessageIds,
+  fetchOlder,
   setOnNewMail,
   startAccount,
   testConnection,
   markFolderSeen,
+  markAnswered,
   reconnectAll,
 } from './imap';
 import { OutgoingMail, sendMail, testSmtp } from './smtp';
+import { addOutbox, outboxBusy, outboxItem, outboxList, removeOutbox, updateOutbox } from './outbox';
+import { offlineComplete, offlineProgress, onOfflineCleared, onOfflineProgress, restartOffline } from './offline';
+import { applyImport, buildExport, readExport, summarize } from './transfer';
+import { parseDateQuery } from './datequery';
+import { checkForUpdates, getUpdate, installUpdate, startUpdates, updateState } from './updater';
 import { mailtoArg, parseMailto } from './mailto';
-import { closeStore as closePopStore, forgetAccount as forgetPopAccount } from './pop3';
+import { closeStore as closePopStore, forgetAccount as forgetPopAccount, vacuumStore as vacuumPop } from './pop3';
 import { closeLocal, forgetLocal, isLocalDav, renameLocal } from './localdav';
 import { aiState, cancelAiDownload, deleteAiModel, downloadAiModel, proofread, setAiEnabled, setAiLang, setAiModel, setAiTranslateLang, stopWorker as stopAi, suggestSubjects, writeText, translate } from './ai';
 import { allowImages, getIdentity, getSettings, Identity, imagesAllowed, isTrustedSender, MailLabel, MailRule, NotifySettings, saveRules, SCALE_FACTOR, saveIdentities, saveLabels, saveNotify, savePrefs, saveTemplates, saveTheme, savedLanguage, setMailLabel, Template, Theme, trustSender, UiScale } from './settings';
 import { listSounds, openSoundFolder, soundData } from './sounds';
 import { flushWinState, loadWinState, trackWinState } from './winstate';
+import { addPin, listPins, PinItem, removePin, togglePin, updatePins } from './pins';
 import { cachedTasks, deleteTask, listTasks, saveTask, TaskInput } from './tasks';
 import { getLists, MailList, removeList, saveList } from './lists';
 import { cancelSignIn, forgetToken, isOAuthProvider, oauthProviders, rememberToken, serverFor, signIn } from './oauth';
-import { addFeed, article as rssArticle, cachedItems as cachedRss, listFeeds, NewRssFeed, refreshFeeds, removeFeed, searchItems as searchRss, setRead as setRssRead, updateFeed } from './rss';
+import { addFeed, article as rssArticle, cachedItems as cachedRss, listFeeds, NewRssFeed, refreshFeeds, removeFeed, searchItems as searchRss, setArchived as setRssArchived, setFlagged as setRssFlagged, setRead as setRssRead, updateFeed } from './rss';
 import { runRulesForNew, runRulesNow } from './rules';
 import { parseInvite, sendInvitations, sendReply } from './invites';
 import { getAvatars, hasRemoteImages, inlineRemoteImages, loadSignatureFile } from './remote';
@@ -90,8 +99,9 @@ import {
   testCalDav,
 } from './caldav';
 import { cachedContacts, ContactInput, deleteContact, forgetCardAccount, listContacts, saveContact, testCardDav } from './carddav';
-import { cachedByMessageIds, knownAddresses, rememberAddresses, cachedBody, cachedMail, closeCache, folderKey, forgetFolder, forgetMailAccount, getKv, removeCachedMail, searchCachedMail, setCachedSeen, setKv, storeBody, storeMail } from './cache';
-import { availableLanguages, i18nData, initI18n, t } from './i18n';
+import { cachedByMessageIds, cachedReplies, hasOffline, offlineBody, offlineOlder, tidyCache, vacuumCache, knownAddresses, rememberAddresses, cachedBody, cachedMail, closeCache, folderKey, forgetFolder, forgetMailAccount, getKv, removeCachedMail, searchCachedMail, setCachedSeen, setKv, storeBody, storeMail } from './cache';
+import { availableLanguages, i18nData, initI18n, chromiumLocale, regionWeekStart, t } from './i18n';
+import { writeFileSafe } from './files';
 
 // Language: system language if lang/<code>.json exists – otherwise English.
 // The locale also drives date fields and formats (e.g. de-CH).
@@ -122,8 +132,13 @@ app.on('open-url', (e, url) => {
 // Windows: without an app ID no notifications appear
 if (process.platform === 'win32') app.setAppUserModelId('ch.ciegolink.agenoras');
 
+// A stray error (a dropped connection nobody waited for, a broken server answer) must not bring up
+// Electron's error dialog or stop the app: write it to the console and go on
+process.on('unhandledRejection', (reason) => console.error('Unhandled rejection:', reason));
+process.on('uncaughtException', (err) => console.error('Uncaught exception:', err));
+
 const lang = initI18n(savedLanguage());
-app.commandLine.appendSwitch('lang', lang.locale);
+app.commandLine.appendSwitch('lang', chromiumLocale());
 
 // Linux: hardware acceleration off. With some drivers Electron's GPU process crashes otherwise
 // (exit_code=139) and the window stays empty. A mail app does not need it.
@@ -134,7 +149,8 @@ if (process.platform === 'linux' && process.env.AGENORAS_GPU !== '1') {
 
 // Windows fetch the strings synchronously at startup (once, small)
 ipcMain.on('i18n:get', (e) => {
-  e.returnValue = { ...i18nData(), weekStart: getSettings().weekStart };
+  const ws = getSettings().weekStart;
+  e.returnValue = { ...i18nData(), weekStart: ws < 0 ? regionWeekStart() : ws, regionWeekStart: regionWeekStart(), version: app.getVersion() };
 });
 
 let win: BrowserWindow | null = null;
@@ -164,7 +180,11 @@ function lockDown(w: BrowserWindow): void {
   w.setMenuBarVisibility(false);
   w.webContents.setWindowOpenHandler(({ url }) => {
     if (/^mailto:/i.test(url)) openMailto(url); // our own compose window, no detour through the system
-    else if (/^https?:/i.test(url)) shell.openExternal(url);
+    else if (/^https?:/i.test(url)) {
+      // links from the main window: in the browser column if chosen (Settings → General)
+      if (w === win && getSettings().linkOpen === 'agenoras') win.webContents.send('web:open', url);
+      else shell.openExternal(url);
+    }
     return { action: 'deny' };
   });
   w.webContents.on('will-navigate', (e) => e.preventDefault());
@@ -196,9 +216,17 @@ function createWindow(): void {
     icon: APP_ICON,
     ...frameOpts,
     // keeps running unthrottled when hidden/minimized (sound, refresh on new mail)
-    webPreferences: { ...webPreferences, backgroundThrottling: false },
+    // webviewTag: the browser column (hardened in will-attach-webview below)
+    webPreferences: { ...webPreferences, backgroundThrottling: false, webviewTag: true },
   });
   lockDown(win);
+  // Browser column: web pages only, no preload, no Node, sandboxed, in their own session that is
+  // forgotten when the app closes (no cookies mixed with anything else, nothing left behind)
+  win.webContents.on('will-attach-webview', (e, prefs, params) => {
+    delete (prefs as { preload?: string }).preload;
+    Object.assign(prefs, { nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, partition: WEB_PARTITION });
+    if (!/^https?:/i.test(params.src ?? '')) e.preventDefault();
+  });
   trackWinState(win, 'main', true);
   win.loadFile(path.join(__dirname, '../../src/renderer/index.html'));
   win.once('ready-to-show', () => {
@@ -480,6 +508,26 @@ function openMailWindow(ref: { accountId: string; folder: string; uid: number })
   vw.on('closed', () => viewerOpts.delete(id));
 }
 
+// Pin sidebar (a column in the main window): pinned tasks and feed articles, kept in pins.ts
+const sendPins = () => win?.webContents.send('pins:changed', listPins());
+
+ipcMain.handle('pins:list', () => listPins());
+ipcMain.handle('pins:add', (_e, item: PinItem) => {
+  addPin(item);
+  sendPins();
+});
+ipcMain.handle('pins:remove', (_e, key: string) => {
+  removePin(String(key));
+  sendPins();
+});
+ipcMain.handle('pins:toggle', (_e, key: string) => {
+  togglePin(String(key));
+  sendPins();
+});
+ipcMain.handle('pins:update', (_e, items: PinItem[]) => {
+  if (updatePins(items)) sendPins();
+});
+
 ipcMain.handle('mailview:open', (_e, ref: { accountId: string; folder: string; uid: number }) => openMailWindow(ref));
 ipcMain.handle('mailview:init', (e) => viewerOpts.get(e.sender.id) ?? null);
 
@@ -544,6 +592,8 @@ ipcMain.handle('accounts:add', async (_e, input: NewAccount) => {
     log('error', 'SMTP', input.email, t('log.testFailed', { msg: friendlyError(err) }));
     throw new Error('SMTP: ' + friendlyError(err));
   }
+  resolved('IMAP', input.email);
+  resolved('SMTP', input.email);
   const acc = await addAccount(input);
   startAccount(acc).catch((err) => console.error(friendlyError(err)));
   return acc;
@@ -570,6 +620,8 @@ ipcMain.handle('oauth:signin', async (_e, provider: string, extra: { name?: stri
     log('error', 'SMTP', res.email, t('log.testFailed', { msg: friendlyError(err) }));
     throw new Error('SMTP: ' + friendlyError(err));
   }
+  resolved('IMAP', res.email);
+  resolved('SMTP', res.email);
   // Same address already there: just renew the sign-in
   const existing = listAccounts().find((a) => a.oauth === provider && a.email.toLowerCase() === res.email.toLowerCase());
   if (existing) return reconnectOAuth(existing.id, res);
@@ -620,6 +672,8 @@ ipcMain.handle('accounts:update', async (_e, id: string, input: AccountUpdate) =
     log('error', 'SMTP', input.email, t('log.testFailed', { msg: friendlyError(err) }));
     throw new Error('SMTP: ' + friendlyError(err));
   }
+  resolved('IMAP', input.email);
+  resolved('SMTP', input.email);
   const acc = await updateAccount(id, input);
   await closeAccount(id); // reconnect with the new settings
   startAccount(acc).catch((err) => console.error(friendlyError(err)));
@@ -688,12 +742,27 @@ ipcMain.handle('log:seen', () => markLogSeen());
 ipcMain.handle('log:clear', () => clearLog());
 
 ipcMain.handle('accounts:remove', async (_e, id: string) => {
+  const big = hasOffline(id); // a lot of local data: shrink the files afterwards
+  const pop = listAllAccounts().find((a) => a.id === id)?.protocol === 'pop3';
   await closeAccount(id);
   removeAccount(id);
   forgetMailAccount(id);
   forgetPopAccount(id); // POP3: the local mailbox belongs to the account
   forgetToken(id);
+  if (big || pop) freeSpace(big, pop);
 });
+
+// After deleting a lot (an account with offline copy or a POP3 mailbox, a switched-off offline copy):
+// give the space back to the system right away (incremental, see cache.ts)
+function freeSpace(cache = true, pop = false): void {
+  try {
+    const bytes = (cache ? vacuumCache() : 0) + (pop ? vacuumPop() : 0);
+    if (bytes >= 1048576) win?.webContents.send('mail:status', t('cache.freed', { mb: Math.round(bytes / 1048576).toLocaleString(i18nData().locale) }));
+  } catch (err) {
+    console.error('VACUUM:', err);
+  }
+}
+onOfflineCleared(() => freeSpace());
 
 // Mail
 const accountsFor = (accountId: string | null) => listAccounts().filter((a) => !accountId || a.id === accountId);
@@ -740,6 +809,32 @@ ipcMain.handle('mail:list', async (_e, accountId: string | null, folder = 'INBOX
   return { mails, errors };
 });
 
+// Scrolling down: the next 50 older mails per account, from the offline copy when it has them
+// before = smallest UID shown so far per account; done = nothing older left there
+ipcMain.handle('mail:older', async (_e, accountId: string | null, folder = 'INBOX', before: Record<string, number>) => {
+  const mails: MailSummary[] = [];
+  const done: string[] = [];
+  await Promise.all(
+    accountsFor(accountId).map(async (acc) => {
+      const min = Number(before?.[acc.id]);
+      if (!min || min <= 1) return void done.push(acc.id);
+      const key = folderKey(acc.id, folder);
+      const offline = offlineOlder<MailSummary>(key, min, 50).map((m) => ({ ...m, folder }));
+      let got = offline;
+      if (offline.length < 50) {
+        try {
+          got = await fetchOlder(acc, folder, min, 50);
+        } catch {
+          /* offline: what the copy has */
+        }
+      }
+      if (got.length < 50) done.push(acc.id);
+      mails.push(...got);
+    }),
+  );
+  return { mails: mails.sort((a, b) => b.date.localeCompare(a.date)), done };
+});
+
 // External images: blocked unless requested (loadImages) or from trusted senders.
 // They are loaded here in the main process; the mail gets the images as data: URLs.
 // "Load images" is remembered per mail (Message-ID, otherwise account|folder|UID).
@@ -775,10 +870,20 @@ ipcMain.handle('mail:get', async (_e, accountId: string, folder: string, uid: nu
     }
     return withImages({ ...cached, priority: cached.priority ?? 'normal', folder }, !!loadImages);
   }
+  // offline copy: complete ones like the cache, a shortened one only when the server is not reachable
+  const offline = offlineBody<MailDetail & { failed?: boolean }>(key, uid);
+  if (offline && !offline.partial && !offline.failed) {
+    if (markRead) {
+      setCachedSeen(key, uid);
+      markSeen(acc, folder, uid).catch(() => {});
+    }
+    return withImages({ ...offline, priority: offline.priority ?? 'normal', folder }, !!loadImages);
+  }
   let detail: MailDetail;
   try {
     detail = await getMessage(acc, folder, uid, !!markRead);
   } catch (err) {
+    if (offline?.partial && !offline.failed) return withImages({ ...offline, priority: offline.priority ?? 'normal', folder }, !!loadImages);
     throw new Error(friendlyError(err));
   }
   storeBody(key, uid, detail);
@@ -818,9 +923,32 @@ ipcMain.handle('mail:flagged', async () => {
 ipcMain.handle('mail:flagged:cached', () => listAccounts().flatMap((a) => getKv<MailSummary[]>(`flagged:${a.id}`) ?? []).sort((a, b) => b.date.localeCompare(a.date)));
 
 // Mails per category (from the cache, across all folders)
-ipcMain.handle('mail:byMessageIds', (_e, ids: string[]) =>
-  cachedByMessageIds<MailSummary>(Array.isArray(ids) ? ids.map(String) : []).sort((a, b) => b.date.localeCompare(a.date)),
-);
+// Older mails found on the server are kept in kv 'labelMails' (Message-ID → summaries)
+ipcMain.handle('mail:byMessageIds', (_e, ids: string[]) => {
+  const want = Array.isArray(ids) ? ids.map(String) : [];
+  const found = cachedByMessageIds<MailSummary>(want);
+  const have = new Set(found.map((m) => m.messageId));
+  const stored = getKv<Record<string, MailSummary[]>>('labelMails') ?? {};
+  for (const id of want) if (!have.has(id)) found.push(...(stored[id] ?? []).filter((m) => getAccount(m.accountId)));
+  return found.sort((a, b) => b.date.localeCompare(a.date));
+});
+
+// Look up on the server the ones that are not in the mail cache
+ipcMain.handle('mail:findByMessageIds', async (_e, ids: string[]) => {
+  const want = Array.isArray(ids) ? ids.map(String).filter(Boolean) : [];
+  const missing = want.filter((id) => !cachedByMessageIds<MailSummary>([id]).length);
+  const found = missing.length ? (await Promise.all(listAccounts().map((acc) => findByMessageIds(acc, missing).catch(() => [] as MailSummary[])))).flat() : [];
+  const labeled = new Set(Object.keys(getSettings().mailLabels ?? {}));
+  const stored = getKv<Record<string, MailSummary[]>>('labelMails') ?? {};
+  for (const id of Object.keys(stored)) if (!labeled.has(id)) delete stored[id];
+  for (const id of missing) {
+    const hits = found.filter((m) => m.messageId === id);
+    if (hits.length) stored[id] = hits;
+    else delete stored[id]; // deleted or moved to the trash
+  }
+  setKv('labelMails', stored);
+  return { found: found.length, missing: missing.filter((id) => !found.some((m) => m.messageId === id)).length };
+});
 
 // Known addresses (senders and recipients) for suggestions when composing
 ipcMain.handle('addresses:list', () => knownAddresses());
@@ -841,7 +969,7 @@ ipcMain.handle('mail:seen', async (_e, accountId: string, folder: string, uids: 
 ipcMain.handle('mail:search:cached', (_e, accountId: string | null, folder: string | null, query: string) => {
   const q = String(query ?? '').trim();
   if (q.length < 2) return [];
-  return searchCachedMail<MailSummary>(accountsFor(accountId).map((a) => a.id), folder || null, q);
+  return searchCachedMail<MailSummary>(accountsFor(accountId).map((a) => a.id), folder || null, q, 200, parseDateQuery(q));
 });
 
 // Full-text search on the server: one folder or all folders (without Gmail's "All Mail")
@@ -856,7 +984,8 @@ ipcMain.handle('mail:search', async (_e, accountId: string | null, folder: strin
   const gen = ++searchGen;
   if (q.length < 2) return { mails: [], errors: [] };
   const cancelled = () => gen !== searchGen;
-  const accs = accountsFor(accountId);
+  // whole mailbox stored offline: the local search already found everything
+  const accs = accountsFor(accountId).filter((a) => !offlineComplete(a.id));
   const errors: { accountId: string; message: string }[] = [];
   const perAccount = await Promise.all(
     accs.map(async (acc) => {
@@ -870,7 +999,7 @@ ipcMain.handle('mail:search', async (_e, accountId: string | null, folder: strin
               .filter((f) => f.selectable && f.specialUse !== '\\All')
               .sort((a, b) => searchRank(a) - searchRank(b))
               .map((f) => f.path);
-        return await searchFolders(acc, folders, q, folder ? 100 : 30, cancelled);
+        return await searchFolders(acc, folders, q, folder ? 100 : 30, cancelled, parseDateQuery(q));
       } catch (err) {
         errors.push({ accountId: acc.id, message: friendlyError(err) });
         return [];
@@ -1032,6 +1161,7 @@ ipcMain.handle('mail:react', async (_e, accountId: string, folder: string, uid: 
       inReplyTo: msg.messageId,
       references: [...msg.references, msg.messageId].filter(Boolean),
     }, () => {});
+    resolved('SMTP', acc.email);
   } catch (err) {
     log('error', 'SMTP', acc.email, friendlyError(err));
     throw new Error(friendlyError(err));
@@ -1093,26 +1223,162 @@ ipcMain.handle('mail:attachment:open', async (_e, accountId: string, folder: str
   if (err) throw new Error(err);
 });
 
-ipcMain.handle('mail:send', async (e, mail: OutgoingMail) => {
+// Outbox: after the undo delay the compose window closes and the mail is sent here in the background.
+// It stays in the outbox until the server has it; failed ones wait there to be sent again, edited or discarded.
+const sendOutbox = () => win?.webContents.send('outbox:changed', outboxList());
+
+function rememberRecipients(mail: OutgoingMail): void {
+  const parse = (l: string[] = []) => l.map((x) => /^"?([^"<]*)"?\s*<([^>]+)>$/.exec(x.trim())).map((m, i) => (m ? { name: m[1].trim(), address: m[2] } : { name: '', address: l[i].trim() }));
+  try {
+    rememberAddresses([...parse(mail.to), ...parse(mail.cc), ...parse(mail.bcc), ...parse((mail.individual ?? []).map((x) => x.to))]);
+  } catch {
+    /* not critical */
+  }
+}
+
+// Mails being handed to the server right now: a second start (double click on "Send again",
+// back online at the same moment) must not send them twice
+const sendingNow = new Set<string>();
+
+async function runOutbox(id: string): Promise<void> {
+  if (sendingNow.has(id)) return;
+  sendingNow.add(id);
+  try {
+    await sendOutboxItem(id);
+  } finally {
+    sendingNow.delete(id);
+  }
+}
+
+async function sendOutboxItem(id: string): Promise<void> {
+  const item = outboxItem(id);
+  const identity = item && getIdentity(item.mail.identityId);
+  const acc = identity && getAccount(identity.accountId);
+  if (!item) return;
+  if (!identity || !acc) {
+    updateOutbox(id, { status: 'failed', error: t('err.senderNotFound') });
+    return sendOutbox();
+  }
+  updateOutbox(id, { status: 'sending', error: '', done: 0 });
+  sendOutbox();
+  try {
+    const res = await sendMail(identity, acc, item.mail, (done, total) => {
+      updateOutbox(id, { done, total });
+      sendOutbox();
+    });
+    resolved('SMTP', acc.email);
+    rememberRecipients(item.mail);
+    if (res.failed.length) {
+      // "Individually to each": only the ones that failed stay, to be sent again
+      const failed = new Set(res.failed.map((f) => f.to));
+      const rest = (item.mail.individual ?? []).filter((x) => failed.has(x.to));
+      updateOutbox(id, {
+        status: 'failed',
+        mail: { ...item.mail, individual: rest },
+        to: rest.map((x) => x.to),
+        total: rest.length,
+        done: 0,
+        error: t('compose.partialFail', { sent: res.sent, failed: res.failed.length, list: res.failed.map((f) => `${f.to} (${f.message})`).join('; ') }),
+      });
+    } else {
+      removeOutbox(id);
+      // reply / forward: mark the original (the list shows it at once, the server gets the flag)
+      const src = item.mail.answers;
+      const srcAcc = src && getAccount(src.accountId);
+      if (src?.messageId) {
+        // when and to whom – shown above the original ("You replied on …")
+        const log = getKv<Record<string, AnswerNote[]>>('answeredLog') ?? {};
+        log[src.messageId] = [...(log[src.messageId] ?? []), { date: new Date().toISOString(), kind: src.kind, to: item.to }].slice(-10);
+        setKv('answeredLog', log);
+      }
+      if (src && srcAcc) {
+        win?.webContents.send('mail:answered', src);
+        markAnswered(srcAcc, src.folder, src.uid, src.kind).catch((err) => console.error('answered:', friendlyError(err)));
+      }
+      win?.webContents.send('mail:sent'); // the "ding"
+      win?.webContents.send('mail:status', item.mail.individual?.length ? t('compose.sentEach', { n: res.sent }) : t('compose.sentAll', { n: item.to.length }));
+    }
+  } catch (err) {
+    log('error', 'SMTP', acc.email, friendlyError(err));
+    updateOutbox(id, { status: 'failed', error: friendlyError(err) });
+  }
+  sendOutbox();
+}
+
+ipcMain.handle('outbox:send', (_e, mail: OutgoingMail) => {
   const identity = getIdentity(mail?.identityId);
   const acc = identity && getAccount(identity.accountId);
   if (!identity || !acc) throw new Error(t('err.senderNotFound'));
   const notApproved = (mail.files ?? []).find((f) => !approvedFiles.has(f));
   if (notApproved) throw new Error(t('err.fileNotApproved', { name: path.basename(notApproved) }));
-  try {
-    const res = await sendMail(identity, acc, mail, (done, total) => e.sender.send('mail:progress', done, total));
-    // Remember recipients for next time
-    const parse = (l: string[] = []) => l.map((x) => /^"?([^"<]*)"?\s*<([^>]+)>$/.exec(x.trim())).map((m, i) => (m ? { name: m[1].trim(), address: m[2] } : { name: '', address: l[i].trim() }));
-    try {
-      rememberAddresses([...parse(mail.to), ...parse(mail.cc), ...parse(mail.bcc), ...parse((mail.individual ?? []).map((x) => x.to))]);
-    } catch {
-      /* not critical */
-    }
-    return res;
-  } catch (err) {
-    log('error', 'SMTP', acc.email, friendlyError(err));
-    throw new Error(friendlyError(err));
+  const item = addOutbox(acc.id, identity.email, mail);
+  void runOutbox(item.id);
+  return item.id;
+});
+ipcMain.handle('outbox:list', () => outboxList());
+
+// Replies and forwards of one mail: sent from Agenoras (with date and recipients), otherwise own replies
+// found in the cache (e.g. written with another program, then in "Sent")
+interface AnswerNote {
+  date: string;
+  kind: 'reply' | 'forward';
+  to: string[];
+  ref?: { accountId: string; folder: string; uid: number }; // the reply itself, if it is in the cache
+}
+ipcMain.handle('mail:answeredInfo', (_e, messageId: string) => {
+  const id = String(messageId ?? '');
+  if (!id) return [];
+  const notes: AnswerNote[] = [...((getKv<Record<string, AnswerNote[]>>('answeredLog') ?? {})[id] ?? [])];
+  const own = new Set([...listAccounts().map((a) => a.email), ...getSettings().identities.map((i) => i.email)].map((a) => a.toLowerCase()));
+  for (const m of cachedReplies<MailSummary>(id)) {
+    if (!own.has((m.fromAddress ?? '').toLowerCase())) continue;
+    const ref = { accountId: m.accountId, folder: m.folder, uid: m.uid };
+    // the same reply logged when sending: about the same time → only add the link to it
+    const same = notes.find((n) => Math.abs(Date.parse(n.date) - Date.parse(m.date)) < 10 * 60_000);
+    if (same) same.ref ??= ref;
+    else notes.push({ date: m.date, kind: 'reply', to: [m.toName || m.toAddress].filter(Boolean), ref });
   }
+  return notes.sort((a, b) => b.date.localeCompare(a.date));
+});
+ipcMain.handle('outbox:retry', (_e, id: string) => void runOutbox(String(id)));
+ipcMain.handle('outbox:discard', (_e, id: string) => {
+  if (outboxItem(String(id))?.status === 'sending') return;
+  removeOutbox(String(id));
+  sendOutbox();
+});
+// Edit: back into a compose window (text, recipients, attachments); it leaves the outbox
+ipcMain.handle('outbox:edit', async (_e, id: string) => {
+  const item = outboxItem(String(id));
+  if (!item || item.status === 'sending' || item.mail.forward?.indexes?.length) return;
+  const m = item.mail;
+  const files = [];
+  for (const f of m.files ?? []) {
+    try {
+      files.push(await fileInfo(f));
+    } catch {
+      /* file is gone */
+    }
+  }
+  openComposeWindow({
+    accountId: item.accountId,
+    matchAddresses: [item.from],
+    to: m.individual?.length ? m.individual.map((x) => x.to) : m.to,
+    cc: m.cc,
+    bcc: m.bcc,
+    subject: m.subject,
+    html: m.draftHtml,
+    body: m.draftHtml ? undefined : m.text,
+    inReplyTo: m.inReplyTo,
+    references: m.references,
+    sendMode: m.individual?.length ? 'each' : undefined,
+    // still a reply / forward: the original gets marked when it is sent
+    source: m.answers ? { accountId: m.answers.accountId, folder: m.answers.folder, uid: m.answers.uid, messageId: m.answers.messageId } : undefined,
+    mode: m.answers ? (m.answers.kind === 'forward' ? 'forward' : 'reply') : undefined,
+    files,
+    attachData: (m.extraAttachments ?? []).map((a) => ({ filename: a.filename, content: a.content, contentType: a.contentType })),
+  });
+  removeOutbox(item.id);
+  sendOutbox();
 });
 
 // Settings: senders/aliases, signatures, templates
@@ -1132,13 +1398,128 @@ ipcMain.handle('settings:signatureFile', async (e) => {
 });
 ipcMain.handle('settings:trustSender', (_e, email: string) => trustSender(email));
 ipcMain.handle('settings:notify', (_e, n: NotifySettings) => saveNotify(n));
-ipcMain.handle('settings:prefs', (_e, p: { uiScale?: UiScale; language?: string; weekStart?: number; sendDelay?: number; readDelay?: number; composeMode?: 'window' | 'popup'; externalMark?: boolean; internalDomains?: string[]; accountLabel?: 'name' | 'email' }) => {
+// Spell check while writing (red underlines, and the dictionary part of proofreading).
+// Off, the system languages, or one dictionary. macOS uses its own checker and picks the language itself.
+function applySpellcheck(): void {
+  const mode = getSettings().spellcheck;
+  const ses = session.defaultSession;
+  ses.setSpellCheckerEnabled(mode !== 'off');
+  if (mode === 'off' || process.platform === 'darwin') return;
+  const avail = ses.availableSpellCheckerLanguages;
+  const pick = (code: string) => avail.find((l) => l.toLowerCase() === code.toLowerCase()) ?? avail.find((l) => l.toLowerCase().split('-')[0] === code.toLowerCase().split('-')[0]);
+  const wanted = mode === 'system' ? app.getPreferredSystemLanguages() : [mode];
+  const langs = [...new Set(wanted.map(pick).filter((l): l is string => !!l))].slice(0, 3);
+  try {
+    ses.setSpellCheckerLanguages(langs.length ? langs : ['en-US']);
+  } catch (err) {
+    console.error('spellcheck:', (err as Error).message);
+  }
+}
+// Browser column: its own session; asks for camera, location & co. are always refused
+const WEB_PARTITION = 'agenoras-web';
+app.whenReady().then(() => {
+  const ses = session.fromPartition(WEB_PARTITION);
+  ses.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
+  ses.setPermissionCheckHandler(() => false);
+});
+// Right click in text: Electron shows no menu of its own. Spelling suggestions for a marked word,
+// add to the dictionary, cut / copy / paste. Our windows draw it like their other menus (common.ts);
+// the browser column gets the plain system menu. Pages with their own menu (mail list …) prevent this one.
+app.on('web-contents-created', (_e, contents) => {
+  contents.on('context-menu', (_ev, p) => {
+    const spell = p.misspelledWord ? { word: p.misspelledWord, suggestions: p.dictionarySuggestions.slice(0, 6) } : null;
+    const copyOnly = !p.isEditable && !!p.selectionText.trim();
+    if (!spell && !p.isEditable && !copyOnly) return;
+    if (contents.getType() !== 'webview') {
+      contents.send('ctx:text', { x: p.x, y: p.y, spell, editable: p.isEditable, can: { cut: p.editFlags.canCut, copy: p.editFlags.canCopy, paste: p.editFlags.canPaste } });
+      return;
+    }
+    const items: Electron.MenuItemConstructorOptions[] = [];
+    if (p.isEditable) items.push({ label: t('ctx.cut'), role: 'cut' }, { label: t('ctx.copy'), role: 'copy' }, { label: t('ctx.paste'), role: 'paste' });
+    else items.push({ label: t('ctx.copy'), role: 'copy' });
+    Menu.buildFromTemplate(items).popup({ window: BrowserWindow.fromWebContents(contents) ?? undefined });
+  });
+});
+// what was picked in that menu
+ipcMain.handle('ctx:act', (e, act: string, word?: string) => {
+  const c = e.sender;
+  if (act === 'replace' && typeof word === 'string') c.replaceMisspelling(word);
+  else if (act === 'learn' && typeof word === 'string') c.session.addWordToSpellCheckerDictionary(word);
+  else if (act === 'cut') c.cut();
+  else if (act === 'copy') c.copy();
+  else if (act === 'paste') c.paste();
+  else if (act === 'selectAll') c.selectAll();
+});
+
+app.on('web-contents-created', (_e, contents) => {
+  if (contents.getType() !== 'webview') return;
+  // new windows (target=_blank) open in the column itself, mail links in a compose window
+  contents.setWindowOpenHandler(({ url }) => {
+    if (/^mailto:/i.test(url)) openMailto(url);
+    else if (/^https?:/i.test(url)) void contents.loadURL(url);
+    return { action: 'deny' };
+  });
+  contents.on('will-navigate', (ev, url) => {
+    if (/^mailto:/i.test(url)) {
+      ev.preventDefault();
+      openMailto(url);
+    } else if (!/^https?:/i.test(url)) ev.preventDefault();
+  });
+});
+ipcMain.handle('web:external', (_e, url: string) => {
+  if (/^https?:/i.test(String(url))) void shell.openExternal(String(url));
+});
+
+ipcMain.handle('spell:languages', () => (process.platform === 'darwin' ? [] : session.defaultSession.availableSpellCheckerLanguages));
+
+ipcMain.handle('settings:prefs', (_e, p: { uiScale?: UiScale; language?: string; weekStart?: number; sendDelay?: number; readDelay?: number; composeMode?: 'window' | 'popup'; externalMark?: boolean; internalDomains?: string[]; accountLabel?: 'name' | 'email'; spellcheck?: string; linkOpen?: 'browser' | 'agenoras'; offline?: Record<string, number>; autoUpdate?: boolean; skipVersion?: string }) => {
   const before = getSettings().language;
+  const offlineBefore = JSON.stringify(getSettings().offline);
   savePrefs(p ?? {});
+  if (p?.spellcheck !== undefined) applySpellcheck();
+  if (JSON.stringify(getSettings().offline) !== offlineBefore) restartOffline();
   if (p?.uiScale) for (const w of BrowserWindow.getAllWindows()) w.webContents.setZoomFactor(zoom());
   return { restartNeeded: p?.language !== undefined && p.language !== before };
 });
 ipcMain.handle('settings:languages', () => availableLanguages());
+// Updates (see updater.ts)
+ipcMain.handle('update:state', () => updateState());
+ipcMain.handle('update:check', () => checkForUpdates());
+ipcMain.handle('update:get', () => getUpdate());
+ipcMain.handle('update:install', () =>
+  installUpdate(() => {
+    quitting = true; // past the "keep running in the tray" close
+  }),
+);
+
+// Settings to another computer: export into one file, import from it (then restart)
+ipcMain.handle('transfer:export', async (e, password: string) => {
+  const w = BrowserWindow.fromWebContents(e.sender) ?? win!;
+  const day = new Date().toISOString().slice(0, 10);
+  const res = await dialog.showSaveDialog(w, { title: t('transfer.exportTitle'), defaultPath: path.join(app.getPath('documents'), `agenoras-settings-${day}.json`), filters: [{ name: 'JSON', extensions: ['json'] }] });
+  if (res.canceled || !res.filePath) return null;
+  writeFileSafe(res.filePath, await buildExport(typeof password === 'string' ? password : ''), 0o600);
+  return res.filePath;
+});
+let importFile: ReturnType<typeof readExport> | null = null;
+ipcMain.handle('transfer:pick', async (e) => {
+  const w = BrowserWindow.fromWebContents(e.sender) ?? win!;
+  const res = await dialog.showOpenDialog(w, { title: t('transfer.importTitle'), properties: ['openFile'], filters: [{ name: 'JSON', extensions: ['json'] }] });
+  if (res.canceled || !res.filePaths[0]) return null;
+  importFile = readExport(res.filePaths[0]);
+  return summarize(importFile);
+});
+ipcMain.handle('transfer:import', async (_e, password: string) => {
+  if (!importFile) throw new Error(t('transfer.badFile'));
+  const res = await applyImport(importFile, typeof password === 'string' ? password : '');
+  importFile = null;
+  return res;
+});
+
+// Offline copy: state and progress (Settings → General, status at the bottom of the sidebar)
+ipcMain.handle('offline:status', () => offlineProgress());
+ipcMain.handle('offline:now', () => restartOffline());
+onOfflineProgress((p) => BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('offline:progress', p)));
 // About page: version and runtime
 ipcMain.handle('app:info', () => ({
   version: app.getVersion(),
@@ -1313,7 +1694,7 @@ ipcMain.handle('tasks:cached', () => cachedTasks());
 ipcMain.handle('tasks:list', () => listTasks());
 ipcMain.handle('tasks:save', async (_e, input: TaskInput) => {
   try {
-    await saveTask(input);
+    return await saveTask(input);
   } catch (err) {
     throw new Error(davError(err));
   }
@@ -1375,6 +1756,8 @@ ipcMain.handle('rss:list', () => refreshFeeds());
 ipcMain.handle('rss:search', (_e, query: string) => searchRss(String(query ?? '')));
 ipcMain.handle('rss:article', (_e, key: string) => rssArticle(String(key)));
 ipcMain.handle('rss:read', (_e, keys: string[], read: boolean) => setRssRead(Array.isArray(keys) ? keys.map(String) : [], !!read));
+ipcMain.handle('rss:archive', (_e, keys: string[], archived: boolean) => setRssArchived(Array.isArray(keys) ? keys.map(String) : [], !!archived));
+ipcMain.handle('rss:flag', (_e, keys: string[], flagged: boolean) => setRssFlagged(Array.isArray(keys) ? keys.map(String) : [], !!flagged));
 
 // Startup / shutdown
 // New mail: rules first (move, mark read …), then notify – moved mail is not reported
@@ -1406,6 +1789,7 @@ ipcMain.handle('rules:run', async (_e, accountId: string | null) => {
 });
 
 app.whenReady().then(() => {
+  applySpellcheck();
   nativeTheme.themeSource = getSettings().theme;
   powerMonitor.on('resume', () => setTimeout(reconnectAll, 3000)); // give the network a moment to come back
   if (pendingMailto) {
@@ -1427,6 +1811,17 @@ app.whenReady().then(() => {
       .then(() => rulesFor(acc.id)) // Mails that arrived while the app was closed
       .catch((err) => console.error(`[${acc.email}]`, friendlyError(err)));
   }
+  // space deleted since the last start (moved, deleted mails, cleared copies) back to the system
+  setTimeout(() => {
+    try {
+      tidyCache();
+      vacuumPop(false);
+    } catch (err) {
+      console.error('VACUUM:', err);
+    }
+  }, 10_000);
+  setTimeout(restartOffline, 20_000); // offline copy: after the start has settled
+  startUpdates(getSettings().autoUpdate, () => getSettings().skipVersion, (st) => win?.webContents.send('update:state', st));
 });
 
 // In background mode the (hidden) main window stays → only a real quit lands here
@@ -1434,6 +1829,14 @@ app.on('window-all-closed', () => app.quit());
 
 let closing = false;
 app.on('before-quit', (e) => {
+  // a mail is still on its way: it stays in the outbox, but better ask
+  if (!closing && outboxBusy()) {
+    const choice = dialog.showMessageBoxSync({ type: 'question', buttons: [t('outbox.quitWait'), t('outbox.quitAnyway')], defaultId: 0, cancelId: 0, message: t('outbox.quitTitle'), detail: t('outbox.quitDetail') });
+    if (choice === 0) {
+      quitting = false;
+      return e.preventDefault();
+    }
+  }
   quitting = true;
   if (closing) return;
   e.preventDefault();

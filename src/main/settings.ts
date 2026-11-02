@@ -4,6 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { listAccounts, listAllAccounts } from './accounts';
 import { t } from './i18n';
+import { writeFileSafe } from './files';
 
 // Sender identities: per account the main address plus any aliases (e.g. info@…),
 // each with its own signature. Mail is always sent via the account's SMTP login.
@@ -38,7 +39,7 @@ interface Settings {
   notify: NotifySettings;
   uiScale: UiScale; // font size
   language: string; // 'system' | 'de' | 'en' …
-  weekStart: number; // 1 = Monday, 0 = Sunday, 6 = Saturday
+  weekStart: number; // 1 = Monday, 0 = Sunday, 6 = Saturday, -1 = like the region (default)
   sendDelay: number; // seconds to undo when sending (0–5)
   readDelay: number; // mark an opened mail as read after this many seconds (0 = at once, -1 = only by hand)
   composeMode: 'window' | 'popup'; // writing: own window or a popup over the main window
@@ -46,7 +47,16 @@ interface Settings {
   externalMark: boolean; // mark mails from outside the own domains
   internalDomains: string[]; // additional domains that count as internal
   rules: MailRule[]; // mail rules
+  spellcheck: string; // spell check while writing: 'off' | 'system' | a dictionary code like 'de-CH'
+  linkOpen: 'browser' | 'agenoras'; // web links: system browser (default) or the browser column in Agenoras
+  autoUpdate: boolean; // look for a new release at start (default on)
+  skipVersion: string; // "Skip this version": not announced again
+  offline: Record<string, number>; // offline copy per mail account: 0/missing = only the newest (default), 30/90/365/1825 days, -1 = everything
 }
+
+export const OFFLINE_DAYS = [0, 30, 90, 365, 1825, -1];
+const cleanOffline = (v: unknown): Record<string, number> =>
+  v && typeof v === 'object' ? Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([k, d]) => typeof k === 'string' && OFFLINE_DAYS.includes(Number(d)) && Number(d) !== 0).map(([k, d]) => [k, Number(d)])) : {};
 
 // Mail rules
 export interface RuleCondition {
@@ -107,7 +117,7 @@ function read(): Settings {
       labels: Array.isArray(s.labels) ? s.labels : [],
       uiScale: ['small', 'medium', 'large'].includes(s.uiScale) ? s.uiScale : 'medium',
       language: typeof s.language === 'string' && /^(system|[a-z]{2})$/.test(s.language) ? s.language : 'system',
-      weekStart: [0, 1, 6].includes(s.weekStart) ? s.weekStart : 1,
+      weekStart: [-1, 0, 1, 6].includes(s.weekStart) ? s.weekStart : -1,
       sendDelay: Number.isFinite(s.sendDelay) ? Math.min(5, Math.max(0, Math.round(s.sendDelay))) : 2,
       readDelay: READ_DELAYS.includes(s.readDelay) ? s.readDelay : 3,
       composeMode: s.composeMode === 'popup' ? 'popup' : 'window',
@@ -115,16 +125,21 @@ function read(): Settings {
       externalMark: s.externalMark === true,
       internalDomains: Array.isArray(s.internalDomains) ? s.internalDomains.filter((d: unknown) => typeof d === 'string') : [],
       rules: Array.isArray(s.rules) ? s.rules : [],
+      linkOpen: s.linkOpen === 'agenoras' ? 'agenoras' : 'browser',
+      offline: cleanOffline(s.offline),
+      autoUpdate: s.autoUpdate !== false,
+      skipVersion: typeof s.skipVersion === 'string' ? s.skipVersion.slice(0, 40) : '',
+      spellcheck: typeof s.spellcheck === 'string' && /^(off|system|[a-zA-Z]{2,3}(-[a-zA-Z]{2,4})?)$/.test(s.spellcheck) ? s.spellcheck : 'system',
       mailLabels: s.mailLabels && typeof s.mailLabels === 'object' ? s.mailLabels : {},
       notify: { ...DEFAULT_NOTIFY, ...(s.notify ?? {}), perAccount: { ...(s.notify?.perAccount ?? {}) }, desktopOff: [...(s.notify?.desktopOff ?? [])] },
     };
   } catch {
-    return { identities: [], templates: [], theme: 'dark', trustedSenders: [], imageMails: [], labels: [], mailLabels: {}, uiScale: 'medium', language: 'system', weekStart: 1, sendDelay: 2, readDelay: 3, composeMode: 'window', accountLabel: 'email', externalMark: false, internalDomains: [], rules: [], notify: { ...DEFAULT_NOTIFY, perAccount: {}, desktopOff: [] } };
+    return { identities: [], templates: [], theme: 'dark', trustedSenders: [], imageMails: [], labels: [], mailLabels: {}, uiScale: 'medium', language: 'system', weekStart: -1, sendDelay: 2, readDelay: 3, composeMode: 'window', accountLabel: 'email', externalMark: false, internalDomains: [], rules: [], spellcheck: 'system', linkOpen: 'browser', offline: {}, autoUpdate: true, skipVersion: '', notify: { ...DEFAULT_NOTIFY, perAccount: {}, desktopOff: [] } };
   }
 }
 
 function write(s: Settings): void {
-  fs.writeFileSync(file(), JSON.stringify(s, null, 2), 'utf8');
+  writeFileSafe(file(), JSON.stringify(s, null, 2));
 }
 
 // Every account's main address always exists; identities of removed accounts are dropped,
@@ -276,18 +291,23 @@ export function setMailLabel(keys: string[], labelId: string, on: boolean): Reco
 // Appearance / language / week start (saved individually)
 export const READ_DELAYS = [0, 1, 3, 5, 10, -1];
 
-export function savePrefs(p: { uiScale?: UiScale; language?: string; weekStart?: number; sendDelay?: number; readDelay?: number; composeMode?: 'window' | 'popup'; externalMark?: boolean; internalDomains?: string[]; accountLabel?: 'name' | 'email' }): void {
+export function savePrefs(p: { uiScale?: UiScale; language?: string; weekStart?: number; sendDelay?: number; readDelay?: number; composeMode?: 'window' | 'popup'; externalMark?: boolean; internalDomains?: string[]; accountLabel?: 'name' | 'email'; spellcheck?: string; linkOpen?: 'browser' | 'agenoras'; offline?: Record<string, number>; autoUpdate?: boolean; skipVersion?: string }): void {
   const s = read();
   write({
     ...s,
     ...(p.uiScale && ['small', 'medium', 'large'].includes(p.uiScale) ? { uiScale: p.uiScale } : {}),
     ...(typeof p.language === 'string' && /^(system|[a-z]{2})$/.test(p.language) ? { language: p.language } : {}),
-    ...([0, 1, 6].includes(Number(p.weekStart)) && p.weekStart !== undefined ? { weekStart: Number(p.weekStart) } : {}),
+    ...([-1, 0, 1, 6].includes(Number(p.weekStart)) && p.weekStart !== undefined ? { weekStart: Number(p.weekStart) } : {}),
     ...(p.sendDelay !== undefined && Number.isFinite(Number(p.sendDelay)) ? { sendDelay: Math.min(5, Math.max(0, Math.round(Number(p.sendDelay)))) } : {}),
     ...(READ_DELAYS.includes(Number(p.readDelay)) && p.readDelay !== undefined ? { readDelay: Number(p.readDelay) } : {}),
     ...(p.composeMode === 'popup' || p.composeMode === 'window' ? { composeMode: p.composeMode } : {}),
     ...(typeof p.externalMark === 'boolean' ? { externalMark: p.externalMark } : {}),
     ...(p.accountLabel === 'name' || p.accountLabel === 'email' ? { accountLabel: p.accountLabel } : {}),
+    ...(p.linkOpen === 'browser' || p.linkOpen === 'agenoras' ? { linkOpen: p.linkOpen } : {}),
+    ...(typeof p.autoUpdate === 'boolean' ? { autoUpdate: p.autoUpdate } : {}),
+    ...(typeof p.skipVersion === 'string' ? { skipVersion: p.skipVersion.slice(0, 40) } : {}),
+    ...(p.offline && typeof p.offline === 'object' ? { offline: cleanOffline({ ...s.offline, ...p.offline }) } : {}),
+    ...(typeof p.spellcheck === 'string' && /^(off|system|[a-zA-Z]{2,3}(-[a-zA-Z]{2,4})?)$/.test(p.spellcheck) ? { spellcheck: p.spellcheck } : {}),
     ...(Array.isArray(p.internalDomains)
       ? { internalDomains: [...new Set(p.internalDomains.map((d) => String(d).trim().toLowerCase().replace(/^@/, '')).filter((d) => /^[a-z0-9.-]+\.[a-z]{2,}$/.test(d)))].slice(0, 50) }
       : {}),

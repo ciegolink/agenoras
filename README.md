@@ -39,7 +39,9 @@ All versions and release notes: [Releases](https://github.com/ciegolink/agenoras
 - Conversations: replies are grouped under the newest mail and can be expanded; switched on or off per account
 - Filter bar per folder: all/unread, attachments, starred, plus a quick filter by sender and subject that offers the full search when nothing matches
 - Star (`\Flagged`), categories (colored labels), spam/not spam, archive, delete, drag and drop onto folders
+- Replied and forwarded marks (`\Answered`, `$Forwarded`) in the list, set on the server after sending; an opened mail shows when you replied, with a link to your reply
 - Ctrl+Z moves deleted, moved, archived or spam-marked mail back to its folder (new UIDs via UIDPLUS, Message-ID lookup as fallback)
+- Older mails load while scrolling down (from the offline copy when there is one)
 - Multi-select (Ctrl/Shift+click, Ctrl+A), context menu, double-click opens a mail in its own window
 - Right-click in a mail: reply, reply all, reply to a single participant, reactions, copy, translate
 - Reactions (👍 ❤️ 😂 …) are sent as a short reply mail that quotes the original
@@ -49,8 +51,11 @@ All versions and release notes: [Releases](https://github.com/ciegolink/agenoras
 - Optional marking of external senders (outside your own domains)
 - Sender pictures from contact photos or website favicons, initials as fallback
 - Desktop notifications, notification sounds per account, tray icon with background mode (new email, event, task or contact right from the tray)
+- Web links open in the system browser or, if chosen, in a browser column inside Agenoras (sandboxed, own session that is forgotten on quit)
+- Offline sign in the title bar when there is no internet connection
 - Can be the system's default email app: `mailto:` links on websites and in other apps open a new email in Agenoras
-- Problem log behind a warning sign in the title bar: connection and server errors only, can be copied and cleared
+- Problem log behind a warning sign in the title bar: lasting connection and server errors only (entries disappear once the account works again), can be copied and cleared
+- Right-click a mail: create an event or task from it, or pin it to the pin sidebar
 
 **Compose**
 - Opens in a separate window (default) or as a fixed popup over the main window
@@ -59,13 +64,16 @@ All versions and release notes: [Releases](https://github.com/ciegolink/agenoras
 - Send to all or individually to each recipient, with placeholders such as `{{FirstName}}`
 - Sender identities and aliases per account, each with a text or HTML signature; compact, searchable list for many signatures
 - Templates, priority, attachments by drag and drop, adjustable undo delay (0–5 s)
+- Outbox: after the undo delay the compose window closes and the mail is sent in the background; failed mails stay in the outbox (also across restarts) to be sent again, edited or discarded
 
 **Calendar and tasks**
 - CalDAV week view with month overview, drag to move or resize, drag on an empty slot to create
 - Recurring events with series/occurrence editing, exceptions and time zones
 - Attendees and invitations by mail (iMIP): send, accept, decline, apply replies and cancellations
 - Move events between calendars, send events as `.ics`, event search
-- CalDAV tasks (VTODO) with due dates, priority, lists per account and a "My day" sidebar
+- CalDAV tasks (VTODO) in the mail list design: list in the middle, task on the right, right-click menu; start and due date, priority, progress in percent (`PERCENT-COMPLETE`), lists per account and a "My day" sidebar (calendar, tasks and the newest feed articles)
+- Reply to a task by mail when its note contains an address (sender and alias selectable, the note is quoted)
+- Tasks and events load objects whatever their file names (not only `.ics`)
 - Local calendars and task lists without a server (stored only on this computer)
 
 **Contacts**
@@ -78,25 +86,33 @@ All versions and release notes: [Releases](https://github.com/ciegolink/agenoras
 - RSS 2.0, RSS 1.0 (RDF) and Atom; enter a feed or just a website address (the feed is discovered automatically)
 - Optional login (HTTP Basic) for protected feeds, password encrypted like account passwords
 - Feeds view with unread counts, all/unread filter, full-text filter, mark all read; only shown once a feed exists
+- Archive folder per feed and "Important" (star) like in mail; multi-select, drag and drop, right-click menu
+- Turn an article into an email, event or task; email addresses in articles open a new mail
 - Articles cached for offline reading (up to 300 per feed), shown sanitized in the sandboxed frame, images embedded by the main process
 - Refreshed when opened, with F5 and every 30 minutes
 
 **Search**
-- One search field in the title bar (Ctrl+K / Ctrl+F) for mails (full text on the server, all folders, all or one account), appointments, contacts, tasks and feed articles
+- Pin sidebar: own column on the right in every view with pinned tasks, feed articles (full text) and mails (subject and sender, opened in their own window); cards fold open and closed
+- One search field in the title bar (Ctrl+K / Ctrl+F) for mails (full text on the server, all folders, all or one account), appointments, contacts, tasks and feed articles; dates ("12.3.2024", "March 2024") also find the mails of that day or month
+- Offline copy per account of all mails of a period (30 days to everything) with their text and a full-text index (SQLite FTS5): search and read without the server, progress shown in the sidebar
+- Update notice at start (update, later, skip this version), installing itself on Windows, macOS and the AppImage; the .deb links to the download
+- Export all settings and accounts into one file and import them on another computer; passwords optional, encrypted with a password of your own (AES-256-GCM, scrypt)
 - Own search page: hits by type with counts in the sidebar, mail preview on the right; × or Esc returns to the previous view
 
 **Offline AI (optional)**
 - Runs entirely on your computer with [Ministral 3 3B](https://huggingface.co/mistralai/Ministral-3-3B-Instruct-2512) by Mistral AI; no cloud, no data leaves the device
 - Generate a mail text from a short description; when replying, the AI knows the original mail and answers in its language
-- Suggest subject lines, proofread the text (Ctrl+Z undoes it)
+- Suggest subject lines; proofread sentence by sentence with a review panel (every correction can be ticked or unticked before applying), plus dictionary suggestions from the built-in spell checker
 - Translate selected text into a default language (right-click in a mail, or the translate button when writing)
 - Output language selectable independently of the UI language (e.g. Swiss German with "ss", German, English, French, Italian)
 - Enabled under Settings → AI: one-time download (about 2 GB, checked with SHA-256), about 3 GB of RAM while working, freed again after 5 minutes without use
+- On computers with 16 GB of memory or more, Ministral 3 8B is offered as a more accurate, slower alternative (about 4.7 GB download, about 7 GB of RAM)
 
 **General**
 - Local SQLite cache for fast startup and offline reading
 - Same filter bar design in mail, feeds, contacts and tasks
 - Light and dark theme, three font sizes, configurable week start
+- Spell check while writing: off, system language or a chosen dictionary
 - Window size, position and column widths are remembered
 - About dialog with version info and links (gear menu → About Agenoras)
 
@@ -181,12 +197,16 @@ User data is stored in `~/.config/agenoras/` (Linux), `%APPDATA%\agenoras\` (Win
 - `settings.json`: identities, signatures, templates, rules, preferences
 - `lists.json`: distribution lists – exist only on this computer, include them in your backup
 - `rss.json`: feeds (password encrypted like the accounts)
-- `cache.db`: local cache (mail, feed articles and their read state), safe to delete at any time; feed articles are fetched again on the next refresh
+- `cache.db`: local cache (mail, tasks, feed articles and their read state); it is rebuilt from the servers when deleted, feed articles on the next refresh. Exceptions that exist only here: the pin sidebar and the archive and star state of feed articles. It also holds the offline copy (Settings → General → Available offline), which can get large with a long period
 - `pop3.db`: mail of POP3 accounts – the only copy if the server copy is deleted, include it in your backup
 - `local.db`: local calendars, tasks and address books – the only copy, include it in your backup
-- `ai.json`, `ai-models/`: AI settings and the downloaded model (delete the model under Settings → AI)
+- `ai.json`, `ai-models/`: AI settings and the downloaded models (delete them under Settings → AI)
+- `problems.json`: the problem log
+- `window-state.json`: window size, position and column widths
 
 Data from earlier versions (folder `ciegolink-mail`) is copied over automatically on first start; the old folder can be deleted afterwards.
+
+Connections other than your own servers: the one-time AI model download from Hugging Face, and on Windows and Linux the spell check dictionaries, which Chromium downloads from Google the first time a language is used (no download with spell check set to *Off*).
 
 HTML mail and feed articles are rendered in a sandboxed frame without scripts under a strict Content Security Policy. Remote content is fetched only by the main process: for mail only on request, for feed articles automatically when an article is opened.
 
@@ -215,7 +235,8 @@ The AI model runs locally in a separate process (`utilityProcess`). Texts are pr
    │  ├─ tasks.ts        CalDAV tasks (VTODO)
    │  ├─ carddav.ts      Address books, vCards
    │  ├─ lists.ts        Distribution lists (lists.json)
-   │  ├─ rss.ts          RSS/Atom feeds: storage, fetching, parsing, article cache
+   │  ├─ rss.ts          RSS/Atom feeds: storage, fetching, parsing, article cache, archive, star
+   │  ├─ pins.ts         Pin sidebar items
    │  ├─ localdav.ts     Local calendars and address books (no server)
    │  ├─ rules.ts        Mail rules
    │  ├─ cache.ts        SQLite cache (node:sqlite)
@@ -241,10 +262,11 @@ The AI model runs locally in a separate process (`utilityProcess`). Texts are pr
       ├─ compose.ts      Editor, recipients, attachments, sending
       ├─ compose-ai.ts   AI in the compose window: text, subject, proofread, translate
       ├─ calendar.ts     Calendar view
-      ├─ tasks.ts        Task view
+      ├─ tasks.ts        Task view: list, detail, context menu, progress
       ├─ contacts.ts     Contacts view, multi-select
       ├─ lists.ts        Distribution lists: sidebar, dialog, drag and drop
       ├─ rss.ts          Feeds view, add/edit feed dialog
+      ├─ pinbar.ts       Pin sidebar
       ├─ agenda.ts       "My day" sidebar
       ├─ labels.ts       Categories
       ├─ problems.ts     Problem log dialog

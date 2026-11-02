@@ -4,10 +4,12 @@
 import { app, BrowserWindow, utilityProcess, UtilityProcess } from 'electron';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import https from 'node:https';
 import path from 'node:path';
-import { t } from './i18n';
+import { germanVariant, t } from './i18n';
 import { log } from './log';
+import { writeFileSafe } from './files';
 
 export interface AiModel {
   id: string;
@@ -16,6 +18,8 @@ export interface AiModel {
   url: string;
   size: number; // bytes
   sha256: string;
+  minRam?: number; // only offered on computers with at least this much memory (bytes)
+  bySentence?: boolean; // proofread sentence by sentence (a small model drifts on whole paragraphs)
 }
 
 // Ministral 3 3B Instruct by Mistral AI (Paris), Apache-2.0. Chosen after testing against Qwen2.5
@@ -31,8 +35,23 @@ export const AI_MODELS: AiModel[] = [
     url: 'https://huggingface.co/bartowski/mistralai_Ministral-3-3B-Instruct-2512-GGUF/resolve/main/mistralai_Ministral-3-3B-Instruct-2512-IQ4_XS.gguf',
     size: 1_959_278_560,
     sha256: '0b5576e556c54bccdf253d5019a5a4d7a7fb755fe50c052c6f59c7d06e03b7e4',
+    bySentence: true,
+  },
+  // Same family, bigger: better grammar and style, about 2–3× slower, needs about 7 GB while working.
+  // Only offered from 16 GB of memory (a "16 GB" laptop reports less, graphics share it – hence 13 GiB).
+  {
+    id: 'ministral-3-8b-iq4xs',
+    name: 'Ministral 3 8B',
+    file: 'mistralai_Ministral-3-8B-Instruct-2512-IQ4_XS.gguf',
+    url: 'https://huggingface.co/bartowski/mistralai_Ministral-3-8B-Instruct-2512-GGUF/resolve/main/mistralai_Ministral-3-8B-Instruct-2512-IQ4_XS.gguf',
+    size: 4_696_414_464,
+    sha256: '00e484724c9faee95c900515cce71f0747a30a954ff576233c38858771edf458',
+    minRam: 13 * 1024 ** 3,
   },
 ];
+
+// A model fits this computer – or it is already downloaded (then it stays usable)
+const fits = (m: AiModel) => !m.minRam || os.totalmem() >= m.minRam;
 
 // Output language of the AI (write, subjects), independent of the UI language
 export const AI_LANGS = ['auto', 'de-CH', 'de-DE', 'en', 'fr', 'it'];
@@ -67,7 +86,7 @@ function readCfg(): AiConfig {
 }
 
 function writeCfg(c: AiConfig): void {
-  fs.writeFileSync(cfgFile(), JSON.stringify(c, null, 2), 'utf8');
+  writeFileSafe(cfgFile(), JSON.stringify(c, null, 2));
 }
 
 export interface AiState {
@@ -76,7 +95,8 @@ export interface AiState {
   lang: string; // output language (AI_LANGS)
   translateLang: string; // default translation target, '' = app language
   ready: boolean; // enabled and the active model is on disk
-  models: { id: string; name: string; size: number; downloaded: boolean }[];
+  proofBySentence: boolean; // the active model proofreads sentence by sentence
+  models: { id: string; name: string; size: number; downloaded: boolean; fits: boolean }[];
   download: { id: string; received: number; total: number } | null;
 }
 
@@ -98,13 +118,14 @@ function removeOldModels(): void {
 export function aiState(): AiState {
   removeOldModels();
   const cfg = readCfg();
-  const models = AI_MODELS.map((m) => ({ id: m.id, name: m.name, size: m.size, downloaded: fs.existsSync(modelFile(m)) }));
+  const models = AI_MODELS.map((m) => ({ id: m.id, name: m.name, size: m.size, downloaded: fs.existsSync(modelFile(m)), fits: fits(m) })).filter((m) => m.fits || m.downloaded);
   return {
     enabled: cfg.enabled,
     model: cfg.model,
     lang: cfg.lang,
     translateLang: cfg.translateLang,
     ready: cfg.enabled && !!models.find((m) => m.id === cfg.model)?.downloaded,
+    proofBySentence: !!AI_MODELS.find((m) => m.id === cfg.model)?.bySentence,
     models,
     download: download && { id: download.id, received: download.received, total: download.total },
   };
@@ -177,6 +198,7 @@ function get(url: string, signal: AbortSignal, hops = 0): Promise<import('node:h
 export async function downloadAiModel(id: string): Promise<AiState> {
   const m = AI_MODELS.find((x) => x.id === id);
   if (!m) throw new Error('Unknown model');
+  if (!fits(m)) throw new Error(t('ai.notEnoughRam'));
   if (download) throw new Error(t('ai.busyDownloading'));
   fs.mkdirSync(dir(), { recursive: true });
   const part = `${modelFile(m)}.part`;
@@ -269,7 +291,8 @@ function enqueue<T>(kind: 'subjects' | 'proofread' | 'write' | 'translate', text
         clearTimeout(idleTimer);
         const id = nextId++;
         pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
-        startWorker().postMessage({ id, kind, text, ctx, lang: lang ?? cfg.lang, modelPath: modelFile(m) });
+        // german: the spelling of the user's region, used wherever no German variant was chosen
+        startWorker().postMessage({ id, kind, text, ctx, lang: lang ?? cfg.lang, german: germanVariant(), modelPath: modelFile(m) });
       }),
   );
   queue = job.catch(() => {}).finally(() => {

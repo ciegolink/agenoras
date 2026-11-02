@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { t } from './i18n';
+import { writeFileSafe } from './files';
 
 export interface Account {
   id: string;
@@ -62,7 +63,7 @@ function readAll(): StoredAccount[] {
 }
 
 function writeAll(list: StoredAccount[]): void {
-  fs.writeFileSync(file(), JSON.stringify(list, null, 2), 'utf8');
+  writeFileSafe(file(), JSON.stringify(list, null, 2));
 }
 
 export async function encrypt(plain: string): Promise<string> {

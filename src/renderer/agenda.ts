@@ -1,17 +1,18 @@
-// Right sidebar in the mail view: calendar on top (month + today's events), open tasks below.
+// Right sidebar in the mail view: calendar on top (month + today's events), open tasks below, then the newest feed articles.
 // Toggled from the title bar, the two parts individually via the buttons at the top of the sidebar.
 
 interface AgendaPrefs {
   on: boolean;
   cal: boolean;
   tasks: boolean;
+  rss: boolean;
 }
 
 let agenda: AgendaPrefs = (() => {
   try {
-    return { on: false, cal: true, tasks: true, ...JSON.parse(localStorage.getItem('ciegolink.agenda') || '{}') };
+    return { on: false, cal: true, tasks: true, rss: true, ...JSON.parse(localStorage.getItem('ciegolink.agenda') || '{}') };
   } catch {
-    return { on: false, cal: true, tasks: true };
+    return { on: false, cal: true, tasks: true, rss: true };
   }
 })();
 let agMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
@@ -31,15 +32,18 @@ function applyAgenda(): void {
   document.body.classList.toggle('agenda-on', agenda.on);
   el('#btn-agenda').classList.toggle('on', agenda.on);
   el('#btn-agenda').setAttribute('aria-pressed', String(agenda.on));
-  document.querySelectorAll<HTMLElement>('#ag-toggles [data-ag]').forEach((b) => b.classList.toggle('on', agenda[b.dataset.ag as 'cal' | 'tasks']));
+  document.querySelectorAll<HTMLElement>('#ag-toggles [data-ag]').forEach((b) => b.classList.toggle('on', agenda[b.dataset.ag as AgPart]));
   el('#ag-cal').hidden = !agenda.cal;
   el('#ag-tasks').hidden = !agenda.tasks;
+  el<HTMLElement>('#ag-toggles [data-ag="rss"]').hidden = !rssFeeds.length; // only with feeds
+  el('#ag-rss').hidden = !agenda.rss || !rssFeeds.length;
   applyCols();
   if (!agenda.on) return;
   if (agenda.cal) loadAgendaEvents();
   if (agenda.tasks) ensureTasks().then(renderAgendaTasks);
   renderAgendaCal();
   renderAgendaTasks();
+  renderAgendaRss();
 }
 
 // Calendar
@@ -191,36 +195,73 @@ el('#ag-tasks').addEventListener('click', async (e) => {
   if (task) openTaskDialog(task);
 });
 
-el('#ag-tasks').addEventListener('submit', async (e) => {
+// Enter opens the task dialog with the typed title and today as start date, there you pick the list
+el('#ag-tasks').addEventListener('submit', (e) => {
   e.preventDefault();
   const input = el<HTMLInputElement>('#ag-quick-input');
   const title = input.value.trim();
-  const listId = taskLists[0]?.id;
-  if (!title || !listId) return;
   input.value = '';
-  try {
-    await saveTaskInput({ listId, title, notes: '', due: agKey(new Date()), done: false, priority: 'normal' });
-    el<HTMLInputElement>('#ag-quick-input').focus();
-  } catch (err) {
-    input.value = title;
-    setStatus(errMsg(err));
-  }
+  openTaskDialog(null, { title, notes: '', start: agKey(new Date()) });
+});
+
+// Feeds: the newest unread articles
+function renderAgendaRss(): void {
+  if (!agenda.on || !agenda.rss || !rssFeeds.length) return;
+  const items = rssItems
+    .filter((i) => !i.read && !i.archived)
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+    .slice(0, 8);
+  el('#ag-rss').innerHTML = `
+    <div class="ag-sub"><span>${esc(t('view.rss').toUpperCase())}</span><button type="button" class="link" data-ag-allrss>${esc(t('agenda.allTasks'))}</button></div>
+    ${
+      items
+        .map((i) => {
+          const f = feedOf(i.feedId);
+          return `<button type="button" class="ag-feed" data-ag-rss="${esc(i.key)}" style="--ec:${feedColor(i.feedId)}">
+            <span class="ag-title">${esc(i.title || t('rss.untitled'))}</span>
+            <span class="ag-loc">${esc(f?.name ?? '')}${i.date ? ` · ${esc(fmtShort(i.date))}` : ''}</span>
+          </button>`;
+        })
+        .join('') || `<p class="hint ag-empty">${esc(t('agenda.noFeeds'))}</p>`
+    }`;
+}
+
+el('#ag-rss').addEventListener('click', (e) => {
+  const tgt = e.target as HTMLElement;
+  if (tgt.closest('[data-ag-allrss]')) return setView('rss');
+  const key = tgt.closest<HTMLElement>('[data-ag-rss]')?.dataset.agRss;
+  if (!key) return;
+  currentFeed = null;
+  rssArchive = rssStarred = false;
+  setView('rss');
+  renderRss();
+  void showRssItem(key);
+});
+
+// feeds loaded, read or archived
+document.addEventListener('rsschange', () => {
+  el<HTMLElement>('#ag-toggles [data-ag="rss"]').hidden = !rssFeeds.length;
+  el('#ag-rss').hidden = !agenda.rss || !rssFeeds.length;
+  renderAgendaRss();
 });
 
 // Toggles
+type AgPart = 'cal' | 'tasks' | 'rss';
+const agParts = (): AgPart[] => (rssFeeds.length ? ['cal', 'tasks', 'rss'] : ['cal', 'tasks']);
+
 el('#btn-agenda').addEventListener('click', () => {
   agenda.on = !agenda.on;
-  if (agenda.on && !agenda.cal && !agenda.tasks) agenda.cal = agenda.tasks = true;
+  if (agenda.on && !agParts().some((k) => agenda[k])) agParts().forEach((k) => (agenda[k] = true));
   saveAgenda();
   setView('mail');
   applyAgenda();
 });
 
 el('#ag-toggles').addEventListener('click', (e) => {
-  const k = (e.target as HTMLElement).closest<HTMLElement>('[data-ag]')?.dataset.ag as 'cal' | 'tasks' | undefined;
+  const k = (e.target as HTMLElement).closest<HTMLElement>('[data-ag]')?.dataset.ag as AgPart | undefined;
   if (!k) return;
   agenda[k] = !agenda[k];
-  if (!agenda.cal && !agenda.tasks) agenda.on = false; // both off = sidebar closed
+  if (!agParts().some((p) => agenda[p])) agenda.on = false; // all off = sidebar closed
   saveAgenda();
   applyAgenda();
 });
@@ -228,7 +269,6 @@ el('#ag-toggles').addEventListener('click', (e) => {
 setInterval(() => {
   if (agenda.on && el('.app').dataset.view === 'mail') {
     if (agenda.cal) loadAgendaEvents(true);
-    if (agenda.tasks) loadTasks();
   }
 }, 5 * 60_000);
 

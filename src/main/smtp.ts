@@ -28,6 +28,8 @@ export interface OutgoingMail {
   forward?: { accountId: string; folder: string; uid: number; indexes: number[] }; // attachments of the original mail
   // "Individually to each": one separate mail per recipient (already personalized)
   individual?: { to: string; subject: string; text: string; html?: string }[];
+  draftHtml?: string; // only for the outbox: the editor content, to open the mail for editing again
+  answers?: { accountId: string; folder: string; uid: number; kind: 'reply' | 'forward'; messageId?: string }; // the original, marked after sending
 }
 
 export interface SendResult {

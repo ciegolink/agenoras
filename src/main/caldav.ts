@@ -6,7 +6,7 @@ import { DavAccount, getDavAccount, getDavPassword, listDavAccounts } from './da
 import { cachedWeek, getKv, setKv, storeWeek } from './cache';
 import { t } from './i18n';
 import { Person, readPeople } from './invites';
-import { log } from './log';
+import { log, resolved } from './log';
 import { isLocalDav, localClient } from './localdav';
 
 type CalAccount = DavAccount;
@@ -100,6 +100,8 @@ async function loadCalendars(client: DAVClient): Promise<DAVCalendar[]> {
 
 export const hasEvents = (c: DAVCalendar) => !c.components || c.components.includes('VEVENT');
 export const hasTodos = (c: DAVCalendar) => !c.components || c.components.includes('VTODO');
+// tsdav only takes objects whose URL contains ".ics" – other clients and servers don't always use it
+export const anyObject = (url: string) => !!url && !url.endsWith('/');
 
 export async function testCalDav(serverUrl: string, username: string, password: string): Promise<number> {
   const client = davClient(serverUrl, username, password);
@@ -162,6 +164,7 @@ export async function listCalendars(): Promise<{ calendars: CalendarInfo[]; erro
         i++;
       }
       succeeded(`cal:${acc.id}`);
+      resolved('CalDAV', acc.name);
     } catch (err) {
       if (failedAgain(`cal:${acc.id}`)) {
         errors.push({ accountId: acc.id, message: davError(err) });
@@ -315,7 +318,7 @@ export async function fetchEvents(
       }
       try {
         const { client } = await getConn(acc);
-        const objects = await client.fetchCalendarObjects({ calendar: entry.cal, timeRange: { start: startIso, end: endIso } });
+        const objects = await client.fetchCalendarObjects({ calendar: entry.cal, timeRange: { start: startIso, end: endIso }, urlFilter: anyObject });
         const local: CalEvent[] = [];
         for (const obj of objects) {
           if (typeof obj.data !== 'string' || !obj.data) continue;
@@ -659,7 +662,7 @@ export async function findByUid(uid: string): Promise<{ url: string; data: strin
     }
     for (const cal of conn.calendars.filter(hasEvents)) {
       try {
-        const objs = await conn.client.fetchCalendarObjects({ calendar: cal, filters: uidFilter(uid) as never });
+        const objs = await conn.client.fetchCalendarObjects({ calendar: cal, filters: uidFilter(uid) as never, urlFilter: anyObject });
         const hit = objs.find((o) => typeof o.data === 'string' && o.data.includes(uid));
         if (hit) {
           rawObjects.set(hit.url, { data: hit.data, etag: hit.etag ?? '', calendarId: cal.url });
@@ -755,7 +758,7 @@ export async function searchEvents(query: string, calendarIds: string[]): Promis
         let hit = searchObjs.get(id);
         if (!hit || Date.now() - hit.at > SEARCH_TTL) {
           const { client } = await getConn(acc);
-          hit = { at: Date.now(), objs: await client.fetchCalendarObjects({ calendar: entry.cal, timeRange: { start: from.toISOString(), end: to.toISOString() } }) };
+          hit = { at: Date.now(), objs: await client.fetchCalendarObjects({ calendar: entry.cal, timeRange: { start: from.toISOString(), end: to.toISOString() }, urlFilter: anyObject }) };
           searchObjs.set(id, hit);
         }
         const objs = hit.objs;

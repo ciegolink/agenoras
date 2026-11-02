@@ -2,11 +2,11 @@
 // Uses el, esc, errMsg from common.ts, account data/dialogs from renderer.ts, calendar.ts and contacts.ts.
 // New compose windows load senders and templates themselves when they open.
 
-type SettingsTab = 'accounts' | 'identities' | 'templates' | 'labels' | 'rules' | 'appearance' | 'sounds' | 'ai';
+type SettingsTab = 'general' | 'accounts' | 'identities' | 'writing' | 'templates' | 'labels' | 'rules' | 'appearance' | 'sounds' | 'ai';
 type ThemeChoice = 'dark' | 'light' | 'system';
 
 const setDlg = el<HTMLDialogElement>('#dlg-settings');
-let setTab: SettingsTab = 'accounts';
+let setTab: SettingsTab = 'general';
 let editIdentities: Identity[] = [];
 let editTemplates: Template[] = [];
 let calAccs: CalAccount[] = [];
@@ -14,7 +14,8 @@ let cardAccs: CalAccount[] = [];
 let rssAccs: RssFeed[] = [];
 let curTheme: ThemeChoice = 'dark';
 let soundList: { id: string; name: string }[] = [];
-let prefs: { uiScale: 'small' | 'medium' | 'large'; language: string; weekStart: number; sendDelay: number; composeMode: 'window' | 'popup' } = { uiScale: 'medium', language: 'system', weekStart: 1, sendDelay: 2, composeMode: 'window' };
+let prefs: { uiScale: 'small' | 'medium' | 'large'; language: string; weekStart: number; sendDelay: number; composeMode: 'window' | 'popup'; spellcheck: string; linkOpen: 'browser' | 'agenoras'; offline: Record<string, number>; autoUpdate: boolean } = { uiScale: 'medium', language: 'system', weekStart: 1, sendDelay: 2, composeMode: 'window', spellcheck: 'system', linkOpen: 'browser', offline: {}, autoUpdate: true };
+let spellLangs: string[] = []; // dictionaries Chromium offers (none on macOS: the system checker picks the language)
 let langList: string[] = ['de', 'en'];
 let editLabels: MailLabel[] = [];
 let editRules: MailRule[] = [];
@@ -32,7 +33,8 @@ async function openSettings(tab: SettingsTab = setTab): Promise<void> {
     curTheme = s.theme ?? 'dark';
     if (s.notify) notify = s.notify;
     soundList = await window.api.sounds.list().catch(() => []);
-    prefs = { uiScale: s.uiScale ?? 'medium', language: s.language ?? 'system', weekStart: s.weekStart ?? 1, sendDelay: s.sendDelay ?? 2, composeMode: s.composeMode ?? 'window' };
+    prefs = { uiScale: s.uiScale ?? 'medium', language: s.language ?? 'system', weekStart: s.weekStart ?? -1, sendDelay: s.sendDelay ?? 2, composeMode: s.composeMode ?? 'window', spellcheck: s.spellcheck ?? 'system', linkOpen: s.linkOpen ?? 'browser', offline: s.offline ?? {}, autoUpdate: s.autoUpdate !== false };
+    spellLangs = await window.api.spell.languages().catch(() => [] as string[]);
     langList = await window.api.settings.languages().catch(() => ['de', 'en']);
     editLabels = (s.labels ?? labels).map((l) => ({ ...l }));
     editRules = JSON.parse(JSON.stringify(s.rules ?? []));
@@ -52,7 +54,11 @@ async function openSettings(tab: SettingsTab = setTab): Promise<void> {
 function renderSettings(): void {
   setDlg.querySelectorAll<HTMLElement>('[data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === setTab));
   el('#settings-body').innerHTML =
-    setTab === 'accounts'
+    setTab === 'general'
+      ? generalHtml()
+      : setTab === 'writing'
+        ? writingHtml()
+        : setTab === 'accounts'
       ? accountsHtml()
       : setTab === 'identities'
         ? identitiesHtml()
@@ -68,9 +74,9 @@ function renderSettings(): void {
                   ? aiHtml()
                   : appearanceHtml();
   if (setTab === 'identities' && idnFilter) applyIdnFilter();
-  if (setTab === 'identities') void paintDefaultMail();
-  // accounts, appearance and sounds apply immediately
-  el('#btn-settings-save').hidden = setTab === 'accounts' || setTab === 'appearance' || setTab === 'sounds' || setTab === 'ai';
+  if (setTab === 'general') void paintDefaultMail();
+  // Only senders, templates and rules need "Save" (several fields belong together); everything else applies at once
+  el('#btn-settings-save').hidden = !['identities', 'templates', 'rules'].includes(setTab);
 }
 
 // Mini-KI (offline): switch on, download/delete models, pick the version
@@ -115,7 +121,7 @@ function aiHtml(): string {
     </div>
     <div class="set-card">
       <span class="mono">${esc(t('tr.defaultLabel').toUpperCase())}</span>
-      <div class="sound-row"><span class="sound-acc">${esc(t('tr.defaultHint'))}</span><select data-ai-trlang>${TR_LANGS.map((l) => `<option value="${l}"${translateTarget(ai) === l ? ' selected' : ''}>${esc(trLangName(l))}</option>`).join('')}</select></div>
+      <div class="sound-row"><span class="sound-acc">${esc(t('tr.defaultHint'))}</span><select data-ai-trlang><option value=""${ai.translateLang ? '' : ' selected'}>${esc(t('tr.system', { lang: trLangName(systemTrLang()) }))}</option>${TR_LANGS.map((l) => `<option value="${l}"${ai!.translateLang === l ? ' selected' : ''}>${esc(trLangName(l))}</option>`).join('')}</select></div>
     </div>
     <h3 class="set-sub">${esc(t('ai.models'))}</h3>
     <div class="set-card ai-models">${rows}</div>
@@ -189,7 +195,6 @@ function soundsHtml(): string {
     .join('');
   return `<div class="set-card">
       <label class="check sound-on"><input type="checkbox" data-notify="desktop"${notify.desktop !== false ? ' checked' : ''}> ${esc(t('notify.desktop'))}</label>
-      <label class="check sound-on"><input type="checkbox" data-notify="background"${notify.background !== false ? ' checked' : ''}> ${esc(t('notify.background'))}</label>
     </div>
     <div class="set-card">
       <label class="check sound-on"><input type="checkbox" data-notify="enabled"${notify.enabled ? ' checked' : ''}> ${esc(t('sounds.enabled'))}</label>
@@ -201,7 +206,7 @@ function soundsHtml(): string {
       <div class="set-acc-head"><b>${esc(t('sounds.perAccount'))}</b></div>
       <div class="set-card">${rows || `<p class="hint">${esc(t('settings.addMailAccountFirst'))}</p>`}</div>
     </section>
-    <div class="sig-actions"><button type="button" class="btn ghost sm" data-sound-folder>${esc(t('sounds.openFolder'))}</button><span class="hint">${esc(t('sounds.hint'))}</span></div>`;
+    <div class="sig-actions"><button type="button" class="btn ghost" data-sound-folder>${esc(t('sounds.openFolder'))}</button><span class="hint">${esc(t('sounds.hint'))}</span></div>`;
 }
 
 async function saveNotifyNow(): Promise<void> {
@@ -312,38 +317,7 @@ function appearanceHtml(): string {
     </div>
     <p class="hint">${esc(t('settings.accountLabelHint'))}</p>
   </div>
-  <div class="set-card">
-    <span class="mono">${esc(t('settings.composeMode').toUpperCase())}</span>
-    <div class="sound-row"><span class="sound-acc">${esc(t('settings.composeModeHint'))}</span><select data-pref-compose>
-      <option value="window"${prefs.composeMode !== 'popup' ? ' selected' : ''}>${esc(t('settings.composeWindow'))}</option>
-      <option value="popup"${prefs.composeMode === 'popup' ? ' selected' : ''}>${esc(t('settings.composePopup'))}</option>
-    </select></div>
-  </div>
-  <div class="set-card two-col">
-    <label>${esc(t('settings.language'))}
-      <select data-pref-lang>
-        <option value="system"${prefs.language === 'system' ? ' selected' : ''}>${esc(t('settings.langSystem'))}</option>
-        ${langList.map((c) => `<option value="${c}"${prefs.language === c ? ' selected' : ''}>${esc(LANG_NAMES[c] ?? c.toUpperCase())}</option>`).join('')}
-      </select>
-    </label>
-    <label>${esc(t('settings.weekStart'))}
-      <select data-pref-week>
-        ${[1, 0, 6].map((d) => `<option value="${d}"${prefs.weekStart === d ? ' selected' : ''}>${esc(new Date(2026, 0, 4 + d).toLocaleDateString(LOCALE, { weekday: 'long' }))}</option>`).join('')}
-      </select>
-    </label>
-    <p class="hint">${esc(t('settings.languageHint'))}</p>
-  </div>
-  <div class="set-card">
-    <span class="mono">${esc(t('ext.title').toUpperCase())}</span>
-    <label class="check"><input type="checkbox" data-pref-ext${extMarkOn ? ' checked' : ''}> ${esc(t('ext.enable'))}</label>
-    <p class="hint">${esc(t('ext.hint'))}</p>
-    ${
-      extMarkOn
-        ? `<label>${esc(t('ext.domains'))}<input data-pref-extdom value="${esc([...extDomainsExtra].join(', '))}" placeholder="example.com, partner.com"></label>
-           <p class="hint">${esc(t('ext.domainsHint', { own: [...extDomains].filter((d) => !extDomainsExtra.includes(d)).join(', ') || '–' }))}</p>`
-        : ''
-    }
-  </div>`;
+`;
 }
 
 let extDomainsExtra: string[] = [];
@@ -382,6 +356,12 @@ el('#settings-body').addEventListener('change', async (e) => {
   } else if (tgt.dataset.prefCompose !== undefined) {
     prefs.composeMode = tgt.value === 'popup' ? 'popup' : 'window';
     await window.api.settings.savePrefs({ composeMode: prefs.composeMode }).catch(() => {});
+  } else if (tgt.dataset.prefLinks !== undefined) {
+    prefs.linkOpen = tgt.value === 'agenoras' ? 'agenoras' : 'browser';
+    await window.api.settings.savePrefs({ linkOpen: prefs.linkOpen }).catch(() => {});
+  } else if (tgt.dataset.prefSpell !== undefined) {
+    prefs.spellcheck = tgt.value;
+    await window.api.settings.savePrefs({ spellcheck: tgt.value }).catch(() => {});
   } else if (tgt.dataset.prefRead !== undefined) {
     readDelay = Number(tgt.value); // renderer.ts – applies right away
     await window.api.settings.savePrefs({ readDelay }).catch(() => {});
@@ -405,7 +385,7 @@ el('#settings-body').addEventListener('change', async (e) => {
   } else if (tgt.dataset.prefWeek !== undefined) {
     prefs.weekStart = Number(tgt.value);
     await window.api.settings.savePrefs({ weekStart: prefs.weekStart }).catch(() => {});
-    WEEK_START = prefs.weekStart;
+    WEEK_START = prefs.weekStart < 0 ? (I18N.regionWeekStart ?? 1) : prefs.weekStart;
     applyWeekStart();
   }
 });
@@ -426,7 +406,7 @@ function labelsHtml(): string {
     .join('');
   return `<p class="hint">${esc(t('labels.settingsHint'))}</p>
     <div class="set-card cat-list">${rows || `<p class="hint">${esc(t('settings.noneYet'))}</p>`}</div>
-    <div><button type="button" class="btn ghost sm" data-cat-add>${esc(t('labels.new'))}</button></div>`;
+    <div><button type="button" class="btn ghost" data-cat-add>+ ${esc(t('labels.new').replace(/\s*…$/, ''))}</button></div>`;
 }
 
 el('#settings-body').addEventListener('input', (e) => {
@@ -441,7 +421,31 @@ el('#settings-body').addEventListener('input', (e) => {
   editLabels[Number(i)].name = tgt.value;
   const pill = tgt.parentElement?.querySelector<HTMLElement>('.lbl');
   if (pill) pill.textContent = tgt.value || '…';
+  clearTimeout(labelTimer);
+  labelTimer = window.setTimeout(() => void saveLabelsNow(), 600); // after typing
 });
+
+// Categories save themselves: a name after typing, colour, add and remove right away.
+// A category whose name is emptied is not saved (that would delete it and its assignments).
+let labelTimer = 0;
+async function saveLabelsNow(): Promise<void> {
+  clearTimeout(labelTimer);
+  labelTimer = 0;
+  const err = el('#settings-error');
+  const names = editLabels.map((l) => l.name.trim().toLowerCase()).filter(Boolean);
+  if (new Set(names).size !== names.length) return void (err.textContent = t('labels.duplicate'));
+  if (editLabels.some((l) => l.id && labels.some((x) => x.id === l.id) && !l.name.trim())) return;
+  try {
+    labels = await window.api.settings.saveLabels(editLabels.filter((l) => l.name.trim()));
+    mailLabels = (await window.api.settings.get()).mailLabels ?? {};
+    if (labelView && !labels.some((l) => l.id === labelView)) labelView = null;
+    renderAccounts();
+    renderList();
+    err.textContent = '';
+  } catch (e) {
+    err.textContent = errMsg(e);
+  }
+}
 
 el('#settings-body').addEventListener('click', (e) => {
   const tgt = e.target as HTMLElement;
@@ -451,11 +455,15 @@ el('#settings-body').addEventListener('click', (e) => {
     const [i, c] = col.split('|');
     editLabels[Number(i)].color = c;
   } else if (rm !== undefined) {
+    const l = editLabels[Number(rm)];
+    if (l.name.trim() && !confirm(t('labels.confirmDelete', { name: l.name.trim() }))) return;
     editLabels.splice(Number(rm), 1);
   } else if (tgt.closest('[data-cat-add]')) {
-    editLabels.push({ id: '', name: '', color: CAT_COLORS[editLabels.length % CAT_COLORS.length] });
+    // own ID right away, so saving while typing doesn't create it twice
+    editLabels.push({ id: crypto.randomUUID(), name: '', color: CAT_COLORS[editLabels.length % CAT_COLORS.length] });
   } else return;
   renderSettings();
+  if (!tgt.closest('[data-cat-add]')) void saveLabelsNow();
   if (tgt.closest('[data-cat-add]')) el('#settings-body').querySelector<HTMLInputElement>(`[data-cat-name="${editLabels.length - 1}"]`)?.focus();
 });
 
@@ -574,7 +582,7 @@ function signatureBlock(idn: Identity, i: number, acc: Account): string {
     <div class="sig-preview" contenteditable="true" data-sig-edit="${i}" aria-label="${esc(t('settings.signature'))}">${sanitizeHtml(html)}</div>
     <textarea class="sig-src" data-sig-src="${i}" rows="7" spellcheck="false" hidden>${esc(html)}</textarea>
     <div class="sig-actions">
-      <button type="button" class="btn ghost sm" data-sig-file="${i}">${esc(t('settings.sigLoadFile'))}</button>
+      <button type="button" class="btn ghost" data-sig-file="${i}">${esc(t('settings.sigLoadFile'))}</button>
       <button type="button" class="link" data-sig-srctoggle="${i}">${esc(t('settings.sigSource'))}</button>
       <span class="hint">${esc(t('settings.sigHtmlHint'))}</span>
     </div>`;
@@ -633,7 +641,71 @@ function identitiesHtml(): string {
     editIdentities.length > 4
       ? `<input type="search" class="idn-filter" data-idn-filter value="${esc(idnFilter)}" placeholder="${esc(t('settings.idnFilter'))}" aria-label="${esc(t('settings.idnFilter'))}">`
       : '';
-  const general = `<h3 class="set-sub">${esc(t('settings.sendRead'))}</h3>
+  return `${filter}${sections.join('')}<p class="hint">${esc(t('settings.aliasHint'))}</p>`;
+}
+
+// General: language and region, default email app, running in the tray
+function generalHtml(): string {
+  return `
+  <div class="set-card two-col">
+    <label>${esc(t('settings.language'))}
+      <select data-pref-lang>
+        <option value="system"${prefs.language === 'system' ? ' selected' : ''}>${esc(t('settings.langSystem'))}</option>
+        ${langList.map((c) => `<option value="${c}"${prefs.language === c ? ' selected' : ''}>${esc(LANG_NAMES[c] ?? c.toUpperCase())}</option>`).join('')}
+      </select>
+    </label>
+    <label>${esc(t('settings.weekStart'))}
+      <select data-pref-week>
+        ${[-1, 1, 0, 6]
+          .map((d) => {
+            const day = (n: number) => new Date(2026, 0, 4 + n).toLocaleDateString(LOCALE, { weekday: 'long' });
+            return `<option value="${d}"${prefs.weekStart === d ? ' selected' : ''}>${esc(d < 0 ? t('settings.weekSystem', { day: day(I18N.regionWeekStart ?? 1) }) : day(d))}</option>`;
+          })
+          .join('')}
+      </select>
+    </label>
+    <p class="hint">${esc(t('settings.languageHint'))}</p>
+  </div>
+  <div class="set-card">
+    <span class="mono">${esc(t('settings.defaultMail').toUpperCase())}</span>
+    <div class="sound-row"><span class="sound-acc" data-default-mail-state>${esc(t('settings.defaultMailHint'))}</span><button type="button" class="btn ghost" data-default-mail hidden>${esc(t('settings.defaultMailSet'))}</button></div>
+  </div>
+  <div class="set-card">
+    <span class="mono">${esc(t('settings.links').toUpperCase())}</span>
+    <div class="sound-row"><span class="sound-acc">${esc(t('settings.linksHint'))}</span><select data-pref-links>
+      <option value="browser"${prefs.linkOpen !== 'agenoras' ? ' selected' : ''}>${esc(t('settings.linksBrowser'))}</option>
+      <option value="agenoras"${prefs.linkOpen === 'agenoras' ? ' selected' : ''}>${esc(t('settings.linksAgenoras'))}</option>
+    </select></div>
+  </div>
+  <div class="set-card transfer-card">
+    <span class="mono">${esc(t('transfer.title').toUpperCase())}</span>
+    <p class="hint">${esc(t('transfer.hint'))}</p>
+    <div class="transfer-row">
+      <label class="check"><input type="checkbox" data-transfer-secrets> ${esc(t('transfer.withPasswords'))}</label>
+      <input type="password" data-transfer-pw placeholder="${esc(t('transfer.passwordPh'))}" autocomplete="new-password" hidden>
+    </div>
+    <div class="transfer-row" data-transfer-step hidden>
+      <input type="password" data-transfer-import-pw placeholder="${esc(t('transfer.filePasswordPh'))}" autocomplete="off">
+      <button type="button" class="btn primary" data-transfer-go>${esc(t('transfer.importGo'))}</button>
+    </div>
+    <div class="sound-row"><span class="sound-acc" data-transfer-state></span><span class="transfer-btns"><button type="button" class="btn ghost" data-transfer-export>${esc(t('transfer.export'))}</button><button type="button" class="btn ghost" data-transfer-import>${esc(t('transfer.import'))}</button></span></div>
+  </div>
+  <div class="set-card">
+    <span class="mono">${esc(t('settings.background').toUpperCase())}</span>
+    <label class="check sound-on"><input type="checkbox" data-notify="background"${notify.background !== false ? ' checked' : ''}> ${esc(t('notify.background'))}</label>
+  </div>`;
+}
+
+// Writing & reading: compose window, undo when sending, mark as read, spell check, external senders
+function writingHtml(): string {
+  return `<div class="set-stack">
+  <div class="set-card">
+    <span class="mono">${esc(t('settings.composeMode').toUpperCase())}</span>
+    <div class="sound-row"><span class="sound-acc">${esc(t('settings.composeModeHint'))}</span><select data-pref-compose>
+      <option value="window"${prefs.composeMode !== 'popup' ? ' selected' : ''}>${esc(t('settings.composeWindow'))}</option>
+      <option value="popup"${prefs.composeMode === 'popup' ? ' selected' : ''}>${esc(t('settings.composePopup'))}</option>
+    </select></div>
+  </div>
     <div class="set-card">
       <span class="mono">${esc(t('settings.sendDelay').toUpperCase())}</span>
       <div class="sound-row"><span class="sound-acc">${esc(t('settings.sendDelayHint'))}</span><input type="range" min="0" max="5" step="1" value="${prefs.sendDelay}" data-pref-delay><b class="delay-val">${prefs.sendDelay ? t('settings.seconds', { n: prefs.sendDelay }) : t('settings.delayOff')}</b></div>
@@ -643,12 +715,35 @@ function identitiesHtml(): string {
       <div class="sound-row"><span class="sound-acc">${esc(t('settings.readDelayHint'))}</span><select data-pref-read>${[0, 1, 3, 5, 10, -1]
         .map((n) => `<option value="${n}"${n === readDelay ? ' selected' : ''}>${esc(n === 0 ? t('settings.readNow') : n < 0 ? t('settings.readManual') : t('settings.readAfter', { n }))}</option>`)
         .join('')}</select></div>
-    </div>`;
-  const defaultMail = `<h3 class="set-sub">${esc(t('settings.defaultMail'))}</h3>
+    </div>
     <div class="set-card">
-      <div class="sound-row"><span class="sound-acc" data-default-mail-state>${esc(t('settings.defaultMailHint'))}</span><button type="button" class="btn ghost" data-default-mail hidden>${esc(t('settings.defaultMailSet'))}</button></div>
-    </div>`;
-  return `${filter}${sections.join('')}<p class="hint">${esc(t('settings.aliasHint'))}</p>${general}${defaultMail}`;
+      <span class="mono">${esc(t('settings.spell').toUpperCase())}</span>
+      <div class="sound-row"><span class="sound-acc">${esc(t('settings.spellHint'))}</span><select data-pref-spell>${['off', 'system', ...spellLangs]
+        .map((l) => `<option value="${esc(l)}"${l === prefs.spellcheck ? ' selected' : ''}>${esc(l === 'off' ? t('settings.spellOff') : l === 'system' ? t('settings.spellSystem') : spellLangName(l))}</option>`)
+        .join('')}</select></div>
+    </div>
+  </div>
+  <div class="set-card">
+    <span class="mono">${esc(t('ext.title').toUpperCase())}</span>
+    <label class="check"><input type="checkbox" data-pref-ext${extMarkOn ? ' checked' : ''}> ${esc(t('ext.enable'))}</label>
+    <p class="hint">${esc(t('ext.hint'))}</p>
+    ${
+      extMarkOn
+        ? `<label>${esc(t('ext.domains'))}<input data-pref-extdom value="${esc([...extDomainsExtra].join(', '))}" placeholder="example.com, partner.com"></label>
+           <p class="hint">${esc(t('ext.domainsHint', { own: [...extDomains].filter((d) => !extDomainsExtra.includes(d)).join(', ') || '–' }))}</p>`
+        : ''
+    }
+  </div>
+`;
+}
+
+// "de-CH" → "Deutsch (Schweiz)" in the app language
+function spellLangName(code: string): string {
+  try {
+    return new Intl.DisplayNames([LOCALE], { type: 'language' }).of(code) ?? code;
+  } catch {
+    return code;
+  }
 }
 
 // Filter without re-rendering (keeps the focus in the field)
@@ -817,6 +912,8 @@ setDlg.querySelectorAll<HTMLElement>('[data-tab]').forEach((b) =>
 );
 
 el('#btn-settings-close').addEventListener('click', () => setDlg.close());
+// a category name still being typed is saved when the dialog closes
+setDlg.addEventListener('close', () => labelTimer && void saveLabelsNow());
 
 el('#btn-settings-save').addEventListener('click', async () => {
   const btn = el<HTMLButtonElement>('#btn-settings-save');
@@ -828,16 +925,6 @@ el('#btn-settings-save').addEventListener('click', async () => {
     editTemplates = (await window.api.settings.saveTemplates(editTemplates)).map((t) => ({ ...t }));
     if (setTab === 'rules') {
       editRules = JSON.parse(JSON.stringify(await window.api.settings.saveRules(editRules)));
-    }
-    if (setTab === 'labels') {
-      const names = editLabels.map((l) => l.name.trim().toLowerCase()).filter(Boolean);
-      if (new Set(names).size !== names.length) throw new Error(t('labels.duplicate'));
-      labels = await window.api.settings.saveLabels(editLabels.filter((l) => l.name.trim()));
-      editLabels = labels.map((l) => ({ ...l }));
-      mailLabels = (await window.api.settings.get()).mailLabels ?? {};
-      if (labelView && !labels.some((l) => l.id === labelView)) labelView = null;
-      renderAccounts();
-      renderList();
     }
     renderSettings();
     el('#settings-error').textContent = t('status.saved');
@@ -856,13 +943,16 @@ setMenu.setAttribute('role', 'menu');
 document.body.appendChild(setMenu);
 
 const SET_TABS: [SettingsTab, string, string][] = [
+  ['general', 'settings.tabGeneral', '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/>'],
   ['accounts', 'settings.tabAccounts', '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>'],
   ['identities', 'settings.tabIdentities', '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>'],
-  ['templates', 'settings.tabTemplates', '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>'],
-  ['rules', 'settings.tabRules', '<path d="M4 6h10M4 12h7M4 18h4"/><path d="m15 15 3 3 4-6"/>'],
-  ['labels', 'settings.tabLabels', '<path d="M3 12V4h8l10 10-8 8Z"/><circle cx="7.5" cy="8" r="1.5"/>'],
+  ['writing', 'settings.tabWriting', '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>'],
   ['sounds', 'settings.tabSounds', '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>'],
   ['appearance', 'settings.tabAppearance', '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18Z" fill="currentColor"/>'],
+  ['rules', 'settings.tabRules', '<path d="M4 6h10M4 12h7M4 18h4"/><path d="m15 15 3 3 4-6"/>'],
+  ['labels', 'settings.tabLabels', '<path d="M3 12V4h8l10 10-8 8Z"/><circle cx="7.5" cy="8" r="1.5"/>'],
+  ['templates', 'settings.tabTemplates', '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>'],
+  ['ai', 'settings.tabAi', '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>'],
 ];
 
 el('#btn-settings').addEventListener('click', (e) => {
@@ -900,6 +990,8 @@ const REPO = 'https://github.com/ciegolink/agenoras';
 
 async function openAbout(): Promise<void> {
   const info = await window.api.appInfo().catch(() => null);
+  const st = await window.api.settings.get().catch(() => null);
+  if (st) prefs.autoUpdate = st.autoUpdate !== false;
   const link = (href: string, label: string, ico: string) => `<a class="about-link" href="${href}" target="_blank" rel="noopener">${svgIco(ico)}<span>${esc(label)}</span></a>`;
   el('#about-body').innerHTML = `
     <div class="about-head">
@@ -909,6 +1001,7 @@ async function openAbout(): Promise<void> {
         <div class="about-ver">${esc(t('about.version', { v: info?.version ?? '–' }))}</div>
       </div>
     </div>
+    ${aboutUpdateHtml()}
     <p class="about-tag">${esc(t('about.tagline'))}</p>
     <div class="about-links">
       ${link(REPO, 'GitHub', '<path d="M9 19c-4.3 1.4-4.3-2.5-6-3m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12.3 12.3 0 0 0-6.2 0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21"/>')}
@@ -929,6 +1022,7 @@ async function openAbout(): Promise<void> {
   const img = el<HTMLImageElement>('#about-body .about-logo');
   img.addEventListener('error', () => (img.src = '../../build/icon.png'), { once: true });
   img.src = '../../build/logo.png';
+  if (updateNow) paintUpdate({ ...updateNow, announce: false }); // button for a version that is out
   el<HTMLDialogElement>('#dlg-about').showModal();
 }
 el('#btn-about-close').addEventListener('click', () => el<HTMLDialogElement>('#dlg-about').close());
@@ -987,8 +1081,8 @@ function rulesHtml(): string {
     })
     .join('');
   return `<p class="hint">${esc(t('rules.hint'))}</p>${cards || `<p class="hint">${esc(t('settings.noneYet'))}</p>`}
-    <div class="rule-foot"><button type="button" class="btn ghost sm" data-rule-add>+ ${esc(t('rules.new'))}</button>
-    <button type="button" class="btn ghost sm" data-rule-run>${esc(t('rules.runNow'))}</button></div>`;
+    <div class="rule-foot"><button type="button" class="btn ghost" data-rule-add>+ ${esc(t('rules.new'))}</button>
+    <button type="button" class="btn ghost" data-rule-run>${esc(t('rules.runNow'))}</button></div>`;
 }
 
 function ruleInput(tgt: HTMLInputElement | HTMLSelectElement): boolean {
@@ -1087,3 +1181,201 @@ async function openRuleFromMail(m: MailSummary): Promise<void> {
   const cards = el('#settings-body').querySelectorAll<HTMLElement>('.rule-card');
   cards[cards.length - 1]?.scrollIntoView({ block: 'center' });
 }
+
+// Offline copy: label of a period, state text, live progress
+function offlineLabel(d: number): string {
+  if (d === 0) return t('settings.offline0');
+  if (d === -1) return t('settings.offlineAll');
+  if (d === 365) return t('settings.offline1y');
+  if (d === 1825) return t('settings.offline5y');
+  return t('settings.offlineDays', { n: d });
+}
+
+function offlineText(p: OfflineProgress | null): string {
+  if (!p) return '';
+  const n = (v: number) => v.toLocaleString(LOCALE);
+  if (p.state === 'running') return t(p.phase === 'bodies' ? 'offline.bodies' : 'offline.headers', { folder: p.folder ?? '', done: n(p.done), total: n(p.total), account: p.account ?? '' });
+  if (p.state === 'error') return t('offline.error', { msg: p.error ?? '' });
+  return '';
+}
+
+let offlineNow: OfflineProgress | null = null;
+
+
+function offlineAccText(id: string): string {
+  const x = offlineNow?.perAccount?.[id];
+  if (!x?.mails) return '';
+  const n = (v: number) => v.toLocaleString(LOCALE);
+  const stored = t('offline.stored', { mails: n(x.mails), bodies: n(x.bodies), size: fmtSize(x.bytes) });
+  return offlineNow?.finished ? `${stored} · ${t('offline.finished', { date: fmtShort(offlineNow.finished) })}` : stored;
+}
+
+function paintOffline(p: OfflineProgress): void {
+  offlineNow = p;
+  if (typeof paintOfflineForm === 'function') paintOfflineForm(); // account dialog, if open
+  // bottom of the sidebar: only while mails are actually downloaded (not for the quiet check of every
+  // folder every 30 minutes), or when it stopped with an error
+  const line = el('#offline-sync');
+  line.hidden = !((p.state === 'running' && p.total > 0 && p.done < p.total) || p.state === 'error');
+  line.classList.toggle('err', p.state === 'error');
+  line.querySelector('span')!.textContent = p.state === 'running' ? `${p.folder ?? ''} · ${p.done.toLocaleString(LOCALE)} / ${p.total.toLocaleString(LOCALE)}` : t('offline.errorShort');
+  line.title = p.state === 'running' ? offlineText(p) : (p.error ?? '');
+}
+
+window.api.offline.onProgress(paintOffline);
+window.api.offline.status().then(paintOffline).catch(() => {});
+el('#offline-sync').addEventListener('click', () => void openSettings('accounts'));
+
+// Settings to another computer: export (optionally with passwords under an export password), import + restart
+setDlg.addEventListener('change', (e) => {
+  const box = (e.target as HTMLElement).closest<HTMLInputElement>('[data-transfer-secrets]');
+  if (!box) return;
+  const pw = setDlg.querySelector<HTMLInputElement>('[data-transfer-pw]')!;
+  pw.hidden = !box.checked;
+  if (box.checked) pw.focus();
+});
+
+setDlg.addEventListener('click', async (e) => {
+  const tgt = e.target as HTMLElement;
+  const state = setDlg.querySelector<HTMLElement>('[data-transfer-state]');
+  if (!state) return;
+  if (tgt.closest('[data-transfer-export]')) {
+    const withPw = setDlg.querySelector<HTMLInputElement>('[data-transfer-secrets]')!.checked;
+    const pw = withPw ? setDlg.querySelector<HTMLInputElement>('[data-transfer-pw]')!.value : '';
+    if (withPw && pw.length < 8) return void (state.textContent = t('transfer.pwShort'));
+    try {
+      const file = await window.api.transfer.exportTo(pw);
+      if (file) state.textContent = t(pw ? 'transfer.exportedPw' : 'transfer.exported', { file });
+    } catch (err) {
+      state.textContent = errMsg(err);
+    }
+    return;
+  }
+  if (tgt.closest('[data-transfer-import]')) {
+    try {
+      const info = await window.api.transfer.pick();
+      if (!info) return;
+      // show what is in the file, the password field only when it carries passwords
+      state.textContent = t('transfer.contains', { accounts: info.accounts, calendars: info.calendars + info.contacts, feeds: info.feeds, identities: info.identities, rules: info.rules, templates: info.templates, date: fmtShort(info.exported) }) + ' ' + t(info.hasSecrets ? 'transfer.askPassword' : 'transfer.importConfirm');
+      const step = setDlg.querySelector<HTMLElement>('[data-transfer-step]')!;
+      step.hidden = false;
+      const pw = setDlg.querySelector<HTMLInputElement>('[data-transfer-import-pw]')!;
+      pw.hidden = !info.hasSecrets;
+      pw.value = '';
+      if (info.hasSecrets) pw.focus();
+    } catch (err) {
+      state.textContent = errMsg(err);
+    }
+    return;
+  }
+  if (tgt.closest('[data-transfer-go]')) {
+    const pw = setDlg.querySelector<HTMLInputElement>('[data-transfer-import-pw]')!;
+    try {
+      const res = await window.api.transfer.importNow(pw.hidden ? '' : pw.value);
+      setDlg.querySelector<HTMLElement>('[data-transfer-step]')!.hidden = true;
+      const msg = t('transfer.imported', { added: res.added, skipped: res.skipped }) + (res.withoutPassword ? ` ${t('transfer.needPasswords', { n: res.withoutPassword })}` : '');
+      state.textContent = `${msg} ${t('transfer.restartLater')}`;
+      if (confirm(`${msg}\n\n${t('transfer.restart')}`)) window.api.settings.relaunch();
+    } catch (err) {
+      state.textContent = errMsg(err); // wrong password: try again
+      pw.select();
+    }
+  }
+});
+
+// Updates: a new version is announced once at start (update, later, skip this version);
+// otherwise "About Agenoras" shows the state and looks for one on request
+let updateNow: UpdateState | null = null;
+const updDlg = el<HTMLDialogElement>('#dlg-update');
+
+function updateText(u: UpdateState | null): string {
+  const mine = t('update.current', { v: I18N.version ?? '' });
+  if (!u || u.state === 'idle') return mine;
+  if (u.state === 'off') return `${mine} · ${t('update.dev')}`;
+  if (u.state === 'checking') return `${mine} · ${t('update.checking')}`;
+  if (u.state === 'none') return `${mine} · ${t('update.none')}`;
+  if (u.state === 'available') return `${mine} · ${t('update.newShort', { v: u.version ?? '' })}`;
+  if (u.state === 'downloading') return t('update.downloading', { v: u.version ?? '', p: u.percent ?? 0 });
+  if (u.state === 'ready') return t('update.readyShort', { v: u.version ?? '' });
+  return `${mine} · ${t('update.error', { msg: u.error ?? '' })}`;
+}
+
+// the window: the new version, then the download progress, then "Restart now"
+function paintUpdateDlg(u: UpdateState): void {
+  el('#update-title').textContent = t('update.newTitle', { v: u.version ?? '' });
+  const go = el<HTMLButtonElement>('#btn-update-go');
+  const bar = el('#update-bar');
+  bar.hidden = u.state !== 'downloading';
+  bar.querySelector<HTMLElement>('i')!.style.width = `${u.percent ?? 0}%`;
+  el('#btn-update-skip').hidden = u.state !== 'available';
+  go.disabled = u.state === 'downloading';
+  if (u.state === 'ready') {
+    el('#update-text').textContent = t('update.readyText');
+    go.textContent = t('update.restart');
+  } else if (u.state === 'downloading') {
+    el('#update-text').textContent = t('update.downloading', { v: u.version ?? '', p: u.percent ?? 0 });
+    go.textContent = t('update.get');
+  } else if (u.state === 'error') {
+    el('#update-text').textContent = t('update.error', { msg: u.error ?? '' });
+    go.textContent = t('update.get');
+  } else {
+    el('#update-text').textContent = t(u.self ? 'update.newText' : 'update.newTextDeb');
+    go.textContent = t(u.self ? 'update.get' : 'update.download');
+  }
+}
+
+function paintUpdate(u: UpdateState): void {
+  updateNow = u;
+  const box = document.querySelector<HTMLElement>('[data-update-state]');
+  if (box) box.textContent = updateText(u);
+  const about = document.querySelector<HTMLButtonElement>('[data-update-get]');
+  if (about) {
+    about.hidden = u.state !== 'available' && u.state !== 'ready';
+    about.textContent = t(u.state === 'ready' ? 'update.restart' : u.self ? 'update.get' : 'update.download');
+  }
+  if (u.announce && !updDlg.open) updDlg.showModal();
+  if (updDlg.open) paintUpdateDlg(u);
+}
+
+window.api.update.onState(paintUpdate);
+window.api.update.state().then(paintUpdate).catch(() => {});
+
+function updateGo(): void {
+  if (updateNow?.state === 'ready') return void window.api.update.install();
+  void window.api.update.get();
+  if (!updateNow?.self) updDlg.close(); // .deb: the download page opened in the browser
+}
+el('#btn-update-go').addEventListener('click', updateGo);
+el('#btn-update-later').addEventListener('click', () => updDlg.close());
+el('#btn-update-skip').addEventListener('click', () => {
+  void window.api.settings.savePrefs({ skipVersion: updateNow?.version ?? '' });
+  updDlg.close();
+});
+
+// in About: state, look now, update, look at start on/off
+function aboutUpdateHtml(): string {
+  return `<div class="about-update">
+    <span class="grow" data-update-state>${esc(updateText(updateNow))}</span>
+    <button type="button" class="btn ghost" data-update-check>${esc(t('update.check'))}</button>
+    <button type="button" class="btn primary" data-update-get hidden></button>
+  </div>
+  <label class="check about-update-auto"><input type="checkbox" data-auto-update${prefs.autoUpdate ? ' checked' : ''}> ${esc(t('update.auto'))}</label>`;
+}
+
+el('#dlg-about').addEventListener('click', (e) => {
+  const tgt = e.target as HTMLElement;
+  if (tgt.closest('[data-update-check]')) void window.api.update.check();
+  if (tgt.closest('[data-update-get]')) {
+    if (updateNow?.state === 'available' && updateNow.self) {
+      updDlg.showModal(); // the progress shows there
+      paintUpdateDlg(updateNow);
+    }
+    updateGo();
+  }
+});
+el('#dlg-about').addEventListener('change', (e) => {
+  const box = (e.target as HTMLElement).closest<HTMLInputElement>('[data-auto-update]');
+  if (!box) return;
+  prefs.autoUpdate = box.checked;
+  void window.api.settings.savePrefs({ autoUpdate: box.checked });
+});

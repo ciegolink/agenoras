@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { t } from './i18n';
+import { writeFileSafe } from './files';
 
 // Distribution lists, only stored in this app (lists.json), never on a server
 
@@ -28,7 +29,7 @@ export function getLists(): MailList[] {
 }
 
 function writeLists(lists: MailList[]): void {
-  fs.writeFileSync(file(), JSON.stringify(lists, null, 2), 'utf8');
+  writeFileSafe(file(), JSON.stringify(lists, null, 2));
 }
 
 const EMAIL = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;

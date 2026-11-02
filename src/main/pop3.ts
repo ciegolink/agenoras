@@ -9,9 +9,10 @@ import { simpleParser } from 'mailparser';
 import { Account, getAccount, getPassword } from './accounts';
 import { t } from './i18n';
 import type { FolderInfo, MailDetail, MailSummary } from './imap';
-import { log } from './log';
+import { log, resolved } from './log';
 import { AttachmentFile, buildDetail, inviteIcs, splitAttachments, summaryFromParsed } from './mailparse';
 import { Pop3Cfg, Pop3Client } from './pop3client';
+import { incremental, shrink } from './cache';
 
 export const POP_FOLDERS: { path: string; specialUse: string }[] = [
   { path: 'INBOX', specialUse: '\\Inbox' },
@@ -115,6 +116,7 @@ async function doSync(acc: Account): Promise<MailSummary[]> {
     throw err;
   }
   await c.quit();
+  resolved('POP3', acc.email);
   if (fresh.length) onNew(acc.id, true);
   return fresh;
 }
@@ -228,15 +230,15 @@ export function moveAllMessages(acc: Account, folder: string, target: string): n
 }
 
 // Local full-text search (subject, people, body text)
-export function searchFolders(acc: Account, folders: string[], query: string, limit: number): MailSummary[] {
+export function searchFolders(acc: Account, folders: string[], query: string, limit: number, range?: { since: Date; before: Date } | null): MailSummary[] {
   if (!folders.length) return [];
   const like = `%${query.replace(/[\\%_]/g, '\\$&')}%`;
   const rows = open()
     .prepare(
       `SELECT uid, folder, seen, flagged, summary FROM msg WHERE account_id = ? AND folder IN (${folders.map(() => '?').join(',')})
-       AND (summary LIKE ? ESCAPE '\\' OR text LIKE ? ESCAPE '\\') ORDER BY date DESC LIMIT ?`,
+       AND (summary LIKE ? ESCAPE '\\' OR text LIKE ? ESCAPE '\\'${range ? ' OR (date >= ? AND date < ?)' : ''}) ORDER BY date DESC LIMIT ?`,
     )
-    .all(acc.id, ...folders, like, like, limit * folders.length) as Row[];
+    .all(acc.id, ...folders, like, like, ...(range ? [range.since.toISOString(), range.before.toISOString()] : []), limit * folders.length) as Row[];
   return rows.map(toSummary);
 }
 
@@ -273,7 +275,17 @@ export function forgetAccount(id: string): void {
   d.prepare('DELETE FROM seen_uidl WHERE account_id = ?').run(id);
 }
 
+// After removing a POP3 account / at start: shrink pop3.db (see shrink in cache.ts)
+export function vacuumStore(force = true): number {
+  return shrink(open(), path.join(app.getPath('userData'), 'pop3.db'), force);
+}
+
 export function closeStore(): void {
+  try {
+    if (db) incremental(db); // see closeCache
+  } catch (err) {
+    console.error('auto_vacuum:', err);
+  }
   db?.close();
   db = null;
 }

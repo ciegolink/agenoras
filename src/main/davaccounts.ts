@@ -4,6 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { decrypt, encrypt } from './accounts';
 import { t } from './i18n';
+import { writeFileSafe } from './files';
 
 // Shared storage for CalDAV (calendars.json) and CardDAV accounts (contacts.json)
 export type DavKind = 'caldav' | 'carddav';
@@ -32,7 +33,7 @@ function readAll(kind: DavKind): StoredDavAccount[] {
 }
 
 function writeAll(kind: DavKind, list: StoredDavAccount[]): void {
-  fs.writeFileSync(file(kind), JSON.stringify(list, null, 2), 'utf8');
+  writeFileSafe(file(kind), JSON.stringify(list, null, 2));
 }
 
 export function listDavAccounts(kind: DavKind): DavAccount[] {

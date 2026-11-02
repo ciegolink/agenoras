@@ -4,7 +4,7 @@ import type { Socket } from 'node:net';
 import { Account, getAccount, getPassword } from './accounts';
 import { accessToken, forgetToken } from './oauth';
 import { t } from './i18n';
-import { log } from './log';
+import { log, resolved } from './log';
 import type { InviteInfo } from './invites';
 import * as pop from './pop3';
 import { AttachmentFile, buildDetail, inviteIcs, parsePriority, splitAttachments } from './mailparse';
@@ -27,6 +27,8 @@ export interface MailSummary {
   messageId: string; // for categories (stays the same when moving)
   inReplyTo?: string; // Message-ID of the mail this one answers – for conversations
   flagged: boolean; // star / "important" (\Flagged)
+  answered?: boolean; // replied to (\Answered) – also set by other mail programs
+  forwarded?: boolean; // forwarded ($Forwarded)
   toAddress: string; // address of the first recipient (address book suggestions)
   rcpt?: string; // all recipients (To + Cc), for mail rules
 }
@@ -179,6 +181,7 @@ async function connectClient(acc: Account): Promise<ImapFlow> {
   // From here on everything counts as "new" (for notifications); do not reset on reconnect
   if (!lastUid.has(acc.id)) lastUid.set(acc.id, Math.max(0, Number(box.uidNext ?? 1) - 1));
   clients.set(acc.id, c);
+  resolved('IMAP', acc.email);
   return c;
 }
 
@@ -325,6 +328,8 @@ function toSummary(acc: Account, folder: string, msg: FetchedMsg): MailSummary {
     toAddress: to?.address || '',
     rcpt: [...(msg.envelope?.to ?? []), ...(msg.envelope?.cc ?? [])].map((a: { name?: string; address?: string }) => `${a.name ?? ''} <${a.address ?? ''}>`).join(', '),
     flagged: msg.flags?.has('\\Flagged') ?? false,
+    answered: msg.flags?.has('\\Answered') ?? false,
+    forwarded: msg.flags?.has('$Forwarded') ?? false,
     subject: msg.envelope?.subject || '',
     date: new Date(msg.envelope?.date ?? Date.now()).toISOString(),
     seen: msg.flags?.has('\\Seen') ?? false,
@@ -362,8 +367,8 @@ export async function searchFolder(acc: Account, folder: string, query: string, 
 
 // Search several folders in one go: no return to INBOX between the folders (halves the round trips),
 // stops as soon as a newer search has started
-export async function searchFolders(acc: Account, folders: string[], query: string, limit: number, cancelled: () => boolean): Promise<MailSummary[]> {
-  if (pop.isPop(acc)) return pop.searchFolders(acc, folders, query, limit);
+export async function searchFolders(acc: Account, folders: string[], query: string, limit: number, cancelled: () => boolean, range?: { since: Date; before: Date } | null): Promise<MailSummary[]> {
+  if (pop.isPop(acc)) return pop.searchFolders(acc, folders, query, limit, range);
   const c = await getClient(acc);
   const out: MailSummary[] = [];
   try {
@@ -378,8 +383,10 @@ export async function searchFolders(acc: Account, folders: string[], query: stri
       }
       try {
         if (!c.mailbox || !c.mailbox.exists || cancelled()) continue;
-        const uids = await c.search({ or: [{ subject: query }, { from: query }, { to: query }, { body: query }] }, { uid: true });
-        if (!uids || !uids.length || cancelled()) continue;
+        const uids = (await c.search({ or: [{ subject: query }, { from: query }, { to: query }, { body: query }] }, { uid: true })) || [];
+        // a date as query: also the mails of that day / month
+        if (range) for (const u of (await c.search({ since: range.since, before: range.before }, { uid: true })) || []) if (!uids.includes(u)) uids.push(u);
+        if (!uids.length || cancelled()) continue;
         const pick = uids.sort((a, b) => a - b).slice(-limit);
         for await (const msg of c.fetch(pick.join(','), SUMMARY_QUERY, { uid: true })) out.push(toSummary(acc, folder, msg as FetchedMsg));
       } catch (err) {
@@ -442,6 +449,102 @@ export async function setFlagged(acc: Account, folder: string, uids: number[], f
   if (pop.isPop(acc)) return pop.setFlagged(acc, folder, uids, flagged);
   if (!uids.length) return;
   await inFolder(acc, folder, (c) => (flagged ? c.messageFlagsAdd(uids.join(','), ['\\Flagged'], { uid: true }) : c.messageFlagsRemove(uids.join(','), ['\\Flagged'], { uid: true })));
+}
+
+// After a reply or forward: mark the original, like other mail programs do (POP3 has no flags)
+export async function markAnswered(acc: Account, folder: string, uid: number, kind: 'reply' | 'forward'): Promise<void> {
+  if (pop.isPop(acc) || !uid) return;
+  await inFolder(acc, folder, (c) => c.messageFlagsAdd(String(uid), [kind === 'forward' ? '$Forwarded' : '\\Answered'], { uid: true }));
+}
+
+// Older mails when scrolling down: the next ones below the smallest UID shown so far
+export async function fetchOlder(acc: Account, folder: string, beforeUid: number, limit = 50): Promise<MailSummary[]> {
+  if (pop.isPop(acc) || beforeUid <= 1) return []; // POP3: the local store already gives more at once
+  return inFolder(acc, folder, async (c) => {
+    if (!c.mailbox || !c.mailbox.exists) return [];
+    const uids = await c.search({ uid: `1:${beforeUid - 1}` }, { uid: true });
+    if (!uids || !uids.length) return [];
+    const pick = uids.sort((a, b) => a - b).slice(-limit);
+    const out: MailSummary[] = [];
+    for await (const msg of c.fetch(pick.join(','), SUMMARY_QUERY, { uid: true })) out.push(toSummary(acc, folder, msg as FetchedMsg));
+    return out;
+  });
+}
+
+// Offline copy (offline.ts): UIDs of a folder in the period, summaries and flags in batches, bodies
+export async function offlineFolderUids(acc: Account, folder: string, since: Date | null): Promise<{ uidValidity: string; uids: number[] }> {
+  return inFolder(acc, folder, async (c) => {
+    const mb = c.mailbox;
+    if (!mb || !mb.exists) return { uidValidity: String(mb ? mb.uidValidity : ''), uids: [] };
+    const uids = await c.search(since ? { since } : { all: true }, { uid: true });
+    return { uidValidity: String(mb.uidValidity), uids: uids || [] };
+  });
+}
+
+export async function fetchSummaries(acc: Account, folder: string, uids: number[]): Promise<MailSummary[]> {
+  if (!uids.length) return [];
+  return inFolder(acc, folder, async (c) => {
+    const out: MailSummary[] = [];
+    for await (const msg of c.fetch(uids.join(','), SUMMARY_QUERY, { uid: true })) out.push(toSummary(acc, folder, msg as FetchedMsg));
+    return out;
+  });
+}
+
+export async function fetchFlags(acc: Account, folder: string, uids: number[]): Promise<Map<number, { seen: boolean; flagged: boolean; answered: boolean; forwarded: boolean }>> {
+  const out = new Map<number, { seen: boolean; flagged: boolean; answered: boolean; forwarded: boolean }>();
+  if (!uids.length) return out;
+  return inFolder(acc, folder, async (c) => {
+    for await (const msg of c.fetch(uids.join(','), { uid: true, flags: true }, { uid: true })) {
+      const f = msg.flags ?? new Set<string>();
+      out.set(msg.uid, { seen: f.has('\\Seen'), flagged: f.has('\\Flagged'), answered: f.has('\\Answered'), forwarded: f.has('$Forwarded') });
+    }
+    return out;
+  });
+}
+
+// Body for the offline copy without marking it read; big mails only up to maxBytes (text first, attachments cut off)
+export async function fetchOfflineBody(acc: Account, folder: string, uid: number, maxBytes: number): Promise<(MailDetail & { partial?: boolean }) | null> {
+  return inFolder(acc, folder, async (c) => {
+    const head = await c.fetchOne(String(uid), { size: true }, { uid: true });
+    if (!head) return null;
+    const big = (head.size ?? 0) > maxBytes;
+    const msg = await c.fetchOne(String(uid), { source: big ? { maxLength: maxBytes } : true }, { uid: true });
+    if (!msg || !msg.source) return null;
+    const detail = await buildDetail(acc, folder, uid, await simpleParser(msg.source));
+    return big ? { ...detail, partial: true } : detail;
+  });
+}
+
+// Mails with these Message-IDs in any folder of the account (categories of older mails that are not cached)
+export async function findByMessageIds(acc: Account, ids: string[]): Promise<MailSummary[]> {
+  if (pop.isPop(acc) || !ids.length) return [];
+  const folders = (await listFolders(acc)).filter((f) => f.selectable && !['\\Trash', '\\Junk', '\\All', '\\Flagged', '\\Important'].includes(f.specialUse));
+  const out: MailSummary[] = [];
+  let left = new Set(ids);
+  for (const f of folders) {
+    if (!left.size) break;
+    try {
+      const found = await inFolder(acc, f.path, async (c) => {
+        if (!c.mailbox || !c.mailbox.exists) return [];
+        const uids: number[] = [];
+        const want = [...left];
+        for (let i = 0; i < want.length; i += 20) {
+          const part = want.slice(i, i + 20).map((id) => ({ header: { 'message-id': id } }));
+          const hit = await c.search(part.length === 1 ? part[0] : { or: part }, { uid: true });
+          if (hit) uids.push(...hit);
+        }
+        if (!uids.length) return [];
+        const list: MailSummary[] = [];
+        for await (const msg of c.fetch(uids.join(','), SUMMARY_QUERY, { uid: true })) list.push(toSummary(acc, f.path, msg as FetchedMsg));
+        return list.filter((m) => left.has(m.messageId));
+      });
+      out.push(...found);
+      left = new Set([...left].filter((id) => !found.some((m) => m.messageId === id)));
+    } catch {
+      /* folder not readable */
+    }
+  }
+  return out;
 }
 
 // All starred mails of an account (without trash, spam, drafts and Gmail collection folders)

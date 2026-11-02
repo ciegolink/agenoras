@@ -33,9 +33,11 @@ let mailLabels: Record<string, string[]> = {};
 let labelFilter: string | null = null;
 // Collection views under "All inboxes": starred mails or a category (across all accounts/folders)
 let flaggedView = false;
+let outboxView = false; // the outbox (mails being sent, failed ones) instead of a folder
+let outboxItems: OutboxItem[] = [];
 let labelView: string | null = null;
 let flaggedMails: MailSummary[] = [];
-const inVirtual = () => flaggedView || !!labelView;
+const inVirtual = () => flaggedView || outboxView || !!labelView;
 const labelKey = (m: { messageId?: string; accountId: string; folder?: string; uid: number }) => m.messageId || mailKey(m);
 const labelsOf = (m: { messageId?: string; accountId: string; folder?: string; uid: number }) =>
   (mailLabels[labelKey(m)] ?? []).map((id) => labels.find((l) => l.id === id)).filter(Boolean) as MailLabel[];
@@ -189,7 +191,7 @@ function markActive(): void {
   const acc = currentAccount ? accountOf(currentAccount) : null;
   const lbl = labelView ? labels.find((l) => l.id === labelView) : null;
   if (el('.app').dataset.view === 'search') return renderVirtualList();
-  el('#list-heading').textContent = flaggedView ? t('mail.flaggedView') : lbl ? lbl.name : acc ? folderLabel(currentAccount, currentFolder) : t('folder.inbox');
+  el('#list-heading').textContent = outboxView ? t('outbox.title') : flaggedView ? t('mail.flaggedView') : lbl ? lbl.name : acc ? folderLabel(currentAccount, currentFolder) : t('folder.inbox');
   el('#list-title').textContent = acc && !inVirtual() ? `${acc.name}.` : t('mail.allAccounts');
   renderVirtualList();
 }
@@ -198,6 +200,11 @@ function markActive(): void {
 function renderVirtualList(showAll = false): void {
   const box = document.querySelector<HTMLElement>('#virtual-list');
   if (!box) return;
+  // Outbox: only while something is being sent or waits after an error
+  const failed = outboxItems.filter((x) => x.status === 'failed').length;
+  const outbox = outboxItems.length
+    ? `<button class="box vbox outbox-box${outboxView ? ' active' : ''}${failed ? ' has-failed' : ''}" data-virtual="outbox"><span class="vico">${failed ? svgIco('<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/>', 14) : svgIco('<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>', 14)}</span><span class="name">${esc(t('outbox.title'))}</span><span class="count">${outboxItems.length}</span></button>`
+    : '';
   const star = flaggedMails.length || showAll
     ? `<button class="box vbox${flaggedView ? ' active' : ''}" data-virtual="flagged"><span class="vico star-ico">★</span><span class="name">${esc(t('mail.flaggedView'))}</span><span class="count">${flaggedMails.length || ''}</span></button>`
     : '';
@@ -209,8 +216,67 @@ function renderVirtualList(showAll = false): void {
         `<button class="box vbox lbl-box${labelView === l.id ? ' active' : ''}" data-virtual="label:${esc(l.id)}" title="${esc(t('labels.dropTip'))}"><span class="vico"><span class="dot" style="background:${l.color}"></span></span><span class="name">${esc(l.name)}</span><span class="count">${n || ''}</span></button>`,
     )
     .join('');
-  box.innerHTML = star + cats;
+  box.innerHTML = outbox + star + cats;
 }
+
+// Outbox list: what is being sent (with progress) and what failed (with the reason and what to do)
+function renderOutbox(): void {
+  shownKeys = [];
+  el('#mail-list').innerHTML = outboxItems.length
+    ? outboxItems
+        .map((x) => {
+          const acc = accountOf(x.accountId);
+          const to = x.to.length > 2 ? `${x.to.slice(0, 2).join(', ')} +${x.to.length - 2}` : x.to.join(', ');
+          const state =
+            x.status === 'sending'
+              ? `<span class="ob-state"><span class="ai-spin" aria-hidden="true"></span>${esc(x.total > 1 ? t('outbox.progress', { done: x.done, total: x.total }) : t('outbox.sending'))}</span>`
+              : `<span class="ob-state failed">${esc(x.error || t('outbox.failedShort'))}</span>
+                 <span class="ob-acts">
+                   <button type="button" class="btn ghost sm" data-outbox-act="retry">${esc(t('outbox.retry'))}</button>
+                   ${x.editable ? `<button type="button" class="btn ghost sm" data-outbox-act="edit">${esc(t('outbox.edit'))}</button>` : ''}
+                   <button type="button" class="btn ghost sm danger-text" data-outbox-act="discard">${esc(t('outbox.discard'))}</button>
+                 </span>`;
+          return `<div class="mail outbox-item${x.status === 'failed' ? ' failed' : ''}" data-outbox="${esc(x.id)}">
+            <span class="m-body">
+              <span class="row"><span class="from">${esc(t('outbox.to', { list: to }))}</span><span class="time">${esc(fmtShort(x.created))}</span></span>
+              <span class="subject">${esc(x.subject || t('mail.noSubject'))}</span>
+              <span class="acc" style="color:${colorOf(x.accountId)}">${esc((acc ? accLabel(acc) : x.from).toUpperCase())}</span>
+              ${state}
+            </span>
+          </div>`;
+        })
+        .join('')
+    : `<div class="list-empty">${esc(t('outbox.empty'))}</div>`;
+}
+
+async function outboxAction(act: string, id: string): Promise<void> {
+  try {
+    if (act === 'retry') await window.api.outbox.retry(id);
+    else if (act === 'edit') await window.api.outbox.edit(id);
+    else if (act === 'discard' && confirm(t('outbox.confirmDiscard'))) await window.api.outbox.discard(id);
+  } catch (err) {
+    setStatus(errMsg(err));
+  }
+}
+
+function paintOutbox(items: OutboxItem[]): void {
+  outboxItems = items;
+  if (outboxView && !items.length) {
+    // all sent: back to the inboxes
+    outboxView = false;
+    renderAccounts();
+    void loadMails();
+    return;
+  }
+  renderVirtualList();
+  if (outboxView) renderList();
+}
+window.api.outbox.onChanged(paintOutbox);
+// Back online: send what failed meanwhile once more (a mail that fails again just stays)
+window.addEventListener('online', () => {
+  for (const x of outboxItems) if (x.status === 'failed') void window.api.outbox.retry(x.id).catch(() => {});
+});
+window.api.outbox.list().then(paintOutbox).catch(() => {});
 
 async function loadFlagged(): Promise<void> {
   try {
@@ -236,7 +302,9 @@ function searchElsewhereHtml(raw: string, found: boolean): string {
     : `<div class="list-empty">${esc(t('search.nothingHere'))}<br><button type="button" class="btn ghost" data-search-all="${esc(q)}">${esc(t('search.everywhereBtn', { q }))}</button></div>`;
 }
 
+// The global search takes over the text: the quick filter is emptied, so "Back" shows the whole folder again
 function searchEverywhere(q: string): void {
+  clearQuickFilter();
   const input = el<HTMLInputElement>('#search');
   input.value = q;
   input.dispatchEvent(new Event('input'));
@@ -260,6 +328,7 @@ el('#quick-filter').addEventListener('keydown', (e) => {
 
 function openVirtual(kind: string): void {
   flaggedView = kind === 'flagged';
+  outboxView = kind === 'outbox';
   labelView = kind.startsWith('label:') ? kind.slice(6) : null;
   currentAccount = null;
   currentFolder = 'INBOX';
@@ -276,6 +345,7 @@ function updateCounts(): void {
 
 // Mail list
 async function loadVirtual(): Promise<void> {
+  if (outboxView) return renderList();
   const want = flaggedView ? 'flagged' : `label:${labelView}`;
   const still = () => (flaggedView ? 'flagged' : `label:${labelView}`) === want;
   if (flaggedView) {
@@ -289,16 +359,83 @@ async function loadVirtual(): Promise<void> {
   const ids = Object.entries(mailLabels)
     .filter(([, l]) => l.includes(labelView!))
     .map(([k]) => k);
+  // 1. local copies, 2. older mails looked up on the server
   try {
-    const found = await window.api.mailsByMessageIds(ids);
+    mails = await window.api.mailsByMessageIds(ids);
     if (!still()) return;
-    mails = found;
-    setStatus(found.length < ids.length ? t('labels.someNotCached', { n: ids.length - found.length }) : '');
+    renderList();
+    setStatus(t('status.updating'));
+    const res = await window.api.findByMessageIds(ids);
+    if (!still()) return;
+    if (res.found) mails = await window.api.mailsByMessageIds(ids);
+    if (!still()) return;
+    setStatus(res.missing ? t('labels.someNotFound', { n: res.missing }) : '');
   } catch (err) {
     setStatus(errMsg(err));
   }
   renderList();
 }
+
+// Scrolling down loads older mails (50 per account at a time). They stay when the list refreshes,
+// until another folder is opened.
+let olderMails: MailSummary[] = [];
+let olderCtx = '';
+let olderDone = new Set<string>();
+let olderLoading = false;
+const olderKey = () => `${currentAccount ?? '*'}|${currentAccount ? currentFolder : 'INBOX'}`;
+
+function withOlder(list: MailSummary[]): MailSummary[] {
+  if (olderCtx !== olderKey()) {
+    olderCtx = olderKey();
+    olderMails = [];
+    olderDone = new Set();
+  }
+  if (!olderMails.length) return list;
+  const have = new Set(list.map(mailKey));
+  return [...list, ...olderMails.filter((m) => !have.has(mailKey(m)))].sort((a, b) => b.date.localeCompare(a.date));
+}
+
+async function loadOlder(): Promise<void> {
+  if (olderLoading || inVirtual() || isSearchView() || !accounts.length) return;
+  const folder = currentAccount ? currentFolder : 'INBOX';
+  const accs = (currentAccount ? accounts.filter((a) => a.id === currentAccount) : accounts).filter((a) => !olderDone.has(a.id));
+  if (!accs.length) return;
+  // smallest UID shown per account = where the next page starts
+  const before: Record<string, number> = {};
+  for (const a of accs) {
+    const uids = mails.filter((m) => m.accountId === a.id && (m.folder ?? folder) === folder).map((m) => m.uid);
+    if (uids.length) before[a.id] = Math.min(...uids);
+    else olderDone.add(a.id);
+  }
+  if (!Object.keys(before).length) return;
+  const ctx = olderKey();
+  olderLoading = true;
+  paintOlderRow();
+  try {
+    const res = await window.api.olderMail(currentAccount, folder, before);
+    if (ctx !== olderKey()) return;
+    res.done.forEach((id) => olderDone.add(id));
+    olderMails = [...olderMails, ...res.mails];
+    mails = withOlder(mails);
+  } catch (err) {
+    setStatus(errMsg(err));
+  } finally {
+    olderLoading = false;
+    renderList();
+  }
+}
+
+// "Loading older emails …" at the end of the list while it runs
+function paintOlderRow(): void {
+  const list = el('#mail-list');
+  list.querySelector('.list-more')?.remove();
+  if (olderLoading) list.insertAdjacentHTML('beforeend', `<div class="search-progress list-more" role="status"><span class="search-spin"></span>${esc(t('mail.loadingOlder'))}</div>`);
+}
+
+el('#mail-list').addEventListener('scroll', () => {
+  const list = el('#mail-list');
+  if (list.scrollTop + list.clientHeight > list.scrollHeight - 400) void loadOlder();
+});
 
 async function loadMails(): Promise<void> {
   if (!accounts.length) {
@@ -315,7 +452,7 @@ async function loadMails(): Promise<void> {
   try {
     const cached = await window.api.cachedMail(forAccount, forFolder);
     if (!stale()) {
-      mails = cached;
+      mails = withOlder(cached);
       renderList();
       updateCounts();
     }
@@ -327,7 +464,7 @@ async function loadMails(): Promise<void> {
   try {
     const res = await window.api.listMail(forAccount, forFolder);
     if (stale()) return; // another folder selected in the meantime
-    mails = res.mails;
+    mails = withOlder(res.mails);
     setStatus(res.errors.map((e) => `${accountOf(e.accountId)?.email ?? t('account.generic')}: ${e.message}`).join(' · '));
   } catch (e) {
     setStatus(errMsg(e));
@@ -346,7 +483,7 @@ document.addEventListener('externalprefs', () => {
 // yet, so a "Re:/AW:/Fwd:/WG:" subject also joins the mails with the same subject.
 
 const THREADS_KEY = 'agenoras.threadAccounts';
-const threadAccounts = new Set<string>(JSON.parse(localStorage.getItem(THREADS_KEY) || '[]') as string[]);
+const threadAccounts = readSet(THREADS_KEY); // damaged value: start empty instead of breaking the whole window
 const expandedThreads = new Set<string>();
 // key of a closed conversation's head → keys of all its mails (dragging the head moves the whole conversation)
 const closedThreads = new Map<string, string[]>();
@@ -457,6 +594,7 @@ function mailRowHtml(m: MailSummary, o: { showTo: boolean; listFolder: string; a
       <span class="row">
         <span class="from">${esc(who)}</span>${threadBtn}
         ${!showTo && isExternal(m.fromAddress) ? `<span class="ext-tag sm" title="${esc(t('ext.banner'))}">${esc(t('ext.tag'))}</span>` : ''}${prio}${m.hasAttachments ? `<span class="clip" title="${esc(t('mail.attachmentTag'))}">${svgIco('<path d="m21 12-8.5 8.5a5 5 0 0 1-7-7L14 5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4L15.5 8"/>', 12)}</span>` : ''}
+        ${m.answered ? `<span class="ans" title="${esc(t('mail.answered'))}">${svgIco('<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>', 12)}</span>` : ''}${m.forwarded ? `<span class="ans" title="${esc(t('mail.forwarded'))}">${svgIco('<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>', 12)}</span>` : ''}
         <span class="time">${fmtShort(m.date)}</span>
         <span class="star${m.flagged ? ' on' : ''}" data-star role="button" title="${esc(t(m.flagged ? 'mail.unflag' : 'mail.flag'))}">${m.flagged ? '★' : '☆'}</span>
       </span>
@@ -471,6 +609,7 @@ const isSearchView = () => el('.app').dataset.view === 'search';
 function renderList(): void {
   // used by the mail view and the search page
   const searchPage = isSearchView();
+  if (outboxView && !searchPage) return renderOutbox();
   const q = searchPage ? el<HTMLInputElement>('#search').value.trim().toLowerCase() : '';
   // quick filter, local only
   const qf = searchPage ? '' : el<HTMLInputElement>('#quick-filter').value.trim().toLowerCase();
@@ -684,6 +823,7 @@ async function openMail(key: string, loadImages = false): Promise<void> {
     ${attachmentsHtml(msg)}`;
 
   mountMailBody(el('#body'), msg, () => openMail(key, true));
+  void fillAnswered(reader, msg, summaryOf(key));
   fillInviteCalendars();
 }
 
@@ -833,6 +973,7 @@ async function removeMails(keys: string[], action: 'delete' | 'archive' | { move
 
   const gone = new Set(keys);
   mails = mails.filter((m) => !gone.has(mailKey(m)));
+  olderMails = olderMails.filter((m) => !gone.has(mailKey(m)));
   if (searchResults) searchResults = searchResults.filter((m) => !gone.has(mailKey(m)));
   clearReader();
   renderList();
@@ -1117,6 +1258,7 @@ function syncProtocolUi(switched = false): void {
   field('host').placeholder = pop ? 'pop.example.com' : 'imap.example.com';
   el('#secure-label').textContent = field('secure').checked ? 'SSL/TLS' : t('account.startTls');
   el('#pop-fields').hidden = !pop;
+  el('#offline-fields').hidden = pop; // POP3 keeps everything locally anyway
   (form.elements.namedItem('deleteAfterDays') as HTMLSelectElement).disabled = !field('leaveOnServer').checked;
   if (switched) {
     const port = Number(field('port').value);
@@ -1133,7 +1275,36 @@ function fillProtocolFields(acc: Account | null): void {
   const days = form.elements.namedItem('deleteAfterDays') as HTMLSelectElement;
   days.innerHTML = POP_DAYS.map((n) => `<option value="${n}">${esc(n ? t('account.afterDays', { n }) : t('account.never'))}</option>`).join('');
   days.value = String(acc?.deleteAfterDays ?? 0);
+  // offline period (Settings → offline, per account)
+  const off = form.elements.namedItem('offlineDays') as HTMLSelectElement;
+  off.innerHTML = [0, 30, 90, 365, 1825, -1].map((d) => `<option value="${d}">${esc(offlineLabel(d))}</option>`).join('');
+  off.value = '0';
+  offlineFormFor = acc?.id ?? '';
+  paintOfflineForm();
+  if (acc) void window.api.settings.get().then((s) => (off.value = String(s.offline?.[acc.id] ?? 0)));
   syncProtocolUi();
+}
+
+// account being edited (for the offline line); '' = new account
+let offlineFormFor = '';
+function paintOfflineForm(): void {
+  const text = offlineFormFor ? offlineAccText(offlineFormFor) : '';
+  const running = offlineNow?.state === 'running' && offlineNow.account === accountOf(offlineFormFor)?.email;
+  el('#offline-acc-state').textContent = running ? offlineText(offlineNow) : text;
+  el('#btn-offline-now').hidden = !offlineFormFor || (form.elements.namedItem('offlineDays') as HTMLSelectElement).value === '0';
+}
+el('#btn-offline-now').addEventListener('click', () => void window.api.offline.now());
+(form.elements.namedItem('offlineDays') as HTMLSelectElement).addEventListener('change', paintOfflineForm);
+
+// Save the offline period of an account; going back to "newest only" deletes its copy, so ask first
+async function saveOfflineDays(id: string): Promise<boolean> {
+  const days = Number((form.elements.namedItem('offlineDays') as HTMLSelectElement).value) || 0;
+  const s = await window.api.settings.get();
+  if ((s.offline?.[id] ?? 0) === days) return true;
+  const had = offlineNow?.perAccount?.[id];
+  if (!days && had?.mails && !confirm(t('offline.clearConfirm', { size: fmtSize(had.bytes) }))) return false;
+  await window.api.settings.savePrefs({ offline: { [id]: days } });
+  return true;
 }
 
 protoSelect().addEventListener('change', () => syncProtocolUi(true));
@@ -1196,6 +1367,11 @@ form.addEventListener('submit', async (e) => {
       return;
     }
   }
+  if (old && !(await saveOfflineDays(old.id))) {
+    save.disabled = false;
+    save.textContent = t('btn.saveConnect');
+    return;
+  }
   // Only colour/privacy changed → save without testing and reconnecting
   const sameProtocol = input.protocol === (old?.protocol ?? 'imap') && (input.protocol !== 'pop3' || (input.leaveOnServer === (old?.leaveOnServer !== false) && input.deleteAfterDays === (old?.deleteAfterDays ?? 0)));
   if (old && !input.pass && sameProtocol && (['email', 'host', 'port', 'secure', 'user', 'smtpHost', 'smtpPort', 'smtpSecure'] as const).every((k) => input[k] === old[k]) && (input.name || input.email) === old.name) {
@@ -1220,7 +1396,10 @@ form.addEventListener('submit', async (e) => {
     dlg.close();
     folderCache.delete(acc.id);
     await loadAccounts();
-    if (!editing) currentAccount = null;
+    if (!editing) {
+      currentAccount = null;
+      await saveOfflineDays(acc.id).catch(() => {});
+    }
     markActive();
     await loadMails();
     if (currentAccount) loadFolders(currentAccount);
@@ -1326,6 +1505,7 @@ el('.side').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-account]');
   if (!b || b.closest('#side-contacts')) return;
   flaggedView = false;
+  outboxView = false;
   labelView = null;
   const account = b.dataset.account || null;
   const folder = b.dataset.folder ?? 'INBOX';
@@ -1347,6 +1527,8 @@ el('.side').addEventListener('click', (e) => {
 
 el('#mail-list').addEventListener('click', (e) => {
   const tgt = e.target as HTMLElement;
+  const ob = tgt.closest<HTMLElement>('[data-outbox-act]');
+  if (ob) return void outboxAction(ob.dataset.outboxAct!, ob.closest<HTMLElement>('[data-outbox]')!.dataset.outbox!);
   if (tgt.closest('[data-action="add-account"]')) return openAddMailAccount();
   const go = tgt.closest<HTMLElement>('[data-kind-go]')?.dataset.kindGo;
   if (go) return setSearchKind(go as SearchKind);
@@ -1364,7 +1546,7 @@ el('#mail-list').addEventListener('click', (e) => {
     const task = taskHits[Number(taskIdx)];
     if (task) {
       setView('tasks');
-      openTaskDialog(taskItems.find((x) => x.id === task.id) ?? task);
+      void ensureTasks().then(() => showTask(task.id));
     }
     return;
   }
@@ -1556,7 +1738,7 @@ function searchHitsHtml(evs: CalEvent[], cts: Contact[], tks: Task[], fds: RssIt
     return `<button type="button" class="hit hit-feed${item.read ? ' read' : ''}" data-hit-feed="${esc(item.key)}" style="--ec:${feedColor(item.feedId)}">
       <span class="hit-cal">${svgIco('<path d="M5 11a8 8 0 0 1 8 8M5 5a14 14 0 0 1 14 14"/><circle cx="6" cy="18" r="1.5"/>', 16)}</span>
       <span class="hit-body"><b>${esc(item.title || t('rss.untitled'))}</b><span>${esc(sub)}</span></span>
-      <span class="hit-tag">${esc(t('search.tag.feed'))}</span>
+      ${item.archived ? `<span class="hit-tag">${esc(t('folder.archive'))}</span>` : ''}<span class="hit-tag">${esc(t('search.tag.feed'))}</span>
     </button>`;
   });
   const html = group('contact', cts.length, contactRows) + group('event', evs.length, eventRows) + group('task', tks.length, taskRows) + group('feed', fds.length, feedRows);
@@ -1609,6 +1791,7 @@ function closeSearch(): void {
   el<HTMLInputElement>('#search').blur();
 }
 el('#search-clear').addEventListener('click', closeSearch);
+el('#search-back').addEventListener('click', closeSearch);
 
 // focusing a filled search field shows the results again
 el('#search').addEventListener('focus', () => {
@@ -1742,6 +1925,7 @@ async function toggleFlag(keys: string[], force?: boolean): Promise<void> {
   if (flaggedView && !on) {
     await animateRowsOut(keys, 'move');
     mails = mails.filter((m) => !set.has(mailKey(m)));
+    olderMails = olderMails.filter((m) => !set.has(mailKey(m)));
     clearReader();
   }
   renderList();
@@ -1762,6 +1946,7 @@ ctx.className = 'ctx-menu';
 ctx.hidden = true;
 ctx.setAttribute('role', 'menu');
 document.body.appendChild(ctx);
+wireSubmenus(ctx);
 let ctxKeys: string[] = [];
 
 function hideCtx(): void {
@@ -1799,14 +1984,23 @@ el('#mail-list').addEventListener('contextmenu', (e) => {
     canArchive ? item('archive', ACT_ICONS.archive, t('mail.archive')) : '',
     allJunk ? item('notspam', ACT_ICONS.notSpam, t('mail.notSpam')) : canSpam ? item('spam', ACT_ICONS.spam, t('mail.spam')) : '',
     item('delete', ACT_ICONS.trash, t('mail.delete'), 'danger'),
+    one && !accountOf(parseKey(ctxKeys[0]).accountId)?.private ? item('pin', PIN_ICON, t('pins.pin')) : '',
     one ? item('rule', svgIco('<path d="M4 6h10M4 12h7M4 18h4"/><path d="m15 15 3 3 4-6"/>'), t('rules.createFromMail')) : '',
     '<hr>',
-    `<div class="ctx-head">${esc(t('labels.title').toUpperCase())}</div>`,
-    ...labels.map((l) => {
-      const on = list.length > 0 && list.every((m) => (mailLabels[labelKey(m)] ?? []).includes(l.id));
-      return `<button type="button" role="menuitemcheckbox" aria-checked="${on}" data-ctx="label:${esc(l.id)}"><span class="lbl-dot" style="background:${l.color}">${on ? '✓' : ''}</span><span>${esc(l.name)}</span></button>`;
-    }),
-    item('label-new', svgIco('<path d="M12 5v14M5 12h14"/>'), t('labels.new')),
+    // long lists in submenus: categories, turn into
+    ctxSub(
+      svgIco('<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8Z"/><circle cx="7.5" cy="7.5" r="1.5"/>'),
+      t('labels.title'),
+      [
+        ...labels.map((l) => {
+          const on = list.length > 0 && list.every((m) => (mailLabels[labelKey(m)] ?? []).includes(l.id));
+          return `<button type="button" role="menuitemcheckbox" aria-checked="${on}" data-ctx="label:${esc(l.id)}"><span class="lbl-dot" style="background:${l.color}">${on ? '✓' : ''}</span><span>${esc(l.name)}</span></button>`;
+        }),
+        labels.length ? '<hr>' : '',
+        item('label-new', svgIco('<path d="M12 5v14M5 12h14"/>'), t('labels.new')),
+      ].join(''),
+    ),
+    one ? ctxSub(svgIco('<path d="M4 12h12"/><path d="m12 6 6 6-6 6"/>'), t('convert.into'), item('toEvent', ACT_ICONS.newEvent, t('convert.intoEvent')) + item('toTask', ACT_ICONS.newTask, t('convert.intoTask'))) : '',
   ].join('');
   ctx.hidden = false;
   const r = ctx.getBoundingClientRect();
@@ -1831,6 +2025,7 @@ ctx.addEventListener('click', async (e) => {
   if (action === 'notspam') return removeMails(keys, { move: 'INBOX' });
   if (action === 'archive' || action === 'delete') return removeMails(keys, action);
   if (action === 'window') return void window.api.mailview.open(parseKey(keys[0]));
+  if (action === 'pin') return pinMail(keys[0]);
   if (action.startsWith('label:')) return toggleLabel(keys, action.slice(6));
   if (action === 'label-new') return openLabelDialog(null, keys);
   // reply/forward need the body
@@ -1843,6 +2038,7 @@ ctx.addEventListener('click', async (e) => {
       return setStatus(errMsg(err));
     }
   }
+  if (action === 'toEvent' || action === 'toTask') return convertTo(action === 'toEvent' ? 'event' : 'task', msg.subject || t('mail.noSubject'), mailAsText(msg));
   if (action === 'forward') openCompose(forwardOpts(msg));
   else openCompose(replyOpts(msg, action === 'replyAll'));
 });
@@ -1904,6 +2100,7 @@ function setupTitlebarActions(): void {
 }
 setupTitlebarActions();
 
+
 // New event, task or contact: from the title bar and from the tray menu
 async function createNew(kind: 'event' | 'task' | 'contact'): Promise<void> {
   if (kind === 'event') {
@@ -1921,6 +2118,51 @@ async function createNew(kind: 'event' | 'task' | 'contact'): Promise<void> {
   }
 }
 window.api.onCreate((kind) => void createNew(kind));
+
+// Pin a mail: subject and sender – from the pin it opens in its own window
+function pinMail(key: string): void {
+  const m = summaryOf(key);
+  if (!m) return;
+  const ref = parseKey(key);
+  void window.api.pins.add({
+    key: `mail:${key}`,
+    kind: 'mail',
+    title: m.subject || t('mail.noSubject'),
+    text: '',
+    meta: [{ text: m.from && m.fromAddress && m.from !== m.fromAddress ? `${m.from} <${m.fromAddress}>` : m.from || m.fromAddress }],
+    color: accountOf(ref.accountId)?.color ?? '#969993',
+    mail: { accountId: ref.accountId, folder: ref.folder, uid: ref.uid },
+  });
+}
+
+// E-mail address in a note, pin or article text: write to it
+document.addEventListener('click', (e) => {
+  const addr = (e.target as HTMLElement).closest<HTMLElement>('[data-mailto]')?.dataset.mailto;
+  if (!addr) return;
+  e.preventDefault();
+  e.stopPropagation();
+  openCompose({ to: [addr] });
+});
+
+// Turn a mail or feed article into an event or task (or a feed article into a mail).
+// The dialog opens on top of the current view, nothing is saved until the user does.
+async function convertTo(kind: 'mail' | 'event' | 'task', title: string, text: string): Promise<void> {
+  const body = text.trim().slice(0, 10_000);
+  if (kind === 'mail') return openCompose({ subject: title, body });
+  // no calendar / task list: say so here, the dialog would only report it in its own view
+  const say = (msg: string) => void (el('.app').dataset.view === 'rss' ? setRssStatus(msg) : setStatus(msg));
+  if (kind === 'event') {
+    await ensureCalendars();
+    if (!calendars.some((c) => !hiddenCals.has(c.id))) return say(t(calendars.length ? 'cal.showOne' : 'cal.addAccountFirst'));
+    openEventDialog(null, undefined, undefined, { title, description: body });
+  } else {
+    await ensureTasks();
+    if (!taskLists.length) return say(t('tasks.noLists'));
+    openTaskDialog(null, { title, notes: body });
+  }
+}
+
+const mailAsText = (msg: MailDetail) => `${t('quote.header', { date: fmtLong(msg.date), name: msg.fromName, email: msg.fromAddress })}\n\n${plainText(msg).trim()}`;
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r')) {
@@ -2006,6 +2248,17 @@ window.api.settings
   .catch(() => {});
 
 // Mail sent → "ding" (Settings → Notifications → Sound when sending)
+// Reply / forward sent: show the mark on the original right away
+window.api.onAnswered((ref) => {
+  const key = mailKey(ref);
+  for (const m of [...mails, ...flaggedMails, ...(searchResults ?? [])]) {
+    if (mailKey(m) !== key) continue;
+    if (ref.kind === 'forward') m.forwarded = true;
+    else m.answered = true;
+  }
+  renderList();
+});
+
 window.api.onMailSent(() => playSound(notify.sentSound ?? 'app:sentMail_Ding.wav', notify.volume, playDing));
 
 // Click on a desktop notification: show the account's inbox and open the mail
@@ -2082,6 +2335,7 @@ window.api.privacy.onChanged(async (state) => {
   }
   for (const id of [...folderCache.keys()]) if (!accountOf(id)) folderCache.delete(id);
   mails = mails.filter((m) => !gone(m));
+  olderMails = olderMails.filter((m) => !gone(m));
   flaggedMails = flaggedMails.filter((m) => !gone(m));
   if (searchResults) searchResults = searchResults.filter((m) => !gone(m));
   selected = new Set([...selected].filter((k) => accountOf(parseKey(k).accountId)));

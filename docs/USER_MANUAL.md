@@ -45,7 +45,7 @@ On first start, open **Settings → Accounts**. Agenoras has four kinds of accou
 
 Click **+ Email account**. For Microsoft accounts (Outlook.com, Hotmail, Microsoft 365) click **Sign in with Microsoft** at the top: your browser opens, you sign in there, and Agenoras sets up the account by itself – no password and no server settings needed. To renew the sign-in later, open the account with **Edit** and click **Sign in again**. Microsoft 365 work accounts may need a one-time approval by your IT administrator.
 
-Gmail is set up by hand with an [app password](https://myaccount.google.com/apppasswords). Sign-in with Google exists in the source code but is not enabled in the official downloads.
+Gmail is set up by hand with an [app password](https://myaccount.google.com/apppasswords). Sign-in with Google is implemented in the [source code](https://github.com/ciegolink/agenoras/blob/main/docs/DEVELOPMENT.md#oauth-microsoft-and-google) but not enabled in the official downloads, because Google requires a paid yearly security assessment for full Gmail access.
 
 Otherwise fill in:
 
@@ -98,17 +98,29 @@ To change an account later, click **Edit** next to it. Leave the password field 
 
 ## 3. The main window
 
-The buttons at the bottom of the sidebar switch between **Mail**, **Calendar**, **Contacts**, **Tasks** and **Feed** (only shown once you have added a feed); they always stay in place, only the list above them scrolls. **Settings** are in the gear menu at the top right.
+The buttons at the bottom of the sidebar switch between **Mail**, **Calendar**, **Contacts**, **Tasks** and **Feed** (only shown once you have added a feed); they always stay in place, only the list above them scrolls. A number next to **Feed** shows your unread articles, a number next to **Tasks** the tasks that are new since you last opened that view. **Settings** are in the gear menu at the top right.
 
 - **Columns** can be resized by dragging their edges. Double-click an edge to reset it. Agenoras remembers window size, position and column widths.
-- **My day** is a side panel with a small month calendar, today's and tomorrow's events and your tasks. Open or close it with the panel button in the toolbar. Use **+ Event** and **+ Task for today** to add items quickly.
-- **Tray icon**: if background mode is on (see [Notifications](#notifications)), closing the window keeps Agenoras running in the tray. Right-click the tray icon to open the app, write a new email, create an event, task or contact, or quit.
-- **Default email app**: Settings → Senders & signatures → *Default email app*. Then links like "Send email to …" on websites and in other apps open a new email in Agenoras, with recipient, subject and text already filled in.
+- **My day** is a side panel with a small month calendar, today's and tomorrow's events, your tasks and, once you have added a feed, the newest unread feed articles. The buttons at its top show or hide each part. Open or close it with the panel button in the toolbar. Use **+ Event** to add an event. Type a title into **+ Create task** and press Enter: the task dialog opens with today as start date, where you choose the list and can change the dates.
+- **Tray icon**: if background mode is on (see [General](#general)), closing the window keeps Agenoras running in the tray. Right-click the tray icon to open the app, write a new email, create an event, task or contact, or quit.
+- **Default email app**: Settings → General → *Default email app*. Then links like "Send email to …" on websites and in other apps open a new email in Agenoras, with recipient, subject and text already filled in.
   - macOS and Linux: click *Make default*.
   - Windows 10/11 doesn't let apps set this themselves: the button opens *Settings → Default apps*, choose Agenoras for *Email* (MAILTO) there.
 - **About**: gear menu → **About Agenoras** shows the version and links to the wiki and bug reports.
 - **Search**: the field in the title bar searches everything, see [Search](#search) below.
-- **Problems**: when a connection to a mail, calendar or contacts server fails, a warning sign appears in the title bar, with the number of new problems. Click it to see what went wrong. The log contains errors only; you can **Copy** it (e.g. for a bug report) or **Clear** it. See also [Troubleshooting](#14-troubleshooting).
+- **Pins**: the pin button next to the *My day* button shows the pin sidebar, see [Pin sidebar](#pin-sidebar) below.
+- **Offline**: without an internet connection, an **Offline** sign appears in the title bar; emails in the outbox are sent once the connection is back.
+- **Problems**: when a connection to a mail, calendar or contacts server fails, a warning sign appears in the title bar, with the number of new problems. Click it to see what went wrong. The log contains errors only, and only lasting ones: once the account works again, its entries disappear by themselves (and the sign too, if nothing else is left). You can **Copy** it (e.g. for a bug report) or **Clear** it. See also [Troubleshooting](#14-troubleshooting).
+
+### Pin sidebar
+
+Pinned tasks, feed articles and emails appear in their own column on the right of the main window, in every view, so you can keep them in sight while you read mail or work in the calendar.
+
+- Pin a task with right-click → **Pin** or the pin button on the right; pin a feed article with right-click → **Pin** or the pin button in the article.
+- Emails can be pinned too (right-click → **Pin**). Their card only shows the subject and the sender; **Open email** opens the email in its own window. Emails of private (PIN-protected) accounts can't be pinned.
+- Click a card's title to fold it open or closed; open, it shows the whole text. **×** on the card unpins it. Email addresses in the text are links: click one to write to that person.
+- The pin button in the title bar (with the number of pins) shows or hides the column, the pins are kept. When you unpin the last card, the column closes by itself.
+- Pinned tasks update when you change them. Feed articles are pinned with their full text; **Open in browser** opens the original.
 
 ### Search
 
@@ -118,6 +130,7 @@ The search field in the title bar searches everything: emails (full text on the 
 - **Mails from** (left): all accounts or a single account. Emails are always searched in all folders.
 - The hits are in the middle, an email opens in the preview on the right. Appointments, contacts, tasks and feed articles open in their own view; click into the search field again to get back to the hits.
 - The **All**, **Unread**, attachment and star buttons above the hits filter the email results.
+- **Search by date**: type a date such as **12.3.2024**, **12.3.** (this year), **2024-03-12** or **12/3/2024**, or a month such as **March 2024** or **Mar 24**. You get the emails of that day or month, plus emails that contain the text.
 
 Click **×** in the search field or press **Esc** to close the search and return to where you were.
 
@@ -127,7 +140,7 @@ Click **×** in the search field or press **Esc** to close the search and return
 
 The sidebar shows **All inboxes** (a unified inbox for all accounts) and below it a folder tree for each account, with unread counts. Click the arrow next to a folder to expand or collapse it; Agenoras remembers your choice.
 
-New mail arrives live without refreshing. To check manually, press **F5** or **Ctrl+R**.
+New mail arrives live without refreshing. To check manually, press **F5** or **Ctrl+R**. A folder first shows its newest 50 emails; scroll to the end of the list and the next older ones load (from the offline copy at once, if the account has one, otherwise from the server). They stay in the list until you open another folder.
 
 Right-click a folder for:
 
@@ -139,7 +152,9 @@ Right-click a folder for:
 
 Click an email to show it in the reading pane. **Double-click** opens it in its own window.
 
-An opened email counts as read after 3 seconds, so quickly clicking through the list doesn't mark everything as read. You can change this to **Immediately**, another delay or **Only by hand** under **Settings → Senders & signatures → Mark as read**.
+An opened email counts as read after 3 seconds, so quickly clicking through the list doesn't mark everything as read. You can change this to **Immediately**, another delay or **Only by hand** under **Settings → Writing & reading → Mark as read**.
+
+In the list, an arrow next to the date shows emails you have **replied to** (↩) or **forwarded** (→). Agenoras sets this mark on the server after sending, so other mail programs see it too, and it shows marks set by them. Open such an email and a small grey line above it says when and to whom you replied ("You replied on … – to …"). **View reply** (or **View forward**) opens your reply in its own window. Agenoras finds replies in your sent emails, including ones written in another program, once it has loaded the Sent folder; until then the line shows without the link.
 
 Buttons in the email header: **Reply**, **Reply all**, **Forward**, a reaction button (😊), **Archive**, **Delete**.
 
@@ -180,6 +195,8 @@ Right-click an email (or a selection) to:
 - Archive, move or delete
 - Open in a new window
 - **Create rule …** from this email (see [Rules](#6-rules))
+- **Pin** the email to the [pin sidebar](#pin-sidebar) (subject and sender)
+- **Create event from it** or **Create task from it**: opens a new event or task with the subject as title and the sender, date and text of the email as description. Nothing is saved until you click Save.
 
 ### Conversations
 
@@ -205,7 +222,7 @@ The bar above the list filters the current folder:
 - the paper clip: emails with an attachment; the star: **Important** (starred) emails
 - **Filter …** narrows the list instantly by sender, recipient and subject. It only looks at the emails already loaded in this folder and doesn't search the message text. If nothing matches, click **Search everywhere for "…"** to run the full [search](#search); when there are matches, the link below the list does the same. **Esc** clears the field.
 
-Contacts, tasks and feeds have the same filter bar.
+Contacts, tasks and feeds have the same filter bar. To search all folders, accounts, appointments, contacts, tasks and feeds, use the [search in the title bar](#search).
 
 ### Categories
 
@@ -213,7 +230,7 @@ Categories are colored labels for your emails, such as "Customer" or "Invoice".
 
 - Create and edit them under **Settings → Categories**.
 - Assign one by right-clicking an email or dragging emails onto the category in the sidebar.
-- A category appears in the sidebar under **All inboxes** as soon as it contains emails. Click it to see all emails in that category.
+- A category appears in the sidebar under **All inboxes** as soon as it contains emails. Click it to see all emails in that category, from every folder. Recent emails show at once; older ones that Agenoras has not stored locally are looked up on the server.
 
 ### Attachments
 
@@ -225,11 +242,11 @@ Images from the internet are blocked by default, because they can tell the sende
 
 ### External senders
 
-If you turn on **Mark external senders** (Settings → Appearance), emails from outside your own domains get an **External** tag in the list and a warning in the email. You can add more internal domains there.
+If you turn on **Mark external senders** (Settings → Writing & reading), emails from outside your own domains get an **External** tag in the list and a warning in the email. You can add more internal domains there.
 
 ## 5. Writing emails
 
-Click **New email** in the sidebar. The compose window opens: by default as a separate window, or as a fixed popup over the main window (Settings → Appearance → **Compose**). The popup can't be moved; it stays in the middle of the main window, which is darkened behind it.
+Click **New email** in the sidebar. The compose window opens: by default as a separate window, or as a fixed popup over the main window (Settings → Writing & reading → **Compose**). The popup can't be moved; it stays in the middle of the main window, which is darkened behind it.
 
 The toolbar shows icons only; hover over an icon to see what it does.
 
@@ -265,7 +282,7 @@ If the offline AI is switched on (**Settings → AI**), the compose window has t
 
 - **Generate text** (✦): describe in a few words what the email should say, e.g. "accept, Tuesday 10 am works, ask about parking", and press **Generate text** or **Ctrl+Enter**. The AI writes a draft that you can **Insert into mail** or **Regenerate**. When replying, it knows the email you are answering and writes in its language, even if your description is in another language. If a signature is in the email, the AI leaves out the closing and your name.
 - **Suggest a subject** (✦ next to the subject): three suggestions based on your text.
-- **Proofread**: corrects spelling, grammar and punctuation of your own text (not the signature or the quoted email). With a selection only the selection is checked. **Ctrl+Z** undoes the changes.
+- **Proofread**: checks spelling, grammar and punctuation of your own text above the signature (not the signature or the quoted email); with a selection only the selection. The small model goes sentence by sentence, which keeps it accurate; Ministral 3 8B reads whole paragraphs. A panel above the text shows the progress, then every correction with the old words struck through and the new ones highlighted. After the AI, the spell checker looks at the words that are still unknown; its suggestions are listed as **Dictionary** and are unticked at first, because names and jargon are often unknown to it. Tick or untick what you want and click **Apply** – only then the text changes. **Ctrl+Z** undoes it.
 - **Translate**: select text and click the translate button. It is replaced by its translation into your default language (Settings → AI). **Ctrl+Z** undoes it.
 
 Generating takes about 5–20 seconds. The AI is small and can make mistakes – always read the text before sending.
@@ -293,7 +310,11 @@ The German placeholders (`{{Vorname}}` etc.) work as well.
 
 ### Sending and undo
 
-Click **Send →** or press **Ctrl+Shift+S**. If an undo delay is set (Settings → Senders & signatures → **Sending**, 0–5 seconds), you can click **Undo** (or press Esc / Ctrl+Z) during that time to stop the email and keep editing.
+Click **Send →** or press **Ctrl+Shift+S**. If an undo delay is set (Settings → Writing & reading → **Sending**, 0–5 seconds), you can click **Undo** (or press Esc / Ctrl+Z) during that time to stop the email and keep editing.
+
+After that the compose window closes right away and the email goes to the **Outbox**, which appears in the sidebar below *All inboxes* while something is in it. It is sent from there in the background, for all accounts; with "individually to each" you see how many are out already. Once the server has the email, it leaves the outbox and you hear the sent sound.
+
+If sending fails (e.g. no connection, server refuses), the email stays in the outbox with the reason, also after a restart. When the internet connection comes back, Agenoras sends failed emails once more by itself. You can also **Send again**, **Edit** it (it opens in a compose window again, with text, recipients and attachments) or **Discard** it. If you quit Agenoras while an email is still being sent, it asks first; the email stays in the outbox either way.
 
 If you close the compose window without sending, Agenoras asks whether you want to discard the draft.
 
@@ -343,9 +364,12 @@ When you receive an invitation, the email shows a card with **Accept**, **Maybe*
 
 Tasks are stored on your CalDAV server (e.g. Nextcloud Tasks or Apple Reminders lists), so they stay in sync with your other devices. Without a server, use a local account (see [First start](#2-first-start-adding-accounts)).
 
-- Type into the quick field at the top and press **Enter** to add a task.
-- Click a task to edit it: title, **List**, **Due** date and optional time, priority and notes.
-- Click the checkbox to mark a task as done.
+- Type into the quick field at the top of the list and press **Enter** to add a task.
+- A task can have a **start** and a **due** date, each with an optional time.
+- The list looks like the email list: checkbox, title, start – due date, the list's name (under *All*) and the first line of the note. The ring on the right shows the **progress** in percent.
+- Click a task to read it on the right. Like an email: the actions on top (done, **Edit**, a small progress slider, pin, delete), then the list, the title, start and due date and the note. Double-click opens the edit dialog directly. Email addresses in the note are links: click one to write to that person. If the note contains an email address (for example a task made from an email), **Reply** first asks which sender (account or alias) to use, then writes to that address, with the task's title as subject and the note quoted below.
+- **Right-click** a task for done / open again, progress (0, 25, 50, 75, 100 %), **Pin** (see [Pin sidebar](#pin-sidebar)), **Edit** and **Delete**.
+- Click the checkbox to mark a task as done; done means 100 %. Progress is saved on the server (PERCENT-COMPLETE), so other apps see it too.
 - The bar at the top switches between **Open** and **All** (including completed tasks). **Filter …** searches title and notes.
 - Tasks are grouped into **Overdue**, **Today**, **Upcoming** and **No date**.
 
@@ -393,13 +417,45 @@ Use **Edit** and **Remove** next to a feed to change or delete it. Removing a fe
 
 ### Reading
 
-- **Left**: your feeds with the number of unread articles; **All feeds** shows everything.
+- **Left**: your feeds with the number of unread articles; **All feeds** shows everything. Below each feed is its **Archive** folder.
 - **Middle**: the articles, newest first. The bar above them has **All** / **Unread** and a **Filter …** field that also searches the article text. The double-tick button marks all shown articles as read.
 - **Right**: the article. Opening it marks it as read. **Open in browser** shows the original page, **Mark as unread** marks it unread again.
+- **Archive**: **Archive** in the article moves it out of the list into the feed's **Archive** folder. It stays stored there and can be found in the search. You can also drag articles onto the Archive folder, and drag them back onto the feed; in the Archive folder, **Back to inbox** does the same. To move several at once, select them with Ctrl+click, Shift+click or Ctrl+A.
+- **Important**: click the star in the list or in the article. Starred articles appear under **Important** below *All feeds* (also when archived) and are kept even beyond the 300-article limit. You can also drag articles onto *Important*.
+- **Right-click** an article for **Open in browser**, **Pin**, **Mark as read / unread**, the **star** and **Archive**. The pin button in the article does the same as **Pin**. On a selection, read / unread, the star and Archive apply to all selected articles. For a single article, **Send as email**, **Create event from it** and **Create task from it** open a new email, event or task with the title, the summary and the link filled in.
+- Email addresses in an article are links: click one to write to that person.
 
 Feeds are refreshed when you open the view, with **F5** and every 30 minutes. Articles are stored on your computer (up to 300 per feed), so you can read them offline. Images in articles are loaded automatically; links open in your browser.
 
+Feed articles also show up in the [search](#search) in the title bar, archived ones marked **Archive**.
+
 ## 11. Settings
+
+Agenoras takes the language and the region formats (dates, numbers, first day of the week, German spelling) from your system; the settings are only needed if you want something different.
+
+The tabs, in this order: **General**, **Accounts**, **Senders & signatures**, **Writing & reading**, **Notifications**, **Appearance**, **Rules**, **Categories**, **Templates** and **AI**. Most settings apply at once; only senders, templates and rules have a **Save** button, because several fields belong together there.
+
+### General
+
+- **Language**: English, German or Match system (applies after a restart). Dates, times and numbers follow your system's region format, also when it differs from the language (e.g. English with Swiss formats: 01.11.2026, 14:05, 1'234.5)
+- **Week starts on**: by default like your region (Switzerland and Germany: Monday, USA: Sunday), or a fixed day
+- **Default email app**: make Agenoras the app for "Send email to …" links (see [The main window](#3-the-main-window))
+- **Open links**: **In the browser** (default) or **In Agenoras**: web links from emails, feeds, tasks and pins then open in a browser column on the right of the main window, with back, forward, reload, **Open in browser** and close. It runs separately from Agenoras in its own session, which is forgotten when Agenoras closes; websites can't use the camera, microphone or location there.
+- **Running in the background**: when closed, Agenoras keeps running in the tray
+- **Updates** are not here but in **About Agenoras** (gear menu): see below.
+- **Transfer settings**: **Export …** saves all settings into one file: email, calendar and address book accounts, feeds, senders and signatures, templates, rules, categories, distribution lists, notifications and the other preferences. Emails, the local copies and private accounts are not included. Passwords are left out unless you tick **Include passwords** and choose a password for the file (at least 8 characters); they are then encrypted with it (AES-256). On the other computer, **Import …** shows what the file contains and, if it carries passwords, asks for the file's password. Accounts that already exist there stay as they are; settings that refer to them are attached to them. Afterwards Agenoras restarts. Accounts imported without a password need it entered under **Settings → Accounts → Edit**.
+
+### Updates
+
+When Agenoras starts, it looks once for a new version. If there is one, a small window says so: **Update** downloads it and then offers **Restart now** (otherwise it is installed the next time Agenoras starts), **Later** asks again at the next start, **Skip this version** stays quiet until the version after it. With the .deb package, **Go to download** opens the download page instead, because installing a .deb needs administrator rights.
+
+Apart from that, **About Agenoras** in the gear menu shows your version, **Look for updates** checks at once, and **Look for new versions at start** switches the check at start off or on.
+
+### Accounts
+
+Add, edit and remove email, CalDAV and CardDAV accounts and RSS feeds (see [First start](#2-first-start-adding-accounts)). Under **Edit** you can also change an account's colour and make it private with a PIN.
+
+**Available offline** (IMAP accounts, under **Edit**): by default Agenoras stores only the newest emails of each folder and the ones you opened. Choose **Last 30 days**, **Last 90 days**, **Last year**, **Last 5 years** or **All emails** to keep every email of that period on your computer, with its text and a full-text index (subject, people, text and the names of attachments). Agenoras first loads the headers of all folders, so searching by sender and subject works offline right away, then the texts, newest first. Attachments are loaded only when you open them; of very large emails only the first 512 KB are stored. While it downloads, a line at the bottom of the sidebar shows the folder and how far it is. In the account dialog you see how many emails are stored and how much space they take; **Sync now** starts a run at once (otherwise every 30 minutes). As a guide: 100'000 emails take about 2–3 GB including the index, and a search in them takes well under a second. With **All emails**, once everything is stored, the search no longer asks this account's server at all. Going back to **Newest emails only** deletes the account's offline copy and gives the disk space back (the status line says how much); removing an account with an offline copy or a POP3 account does the same. Private accounts are not included. POP3 accounts keep all their emails locally anyway; there you choose instead whether to **Leave a copy on the server**.
 
 ### Senders & signatures
 
@@ -407,33 +463,21 @@ For each account you can set the sender name, add **aliases** (other addresses y
 
 With many senders the list stays compact: only one signature is open for editing at a time, each account can be collapsed, and from five senders on a search field finds a sender or signature quickly.
 
-Your mail server must allow you to send from an alias address. Also set here, under **Sending & reading**:
+Your mail server must allow you to send from an alias address.
 
+### Writing & reading
+
+- **Compose**: **Separate window** (default) or **Popup over the main window**
 - **Sending**: delay for undo (0–5 seconds)
 - **Mark as read**: when an opened email counts as read (immediately, after 1–10 seconds, or only by hand)
-
-### Templates
-
-Create, rename and delete email templates. A template saved from the compose window keeps its formatting; editing it here turns it into plain text.
-
-### Accounts
-
-Add, edit and remove email, CalDAV and CardDAV accounts and RSS feeds (see [First start](#2-first-start-adding-accounts)). Under **Edit** you can also change an account's colour and make it private with a PIN.
-
-### Categories
-
-Create categories, choose their colors, rename or delete them. Deleting a category keeps the emails.
-
-### Rules
-
-See [section 6](#6-rules).
+- **Spell check**: red underlines while writing and the dictionary part of proofreading – **Off**, **System language** or one language of your choice (on macOS the system's spell checker chooses the language itself)
+- **External emails**: mark external senders, additional internal domains
 
 ### Notifications
 
 - **Play a sound for new email**, with a default sound, volume and a sound per account
 - **Sound when sent**
 - **Desktop notification for new email** (when the window isn't in front), also per account
-- **Keep running in the background when closed** (tray icon)
 
 To use your own sounds, click **Open folder for your own sounds**, put `.ogg`, `.mp3` or `.wav` files into it and reopen the settings.
 
@@ -441,11 +485,19 @@ To use your own sounds, click **Open folder for your own sounds**, put `.ogg`, `
 
 - **Colour scheme**: Dark, Light or Match system
 - **Text size**: Small, Medium or Large
-- **Language**: English, German or Match system (applies after a restart)
-- **Week starts on**
 - **Show mailboxes as** name or email address
-- **Compose**: **Separate window** (default) or **Popup over the main window**
-- **External emails**: mark external senders, additional internal domains
+
+### Rules
+
+See [section 6](#6-rules).
+
+### Categories
+
+Create categories, choose their colors, rename or delete them. Changes are saved right away. Deleting a category asks first and keeps the emails.
+
+### Templates
+
+Create, rename and delete email templates. A template saved from the compose window keeps its formatting; editing it here turns it into plain text.
 
 ### AI
 
@@ -453,8 +505,9 @@ The optional offline AI writes email drafts, suggests subjects, proofreads and t
 
 - **Enable mini AI (offline)** and click **Download** next to the model. The model is [Ministral 3 3B](https://huggingface.co/mistralai/Ministral-3-3B-Instruct-2512) by Mistral AI (Apache 2.0), about 2 GB, downloaded once and checked with SHA-256. You can cancel the download or delete the model again here.
 - While working it needs about 3 GB of RAM; after 5 minutes without use the memory is freed again.
-- **AI language**: the language for generated texts and subject suggestions, independent of the app language – *Same as the mail*, German (Switzerland, with "ss"), German (Germany), English, French or Italian. Replies are always written in the language of the email you answer; for German, the spelling chosen here applies.
-- **Default translation**: the target language for **Translate** (right-click in an email, translate button when writing). All languages the model supports are available: German, English, French, Italian, Spanish, Portuguese, Dutch, Chinese, Japanese, Korean and Arabic.
+- On computers with 16 GB of memory or more, **Ministral 3 8B** is offered as well: more accurate, but about 2–3 times slower and about 7 GB of RAM while working (download about 4.7 GB). Pick the model you want to use; both can be downloaded and deleted separately.
+- **AI language**: the language for generated texts and subject suggestions, independent of the app language – *Same as the mail*, German (Switzerland, with "ss"), German (Germany), English, French or Italian. Replies are always written in the language of the email you answer. German follows the spelling of your region (Switzerland: "ss", Germany and Austria: "ß"), also with an English interface, unless you choose a German variant here. The same applies to proofreading and to translations into German.
+- **Default translation**: the target language for **Translate** (right-click in an email, translate button when writing); by default the system language. All languages the model supports are available: German, English, French, Italian, Spanish, Portuguese, Dutch, Chinese, Japanese, Korean and Arabic.
 
 ## 12. Keyboard shortcuts
 
@@ -502,7 +555,7 @@ Your data is stored here:
 - `settings.json` contains signatures, templates, rules and preferences. Back it up if you want to keep them.
 - `lists.json` holds your distribution lists. They exist only on this computer – back the file up.
 - `rss.json` holds your feeds (addresses and encrypted passwords for protected feeds).
-- `cache.db` is a local copy of your mail and feed articles for fast start and offline reading. You can delete it at any time; it is rebuilt from the server.
+- `cache.db` is a local copy of your mail, tasks and feed articles for fast start and offline reading. It is rebuilt from the server when deleted; what exists only here is lost then: the pin sidebar, and which feed articles are archived or starred.
 - `pop3.db` holds the mail of POP3 accounts. If the copy on the server is deleted, this is the only copy – back it up.
 - `local.db` holds local calendars, tasks and address books (accounts without a server). This is the only copy – back it up.
 - `ai.json` and the folder `ai-models` hold the AI settings and the downloaded model. Delete the model under **Settings → AI**.
@@ -510,6 +563,8 @@ Your data is stored here:
 HTML emails are shown in a protected area where scripts can't run. External content is only loaded when you allow it. Feed articles are shown in the same protected area; their images are loaded automatically.
 
 The offline AI runs only on your computer. Your texts are never sent anywhere; its only internet access is the one-time download of the model file from Hugging Face.
+
+Spell check: on Windows and Linux the dictionaries come from Google the first time a language is used (that's how Chromium, the engine inside Agenoras, works). With spell check set to **Off** (Settings → Writing & reading) nothing is downloaded.
 
 ## 14. Troubleshooting
 
@@ -526,10 +581,13 @@ This can happen after a system change or a new keyring. Enter the password again
 Someone or another device changed it at the same time. Refresh and make your change again.
 
 **"Access expired or revoked. Please sign in again"**
-The sign-in with Microsoft or Google is no longer valid, for example after a password change or when access was removed in the account settings. Open **Settings → Accounts → Edit** and click **Sign in again**.
+The sign-in with Microsoft is no longer valid, for example after a password change or when access was removed in the account settings. Open **Settings → Accounts → Edit** and click **Sign in again**.
 
 **Microsoft 365: sign-in works, but sending fails ("SmtpClientAuthentication is disabled")**
 Many companies turn off sending from mail programs. Your Microsoft 365 administrator has to enable **Authenticated SMTP** for your mailbox.
+
+**There is no "Sign in with Google" button**
+It is not enabled in the official downloads. Use an app password for Gmail.
 
 **One email account keeps losing its connection**
 Open **Settings → Accounts → Edit** and check the IMAP and SMTP server. Use the mail server your provider gives for mail programs, not your website's domain: the domain often points to the web server, not the mail server. Some providers also limit how many connections a mailbox may open at the same time. The warning sign in the title bar shows the exact error.

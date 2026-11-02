@@ -20,11 +20,16 @@ type ComposeAttachment =
 const cform = el<HTMLFormElement>('#form-compose');
 const cfield = (name: string) => cform.elements.namedItem(name) as HTMLInputElement;
 const editor = el<HTMLDivElement>('#editor');
+// No red underlines in the signature and the quoted original: not your text to correct.
+// Watched, because the signature is swapped when the sender changes.
+const noSpell = () => editor.querySelectorAll<HTMLElement>('[data-sig],[data-quote]').forEach((n) => (n.spellcheck = false));
+new MutationObserver(noSpell).observe(editor, { childList: true });
 const fromSelect = () => cform.elements.namedItem('from') as HTMLSelectElement;
 const recipients: Record<RecipField, Recipient[]> = { to: [], cc: [], bcc: [] };
 let composeAtts: ComposeAttachment[] = [];
 let fwdSource: { accountId: string; folder: string; uid: number } | null = null;
 let threadInfo: { inReplyTo?: string; references?: string[] } = {};
+let answerRef: (MailRef & { kind: 'reply' | 'forward' }) | undefined; // replied to / forwarded: marked after sending
 let identities: Identity[] = [];
 let templates: Template[] = [];
 let sendMode: 'all' | 'each' = 'all';
@@ -871,8 +876,10 @@ function initCompose(o: ComposeOpts): void {
   cfield('subject').value = o.subject ?? '';
   // Layout: space to write – signature – quote
   const text = o.body ? o.body.split(/\r?\n/).map((l) => `<p>${esc(l) || '<br>'}</p>`).join('') + '<p><br></p>' : '<p><br></p><p><br></p>';
-  editor.innerHTML = text + sigHtml(identity) + (o.quoteHtml ? `<div data-quote="1">${sanitizeHtml(o.quoteHtml)}</div>` : '');
+  // from the outbox: the content exactly as it was (signature and quote included)
+  editor.innerHTML = o.html ? sanitizeHtml(o.html, true) : text + sigHtml(identity) + (o.quoteHtml ? `<div data-quote="1">${sanitizeHtml(o.quoteHtml)}</div>` : '');
   threadInfo = { inReplyTo: o.inReplyTo, references: o.references };
+  answerRef = o.source && (o.mode === 'reply' || o.mode === 'replyAll' || o.mode === 'forward') ? { ...o.source, kind: o.mode === 'forward' ? 'forward' : 'reply' } : undefined;
 
   const fw = o.forward;
   fwdSource = fw ? { accountId: fw.accountId, folder: fw.folder ?? 'INBOX', uid: fw.uid } : null;
@@ -931,10 +938,6 @@ cform.addEventListener('keydown', (e) => {
   }
 });
 
-window.api.onSendProgress((done, total) => {
-  el('#send-progress').textContent = t('compose.progress', { done, total });
-});
-
 cform.addEventListener('submit', async (e) => {
   e.preventDefault();
   const mode = stickyEach ? 'each' : sendMode;
@@ -981,12 +984,12 @@ cform.addEventListener('submit', async (e) => {
   // a few seconds to undo, then really send
   errBox.textContent = '';
   if (!(await sendCountdown())) return;
+  // into the outbox: the window closes, the main process sends in the background
   const send = el<HTMLButtonElement>('#btn-send');
   send.disabled = true;
-  send.textContent = t('compose.sending');
   try {
     const main = build(single);
-    const res = await window.api.sendMail({
+    await window.api.outbox.send({
       identityId: fromSelect().value,
       to: recipients.to.map(fmt),
       cc: each ? [] : recipients.cc.map(fmt),
@@ -999,30 +1002,20 @@ cform.addEventListener('submit', async (e) => {
       forward: fwdSource && fwdIdx.length ? { ...fwdSource, indexes: fwdIdx } : undefined,
       extraAttachments: composeAtts.filter((a) => a.kind === 'data').map((a) => ({ filename: a.name, content: (a as { content: string }).content, contentType: (a as { contentType: string }).contentType })),
       individual: each ? recipients.to.map((r) => ({ to: fmt(r), ...build(r) })) : undefined,
+      draftHtml: sanitizeHtml(editor.innerHTML, true),
+      answers: answerRef,
     });
-    if (res.failed.length) {
-      // Failed ones stay in the field so they can be sent again
-      const failed = new Set(res.failed.map((f) => f.to));
-      recipients.to = recipients.to.filter((r) => failed.has(fmt(r)));
-      renderRecipients('to');
-      errBox.textContent = t('compose.partialFail', { sent: res.sent, failed: res.failed.length, list: res.failed.map((f) => `${f.to} (${f.message})`).join('; ') });
-      el('#send-progress').textContent = '';
-      return;
-    }
     sent = true;
-    await showSent();
-    await window.api.compose.done(each ? t('compose.sentEach', { n: res.sent }) : t('compose.sentAll', { n: all.length }));
+    await window.api.compose.done(t('outbox.queued'));
   } catch (err) {
     errBox.textContent = errMsg(err);
-  } finally {
     hideSendOverlay();
     send.disabled = false;
-    send.textContent = stickyEach ? t('compose.sendEachBtn') : t('compose.send');
   }
 });
 
 // Send with undo (circle runs for the configured delay)
-let undoMs = 2000; // Settings → Senders & signatures → delay (0–5 s)
+let undoMs = 2000; // Settings → Writing & reading → delay (0–5 s)
 const sendOverlay = document.createElement('div');
 sendOverlay.className = 'send-undo';
 sendOverlay.hidden = true;
@@ -1090,15 +1083,6 @@ function sendCountdown(): Promise<boolean> {
   });
 }
 
-// Show a check mark briefly, then the window closes
-function showSent(): Promise<void> {
-  window.api.compose.sent().catch(() => {}); // the "ding" comes from the main window
-  sendOverlay.className = 'send-undo sent';
-  sendOverlay.hidden = false;
-  sendOverlay.querySelector('.su-text')!.textContent = t('compose.sentShort');
-  sendOverlay.querySelector<HTMLButtonElement>('.su-undo')!.hidden = true;
-  return new Promise((r) => setTimeout(r, 650));
-}
 
 // Startup: load everything the window needs
 (async () => {

@@ -24,7 +24,8 @@ interface AiState {
   lang: string; // output language: auto | de-CH | de-DE | en | fr | it
   translateLang: string; // default translation target, '' = app language
   ready: boolean; // enabled and the active model is downloaded
-  models: { id: string; name: string; size: number; downloaded: boolean }[];
+  proofBySentence: boolean; // small model: sentence by sentence, bigger one: whole paragraphs
+  models: { id: string; name: string; size: number; downloaded: boolean; fits: boolean }[];
   download: { id: string; received: number; total: number } | null;
 }
 
@@ -82,6 +83,22 @@ interface OutgoingMail {
   forward?: { accountId: string; folder: string; uid: number; indexes: number[] };
   extraAttachments?: { filename: string; content: string; contentType: string }[];
   individual?: { to: string; subject: string; text: string; html?: string }[];
+  draftHtml?: string;
+  answers?: MailRef & { kind: 'reply' | 'forward'; messageId?: string };
+}
+
+interface OutboxItem {
+  id: string;
+  accountId: string;
+  from: string;
+  to: string[];
+  subject: string;
+  status: 'sending' | 'failed';
+  done: number;
+  total: number;
+  error: string;
+  created: string;
+  editable: boolean;
 }
 
 interface SendResult {
@@ -139,6 +156,8 @@ interface ComposeOpts {
   forward?: { accountId: string; folder: string; uid: number; attachments: { filename: string; size: number }[] };
   files?: PickedFile[];
   attachData?: { filename: string; content: string; contentType: string }[]; // e.g. an event as .ics
+  html?: string; // the whole editor content as it was (a mail from the outbox, signature included)
+  source?: MailRef & { messageId?: string }; // the mail replied to or forwarded – gets marked after sending
 }
 
 interface MailSummary {
@@ -156,6 +175,8 @@ interface MailSummary {
   messageId?: string;
   inReplyTo?: string;
   flagged?: boolean;
+  answered?: boolean;
+  forwarded?: boolean;
   toAddress?: string;
 }
 
@@ -254,6 +275,8 @@ interface RssItem {
   author: string;
   snippet: string;
   read: boolean;
+  archived?: boolean;
+  flagged?: boolean;
 }
 
 interface CalAccount {
@@ -350,11 +373,27 @@ interface Task {
   listId: string;
   title: string;
   notes: string;
+  start: string;
   due: string;
   done: boolean;
   completed: string;
   priority: Priority;
+  percent: number;
   created: string;
+}
+
+// Pin sidebar: a copy of a task or feed article for reading
+interface PinItem {
+  key: string; // task:<id> | feed:<key> | mail:<account>|<folder>|<uid>
+  kind: 'task' | 'feed' | 'mail';
+  title: string;
+  text: string;
+  meta: { text: string; cls?: string }[];
+  color: string;
+  link?: string;
+  done?: boolean;
+  collapsed?: boolean;
+  mail?: MailRef;
 }
 
 interface TaskInput {
@@ -362,9 +401,11 @@ interface TaskInput {
   id?: string;
   title: string;
   notes: string;
+  start?: string;
   due: string;
   done: boolean;
   priority: Priority;
+  percent?: number;
 }
 
 interface AddressBookInfo {
@@ -416,7 +457,7 @@ interface DavAccountInput {
 }
 
 interface Window {
-  i18n: { lang: string; locale: string; strings: Record<string, string>; weekStart?: number };
+  i18n: { lang: string; locale: string; strings: Record<string, string>; weekStart?: number; regionWeekStart?: number; version?: string };
   api: {
       appInfo(): Promise<{ version: string; electron: string; chrome: string; node: string; platform: string }>;
     platform: string;
@@ -478,12 +519,14 @@ interface Window {
     junkToTrash(accountId: string): Promise<number>;
     cachedMail(accountId: string | null, folder?: string): Promise<MailSummary[]>;
     listMail(accountId: string | null, folder?: string): Promise<{ mails: MailSummary[]; errors: { accountId: string; message: string }[] }>;
+    olderMail(accountId: string | null, folder: string, before: Record<string, number>): Promise<{ mails: MailSummary[]; done: string[] }>;
     getMail(accountId: string, folder: string, uid: number, loadImages?: boolean, markRead?: boolean): Promise<MailDetail>;
     setSeen(accountId: string, folder: string, uids: number[], seen: boolean): Promise<void>;
     setFlagged(accountId: string, folder: string, uids: number[], flagged: boolean): Promise<void>;
     flaggedMails(): Promise<{ mails: MailSummary[]; errors: { accountId: string; message: string }[] }>;
     cachedFlagged(): Promise<MailSummary[]>;
     mailsByMessageIds(ids: string[]): Promise<MailSummary[]>;
+    findByMessageIds(ids: string[]): Promise<{ found: number; missing: number }>;
     knownAddresses(): Promise<{ name: string; address: string }[]>;
     searchMail(accountId: string | null, folder: string | null, query: string): Promise<{ mails: MailSummary[]; errors: { accountId: string; message: string }[] }>;
     searchCachedMail(accountId: string | null, folder: string | null, query: string): Promise<MailSummary[]>;
@@ -496,8 +539,51 @@ interface Window {
       open(ref: MailRef): Promise<void>;
       init(): Promise<MailRef | null>;
     };
-    sendMail(mail: OutgoingMail): Promise<SendResult>;
-    onSendProgress(cb: (done: number, total: number) => void): void;
+    spell: {
+      languages(): Promise<string[]>;
+      check(words: string[]): { word: string; suggestions: string[] }[];
+    };
+    web: {
+      external(url: string): Promise<void>;
+      onOpen(cb: (url: string) => void): void;
+    };
+    pins: {
+      list(): Promise<PinItem[]>;
+      add(item: PinItem): Promise<void>;
+      remove(key: string): Promise<void>;
+      toggle(key: string): Promise<void>;
+      update(items: PinItem[]): Promise<void>;
+      onChanged(cb: (items: PinItem[]) => void): void;
+    };
+    transfer: {
+      exportTo(password: string): Promise<string | null>;
+      pick(): Promise<{ accounts: number; calendars: number; contacts: number; feeds: number; identities: number; rules: number; templates: number; hasSecrets: boolean; exported: string } | null>;
+      importNow(password: string): Promise<{ added: number; skipped: number; withoutPassword: number }>;
+    };
+    ctx: {
+      onText(cb: (p: { x: number; y: number; spell: { word: string; suggestions: string[] } | null; editable: boolean; can: { cut: boolean; copy: boolean; paste: boolean } }) => void): void;
+      act(act: 'replace' | 'learn' | 'cut' | 'copy' | 'paste' | 'selectAll', word?: string): Promise<void>;
+    };
+    update: {
+      state(): Promise<UpdateState>;
+      check(): Promise<void>;
+      get(): Promise<void>;
+      install(): Promise<void>;
+      onState(cb: (s: UpdateState) => void): void;
+    };
+    offline: {
+      status(): Promise<OfflineProgress>;
+      now(): Promise<void>;
+      onProgress(cb: (p: OfflineProgress) => void): void;
+    };
+    outbox: {
+      send(mail: OutgoingMail): Promise<string>;
+      list(): Promise<OutboxItem[]>;
+      retry(id: string): Promise<void>;
+      discard(id: string): Promise<void>;
+      edit(id: string): Promise<void>;
+      onChanged(cb: (items: OutboxItem[]) => void): void;
+    };
     onStatus(cb: (text: string) => void): void;
     compose: {
       open(opts: ComposeOpts): Promise<void>;
@@ -508,9 +594,9 @@ interface Window {
       onDim(cb: (on: boolean) => void): void;
     };
     settings: {
-      get(): Promise<{ identities: Identity[]; templates: Template[]; theme: 'dark' | 'light' | 'system'; notify?: NotifySettings; labels?: MailLabel[]; mailLabels?: Record<string, string[]>; uiScale?: 'small' | 'medium' | 'large'; language?: string; weekStart?: number; sendDelay?: number; readDelay?: number; composeMode?: 'window' | 'popup'; externalMark?: boolean; internalDomains?: string[]; accountLabel?: 'name' | 'email'; rules?: MailRule[] }>;
+      get(): Promise<{ identities: Identity[]; templates: Template[]; theme: 'dark' | 'light' | 'system'; notify?: NotifySettings; labels?: MailLabel[]; mailLabels?: Record<string, string[]>; uiScale?: 'small' | 'medium' | 'large'; language?: string; weekStart?: number; sendDelay?: number; readDelay?: number; composeMode?: 'window' | 'popup'; externalMark?: boolean; internalDomains?: string[]; accountLabel?: 'name' | 'email'; rules?: MailRule[]; spellcheck?: string; linkOpen?: 'browser' | 'agenoras'; offline?: Record<string, number>; autoUpdate?: boolean; skipVersion?: string }>;
       saveLabels(list: MailLabel[]): Promise<MailLabel[]>;
-      savePrefs(p: { uiScale?: 'small' | 'medium' | 'large'; language?: string; weekStart?: number; sendDelay?: number; readDelay?: number; composeMode?: 'window' | 'popup'; externalMark?: boolean; internalDomains?: string[]; accountLabel?: 'name' | 'email' }): Promise<{ restartNeeded: boolean }>;
+      savePrefs(p: { uiScale?: 'small' | 'medium' | 'large'; language?: string; weekStart?: number; sendDelay?: number; readDelay?: number; composeMode?: 'window' | 'popup'; externalMark?: boolean; internalDomains?: string[]; accountLabel?: 'name' | 'email'; spellcheck?: string; linkOpen?: 'browser' | 'agenoras'; offline?: Record<string, number>; autoUpdate?: boolean; skipVersion?: string }): Promise<{ restartNeeded: boolean }>;
       saveRules(list: MailRule[]): Promise<MailRule[]>;
       runRules(accountId: string | null): Promise<{ matched: number; moved: number }>;
       languages(): Promise<string[]>;
@@ -548,7 +634,7 @@ interface Window {
     tasks: {
       cached(): Promise<{ lists: TaskList[]; tasks: Task[] }>;
       list(): Promise<{ lists: TaskList[]; tasks: Task[]; errors: { accountId: string; message: string }[] }>;
-      save(input: TaskInput): Promise<void>;
+      save(input: TaskInput): Promise<{ id: string; tasks: Task[] | null }>;
       delete(id: string): Promise<void>;
     };
     lists: {
@@ -566,6 +652,8 @@ interface Window {
       article(key: string): Promise<string>;
       search(query: string): Promise<RssItem[]>;
       setRead(keys: string[], read: boolean): Promise<void>;
+      setArchived(keys: string[], archived: boolean): Promise<void>;
+      setFlagged(keys: string[], flagged: boolean): Promise<void>;
     };
     contacts: {
       listAccounts(): Promise<CalAccount[]>;
@@ -581,6 +669,8 @@ interface Window {
     onNewMail(cb: (accountId: string, grew: boolean) => void): void;
     onOpenMail(cb: (ref: MailRef) => void): void;
     onCreate(cb: (kind: 'event' | 'task' | 'contact') => void): void;
+    onAnswered(cb: (ref: MailRef & { kind: 'reply' | 'forward' }) => void): void;
+    answeredInfo(messageId: string): Promise<{ date: string; kind: 'reply' | 'forward'; to: string[]; ref?: MailRef }[]>;
     onMailSent(cb: () => void): void;
     sounds: {
       list(): Promise<{ id: string; name: string }[]>;
@@ -588,4 +678,30 @@ interface Window {
       openFolder(): Promise<void>;
     };
   };
+}
+
+// Offline copy of all mails of a period (see main/offline.ts)
+interface OfflineProgress {
+  state: 'off' | 'idle' | 'running' | 'error';
+  phase?: 'headers' | 'bodies';
+  account?: string;
+  folder?: string;
+  done: number;
+  total: number;
+  mails: number;
+  bodies: number;
+  bytes: number;
+  perAccount: Record<string, { mails: number; bodies: number; bytes: number }>;
+  error?: string;
+  finished?: string;
+}
+
+// Updates (see main/updater.ts)
+interface UpdateState {
+  state: 'off' | 'idle' | 'checking' | 'none' | 'available' | 'downloading' | 'ready' | 'error';
+  version?: string;
+  percent?: number;
+  error?: string;
+  self?: boolean;
+  announce?: boolean;
 }

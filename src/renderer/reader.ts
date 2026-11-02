@@ -113,8 +113,39 @@ function attachmentsHtml(msg: MailDetail): string {
 }
 
 // Header: account · folder, subject, sender with picture
+// "You replied on …" above an opened mail (filled in afterwards, see fillAnswered)
+function answeredHtml(): string {
+  return '<div class="answered-note" hidden></div>';
+}
+
+async function fillAnswered(box: ParentNode, msg: MailDetail, flagged: { answered?: boolean; forwarded?: boolean } | undefined): Promise<void> {
+  const note = box.querySelector<HTMLElement>('.answered-note');
+  if (!note) return;
+  const list = msg.messageId ? await window.api.answeredInfo(msg.messageId).catch(() => []) : [];
+  const last = list[0];
+  const who = (to: string[]) => (to.length > 2 ? `${to.slice(0, 2).map(nameOf).join(', ')} +${to.length - 2}` : to.map(nameOf).join(', '));
+  let text = '';
+  if (last) text = t(last.kind === 'forward' ? 'mail.forwardedOn' : 'mail.answeredOn', { date: fmtLong(last.date), to: who(last.to) });
+  else if (flagged?.answered) text = t('mail.answeredFlag');
+  else if (flagged?.forwarded) text = t('mail.forwardedFlag');
+  if (!text) return;
+  const more = list.length > 1 ? ` <span class="more">${esc(t('mail.answeredMore', { n: list.length - 1 }))}</span>` : '';
+  // the reply itself opens in its own window
+  const link = last?.ref ? ` · <button type="button" class="link" data-answer-ref="${esc(JSON.stringify(last.ref))}">${esc(t(last.kind === 'forward' ? 'mail.showForward' : 'mail.showReply'))}</button>` : '';
+  note.innerHTML = `${svgIco(last?.kind === 'forward' || (!last && flagged?.forwarded) ? '<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>' : '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>', 12)}<span>${esc(text)}${more}${link}</span>`;
+  note.hidden = false;
+}
+
+document.addEventListener('click', (e) => {
+  const raw = (e.target as HTMLElement).closest<HTMLElement>('[data-answer-ref]')?.dataset.answerRef;
+  if (raw) void window.api.mailview.open(JSON.parse(raw) as MailRef);
+});
+
+// "Anna Muster <anna@x.ch>" → "Anna Muster"
+const nameOf = (s: string) => /^"?([^"<]+?)"?\s*</.exec(s)?.[1]?.trim() || s.replace(/[<>]/g, '');
+
 function metaHtml(msg: MailDetail, accLine: string, accColor: string, extra = ''): string {
-  return `<div class="meta">
+  return `${answeredHtml()}<div class="meta">
       <div class="acc" style="color:${accColor}">${esc(accLine)}${extra ? ` <span class="lbls">${extra}</span>` : ''}</div>
       <h2>${esc(msg.subject || t('mail.noSubject'))} ${priorityBadge(msg.priority)}</h2>
       <div class="who-row">
@@ -128,7 +159,7 @@ function metaHtml(msg: MailDetail, accLine: string, accColor: string, extra = ''
 
 // Recipients: clickable, each with its own menu (e.g. write to everyone in Cc individually)
 let readerOwn = new Set<string>(); // own addresses (accounts + aliases) – do not suggest as recipients
-// Mark external senders (Settings → Appearance); only active when switched on
+// Mark external senders (Settings → Writing & reading); only active when switched on
 // Show mailboxes by name or address (Settings → Appearance)
 let accLabelMode: 'name' | 'email' = 'email';
 const accLabel = (a?: { name: string; email: string } | null) => (!a ? '' : accLabelMode === 'name' && a.name ? a.name : a.email);
@@ -193,6 +224,13 @@ function recipientsHtml(msg: MailDetail): string {
     </div>`;
 }
 
+// Writing to someone from a mail: send from the account (and alias) that mail belongs to,
+// for a sent mail that is the address it was sent from
+function senderOf(msg: MailDetail | null): Pick<ComposeOpts, 'accountId' | 'matchAddresses'> {
+  if (!msg) return {};
+  return { accountId: msg.accountId, matchAddresses: [msg.fromAddress, ...msg.toList, ...msg.ccList] };
+}
+
 // Click on a person: small menu (write, add contact, copy address)
 const personPop = document.createElement('div');
 personPop.className = 'ctx-menu person-pop';
@@ -236,7 +274,7 @@ personPop.addEventListener('click', async (e) => {
   const email = personPop.dataset.email!;
   const name = personPop.dataset.name || '';
   personPop.hidden = true;
-  if (what === 'mail') window.api.compose.open({ to: [name ? `${name} <${email}>` : email] });
+  if (what === 'mail') window.api.compose.open({ ...senderOf(bodyMsg), to: [name ? `${name} <${email}>` : email] });
   else if (what === 'contact') readerCreateContact?.(name, email);
   else if (what === 'copy') await navigator.clipboard.writeText(email).catch(() => {});
   else if (what === 'copyName') await navigator.clipboard.writeText(name).catch(() => {});
@@ -264,7 +302,7 @@ document.addEventListener('click', (e) => {
     // to all participants except myself
     const picked = [...document.querySelectorAll<HTMLElement>('#people-pick .pp-row:not(.own)')].map((b) => (b.dataset.pname ? `${b.dataset.pname} <${b.dataset.person}>` : b.dataset.person!));
     if (!picked.length) return;
-    window.api.compose.open({ to: picked, sendMode: pp === 'each' ? 'each' : 'all' });
+    window.api.compose.open({ ...senderOf(bodyMsg), to: picked, sendMode: pp === 'each' ? 'each' : 'all' });
   }
 });
 
@@ -349,9 +387,15 @@ function withPrefix(prefix: 'Re' | 'Fwd', subject: string): string {
   return already.test(subject.trim()) ? subject : `${prefix}: ${subject}`;
 }
 
-// Always quote the original as text – foreign HTML never goes into the editor
+// The original keeps its layout (paragraphs, lists, tables, bold …), but only through the allow list:
+// no scripts, forms, external images or positioning. Plain-text mails as text.
+function quotedBody(msg: MailDetail): string {
+  const html = msg.html?.trim() ? sanitizeHtml(msg.html) : '';
+  return html && new DOMParser().parseFromString(html, 'text/html').body.textContent?.trim() ? html : textToHtml(plainText(msg));
+}
+
 function quoteHtml(msg: MailDetail): string {
-  return `<p>${esc(t('quote.header', { date: fmtLong(msg.date), name: msg.fromName, email: msg.fromAddress }))}</p><blockquote style="margin: 0 0 0 4px; padding-left: 10px; border-left: 2px solid #C1C8BE; color: #555">${textToHtml(plainText(msg))}</blockquote>`;
+  return `<p>${esc(t('quote.header', { date: fmtLong(msg.date), name: msg.fromName, email: msg.fromAddress }))}</p><blockquote style="margin: 0 0 0 4px; padding-left: 10px; border-left: 2px solid #C1C8BE">${quotedBody(msg)}</blockquote>`;
 }
 
 function replyOpts(msg: MailDetail, all: boolean): ComposeOpts {
@@ -368,6 +412,7 @@ function replyOpts(msg: MailDetail, all: boolean): ComposeOpts {
     inReplyTo: msg.messageId,
     references: [...msg.references, msg.messageId].filter(Boolean),
     mode: all ? 'replyAll' : 'reply',
+    source: { accountId: msg.accountId, folder: msg.folder, uid: msg.uid, messageId: msg.messageId },
   };
 }
 
@@ -383,9 +428,10 @@ function forwardOpts(msg: MailDetail): ComposeOpts {
     .join('<br>');
   return {
     accountId: msg.accountId,
+    source: { accountId: msg.accountId, folder: msg.folder, uid: msg.uid, messageId: msg.messageId },
     matchAddresses: [...msg.toList, ...msg.ccList],
     subject: withPrefix('Fwd', msg.subject),
-    quoteHtml: `<p>${header}</p>${textToHtml(plainText(msg))}`,
+    quoteHtml: `<p>${header}</p>${quotedBody(msg)}`,
     mode: 'forward',
     forward: { accountId: msg.accountId, folder: msg.folder, uid: msg.uid, attachments: msg.attachments.map((a) => ({ filename: a.filename, size: a.size })) },
   };

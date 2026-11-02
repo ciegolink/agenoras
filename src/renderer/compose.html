@@ -105,6 +105,16 @@
         <button type="button" class="btn primary sm" id="btn-ai-insert" data-i18n="ai.insert"></button>
       </div>
     </div>
+    <div class="ai-write ai-proof" id="ai-proof" hidden>
+      <div class="ai-write-head"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 16 7.5 6 11 16M5.2 12.5h4.6"/><path d="m13 15 3 3 6-7"/></svg><b data-i18n="ai.proofread"></b><span class="hint" id="ai-proof-count"></span></div>
+      <div class="ai-busy" id="ai-proof-busy" hidden><span class="ai-spin" aria-hidden="true"></span><span id="ai-proof-step"></span><button type="button" class="btn ghost sm" id="btn-ai-proof-stop" data-i18n="btn.cancel"></button></div>
+      <div class="ai-proof-list" id="ai-proof-list"></div>
+      <div class="ai-write-row" id="ai-proof-actions" hidden>
+        <span class="hint" data-i18n="ai.proofHint"></span>
+        <button type="button" class="btn ghost sm" id="btn-ai-proof-discard" data-i18n="ai.proofDiscard"></button>
+        <button type="button" class="btn primary sm" id="btn-ai-proof-apply" data-i18n="ai.proofApply"></button>
+      </div>
+    </div>
     <div class="editor" id="editor" contenteditable="true" role="textbox" aria-multiline="true" data-i18n-aria="compose.message" spellcheck="true"></div>
   </div>
 

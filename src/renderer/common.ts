@@ -5,7 +5,7 @@ const el = <T extends HTMLElement = HTMLElement>(sel: string) => document.queryS
 // Language (strings from lang/<language>.json, delivered by the main process)
 const I18N = window.i18n ?? { lang: 'en', locale: 'en-GB', strings: {} };
 const LOCALE = I18N.locale;
-// First day of the week (1 = Monday, 0 = Sunday, 6 = Saturday) – Settings → Appearance
+// First day of the week (1 = Monday, 0 = Sunday, 6 = Saturday) – Settings → General
 let WEEK_START = I18N.weekStart ?? 1;
 
 // t('key') → text; {name} placeholders are replaced. If a key is missing, the key itself is shown.
@@ -33,6 +33,28 @@ const WIN_ICONS = {
     '<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect x="1" y="3" width="6" height="6" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M3 3V1h6v6H7" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>',
   close: '<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1 1l8 8M9 1L1 9" stroke="currentColor" stroke-width="1.2"/></svg>',
 };
+
+// E-mail addresses in already escaped plain text → clickable, opens a new mail (handled in renderer.ts)
+const MAIL_IN_TEXT = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g;
+const linkEmails = (html: string) => html.replace(MAIL_IN_TEXT, (a) => `<button type="button" class="mail-link" data-mailto="${a}" title="${esc(t('people.write'))}">${a}</button>`);
+
+// Web addresses in plain text (https://…, www.…); a closing bracket or punctuation at the end is not part of it
+const URL_IN_TEXT = /\b(?:https?:\/\/|www\.)[^\s<>"]+[^\s<>".,;:!?)\]'’]/gi;
+
+// Links and e-mail addresses in already escaped plain text: links open in the browser, addresses a new mail
+function linkText(html: string): string {
+  return html
+    .split(/(\b(?:https?:\/\/|www\.)[^\s<>"]+[^\s<>".,;:!?)\]'’])/gi)
+    .map((part, i) => {
+      if (i % 2 === 0) return linkEmails(part);
+      const href = /^www\./i.test(part) ? `https://${part}` : part;
+      return `<a class="mail-link" href="${href}" target="_blank" rel="noopener" title="${href}">${part}</a>`;
+    })
+    .join('');
+}
+
+// Pin (pin sidebar)
+const PIN_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4h6l-1 6 4 4H6l4-4z"/><path d="M12 14v7"/></svg>';
 
 // Logo in the title bar: build/logo.png if present (otherwise the "Agenoras." wordmark)
 function setupLogo(): void {
@@ -234,6 +256,150 @@ const trLangName = (code: string) => {
 // Default target: Settings → AI, otherwise the app language
 function translateTarget(state?: AiState | null): string {
   if (state?.translateLang && TR_LANGS.includes(state.translateLang)) return state.translateLang;
-  const l = LOCALE.slice(0, 2).toLowerCase();
+  return systemTrLang();
+}
+
+// No target chosen: the system (app) language
+function systemTrLang(): string {
+  const l = I18N.lang.slice(0, 2).toLowerCase();
   return TR_LANGS.includes(l) ? l : 'en';
 }
+
+// Badge on the view buttons at the bottom of the sidebar. Tasks: new since the view was last open
+const seenKeys = (view: string): Set<string> | null => {
+  try {
+    const raw = localStorage.getItem(`seen.${view}`);
+    return raw ? new Set(JSON.parse(raw) as string[]) : null;
+  } catch {
+    return null;
+  }
+};
+const saveSeen = (view: string, keys: Iterable<string>) => {
+  try {
+    localStorage.setItem(`seen.${view}`, JSON.stringify([...keys]));
+  } catch {
+    /* ignore */
+  }
+};
+
+function navBadge(view: string, keys: string[]): void {
+  const btn = document.querySelector<HTMLElement>(`.view-btn[data-view="${view}"]`);
+  if (!btn) return;
+  let seen = seenKeys(view);
+  // first run or view open: everything there now counts as seen
+  if ((!seen && keys.length) || document.querySelector<HTMLElement>('.app')?.dataset.view === view) {
+    saveSeen(view, keys);
+    seen = new Set(keys);
+  }
+  paintNavBadge(view, seen ? keys.filter((k) => !seen.has(k)).length : 0);
+}
+
+function paintNavBadge(view: string, n: number): void {
+  const btn = document.querySelector<HTMLElement>(`.view-btn[data-view="${view}"]`);
+  if (!btn) return;
+  let badge = btn.querySelector<HTMLElement>('.nav-new');
+  if (!badge) {
+    badge = document.createElement('span');
+    badge.className = 'nav-new';
+    btn.append(badge);
+  }
+  badge.textContent = n > 99 ? '99+' : String(n);
+  badge.hidden = !n;
+  badge.title = n ? t(view === 'rss' ? 'nav.unread' : 'nav.new', { n }) : '';
+}
+
+// Own new items (quick add, converted mail …) are not news
+function markNavSeen(view: string, keys: string[]): void {
+  const seen = seenKeys(view);
+  if (!seen || !keys.length) return;
+  keys.forEach((k) => seen.add(k));
+  saveSeen(view, seen);
+}
+
+// Save button while saving: disabled with a turning circle
+function savingBtn(btn: HTMLButtonElement, on: boolean): void {
+  btn.disabled = on;
+  btn.classList.toggle('saving', on);
+}
+
+// Context menus: an entry that opens a submenu to the side (on hover, or click / Enter)
+function ctxSub(icon: string, label: string, inner: string): string {
+  return `<div class="ctx-subwrap"><button type="button" role="menuitem" aria-haspopup="menu" class="ctx-more">${icon}<span>${esc(label)}</span><span class="chev">›</span></button><div class="ctx-flyout" role="menu">${inner}</div></div>`;
+}
+
+function wireSubmenus(menu: HTMLElement): void {
+  // open to the left / higher up when there is no room
+  const place = (wrap: HTMLElement) => {
+    const fly = wrap.querySelector<HTMLElement>('.ctx-flyout');
+    if (!fly) return;
+    fly.classList.remove('left');
+    fly.style.top = '';
+    const r = fly.getBoundingClientRect();
+    if (r.right > innerWidth - 6) fly.classList.add('left');
+    if (r.bottom > innerHeight - 6) fly.style.top = `${Math.max(-wrap.getBoundingClientRect().top + 6, innerHeight - 6 - r.bottom - 4)}px`;
+  };
+  menu.addEventListener('mouseover', (e) => {
+    const wrap = (e.target as HTMLElement).closest<HTMLElement>('.ctx-subwrap');
+    menu.querySelectorAll<HTMLElement>('.ctx-subwrap.open').forEach((w) => w !== wrap && w.classList.remove('open'));
+    if (wrap && !wrap.classList.contains('open')) {
+      wrap.classList.add('open');
+      place(wrap);
+    }
+  });
+  menu.addEventListener('click', (e) => {
+    const more = (e.target as HTMLElement).closest<HTMLElement>('.ctx-more');
+    if (!more) return;
+    e.stopPropagation();
+    const wrap = more.parentElement!;
+    wrap.classList.add('open');
+    place(wrap);
+    wrap.querySelector<HTMLElement>('.ctx-flyout button')?.focus();
+  });
+}
+
+// Right click in text fields: spelling suggestions and editing, drawn like the other menus.
+// A popover lies in the top layer, so it also shows above open dialogs (task, settings …).
+const textMenu = document.createElement('div');
+textMenu.className = 'ctx-menu text-menu';
+textMenu.setAttribute('role', 'menu');
+textMenu.popover = 'manual';
+document.body.appendChild(textMenu);
+
+const hideTextMenu = () => {
+  if (textMenu.matches(':popover-open')) textMenu.hidePopover();
+};
+
+window.api.ctx.onText((p) => {
+  const item = (act: string, label: string, enabled = true, word = '') =>
+    `<button type="button" role="menuitem" data-text-act="${act}" data-word="${esc(word)}"${enabled ? '' : ' disabled'}><span>${esc(label)}</span></button>`;
+  const parts: string[] = [];
+  if (p.spell) {
+    parts.push(...p.spell.suggestions.map((w) => item('replace', w, true, w).replace('<span>', '<span class="sugg">')));
+    if (!p.spell.suggestions.length) parts.push(`<div class="ctx-sub">${esc(t('ctx.noSuggestions'))}</div>`);
+    parts.push(item('learn', t('ctx.addToDictionary'), true, p.spell.word), '<hr>');
+  }
+  if (p.editable) parts.push(item('cut', t('ctx.cut'), p.can.cut), item('copy', t('ctx.copy'), p.can.copy), item('paste', t('ctx.paste'), p.can.paste), '<hr>', item('selectAll', t('ctx.selectAll')));
+  else parts.push(item('copy', t('ctx.copy')));
+  textMenu.innerHTML = parts.join('');
+  textMenu.showPopover();
+  const r = textMenu.getBoundingClientRect();
+  textMenu.style.left = `${Math.max(4, Math.min(p.x, innerWidth - r.width - 6))}px`;
+  textMenu.style.top = `${Math.max(4, Math.min(p.y, innerHeight - r.height - 6))}px`;
+});
+
+// keep the focus (and the selection) in the text field while clicking the menu
+textMenu.addEventListener('mousedown', (e) => e.preventDefault());
+textMenu.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-text-act]');
+  if (!b || b.disabled) return;
+  hideTextMenu();
+  void window.api.ctx.act(b.dataset.textAct as 'replace', b.dataset.word || undefined);
+});
+document.addEventListener('mousedown', (e) => {
+  if (!textMenu.contains(e.target as Node)) hideTextMenu();
+}, true);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') hideTextMenu();
+}, true);
+window.addEventListener('blur', hideTextMenu);
+document.addEventListener('scroll', hideTextMenu, true);

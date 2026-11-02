@@ -439,7 +439,8 @@ function applyAllDay(allDay: boolean): void {
   }
 }
 
-function openEventDialog(ev: CalEvent | null, start?: Date, end?: Date): void {
+// prefill: new event from a mail or feed article
+function openEventDialog(ev: CalEvent | null, start?: Date, end?: Date, prefill?: { title: string; description: string }): void {
   const writable = calendars.filter((c) => !hiddenCals.has(c.id));
   if (!ev && !writable.length) {
     setCalStatus(t(calendars.length ? 'cal.showOne' : 'cal.addAccountFirst'));
@@ -471,6 +472,8 @@ function openEventDialog(ev: CalEvent | null, start?: Date, end?: Date): void {
     }
   } else {
     el('#event-title').innerHTML = t('cal.newTitle');
+    evField('title').value = prefill?.title ?? '';
+    (evForm.elements.namedItem('description') as HTMLTextAreaElement).value = prefill?.description ?? '';
     const s = start ?? new Date(new Date().setMinutes(0, 0, 0) + 3600000);
     evField('allDay').checked = false;
     evField('start').type = evField('end').type = 'datetime-local';
@@ -538,7 +541,7 @@ evForm.addEventListener('submit', async (e) => {
     if (people.length && idn && evField('sendInvites').checked) invite = { identityId: idn.id };
   }
   const btn = el<HTMLButtonElement>('#btn-event-save');
-  btn.disabled = true;
+  savingBtn(btn, true);
   el('#event-error').textContent = '';
   try {
     const res = await window.api.cal.saveEvent(input, invite);
@@ -548,7 +551,7 @@ evForm.addEventListener('submit', async (e) => {
   } catch (err) {
     el('#event-error').textContent = errMsg(err);
   } finally {
-    btn.disabled = false;
+    savingBtn(btn, false);
   }
 });
 
@@ -917,7 +920,7 @@ el('#cal-mini').addEventListener('click', (e) => {
   loadEvents();
 });
 
-// Week start changed (Settings → Appearance)
+// Week start changed (Settings → General)
 function applyWeekStart(): void {
   weekStart = weekStartOf(weekStart);
   if (calLoaded) loadEvents();
