@@ -264,7 +264,7 @@ function renderWeek(): void {
           return `<button class="chip" data-ev="${esc(e.id)}" style="background:${tint(c, 0.2)};border-color:${tint(c, 0.7)}">${e.recurring ? '↻ ' : ''}${esc(e.title)}</button>`;
         })
         .join('');
-      return `<div class="allday-cell" data-day="${key}">${chips}</div>`;
+      return `<div class="allday-cell" data-day="${key}" title="${esc(t('cal.allDayNew'))}">${chips}</div>`;
     })
     .join('');
 
@@ -889,6 +889,19 @@ el('#week').addEventListener('click', (e) => {
 });
 
 
+
+// Double click in the all-day row: a new all-day event on that day
+el('#week').addEventListener('dblclick', (e) => {
+  const target = e.target as HTMLElement;
+  if (target.closest('[data-ev]')) return;
+  const day = target.closest<HTMLElement>('.allday-cell')?.dataset.day;
+  if (!day) return;
+  openEventDialog(null, parseYmd(day));
+  if (!evDlg.open) return; // no calendar to write to
+  evField('allDay').checked = true;
+  applyAllDay(true);
+  evField('end').value = evField('start').value;
+});
 
 // Month calendar at the bottom of the sidebar
 let calMiniMonth = new Date(weekStart.getFullYear(), weekStart.getMonth(), 1);

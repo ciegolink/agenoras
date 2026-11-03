@@ -260,7 +260,7 @@ Choose the sender address under **From**. When you reply, Agenoras automatically
 
 ### Text and formatting
 
-The editor works like a word processor: paragraph styles, **bold** (Ctrl+B), *italic* (Ctrl+I), underline (Ctrl+U), strikethrough, text color, lists, links (Ctrl+K) and **Clear formatting**. Text you paste from other programs is cleaned up automatically.
+The editor works like a word processor: paragraph styles, **bold** (Ctrl+B), *italic* (Ctrl+I), underline (Ctrl+U), strikethrough, text color, lists, links (Ctrl+K) and **Clear formatting** (Ctrl+\\): it turns the selected text back into plain paragraphs, without bold, colours, headings, lists or quotes. In a list, **Tab** makes an item a sub-item and **Shift+Tab** moves it back. Text you paste from other programs is cleaned up automatically.
 
 **Images** can be inserted with the image button or by dragging them onto the text (max. 5 MB each).
 
@@ -531,6 +531,8 @@ On macOS, use **Cmd** instead of **Ctrl**.
 | Compose | **Ctrl+Shift+S** | Send |
 | Compose | **Ctrl+B / I / U** | Bold / italic / underline |
 | Compose | **Ctrl+K** | Insert link |
+| Compose | **Ctrl+\\** | Clear formatting of the selected text |
+| Compose | **Tab** / **Shift+Tab** | In a list: indent / outdent the item |
 | Compose | **Esc** / **Ctrl+Z** | Undo sending (during the delay) |
 | Compose (Generate text) | **Ctrl+Enter** | Generate the text |
 | Compose | **Ctrl+Z** | Undo proofreading or translation |

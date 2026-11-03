@@ -67,6 +67,8 @@ contextBridge.exposeInMainWorld('api', {
   cachedMail: (accountId: string | null, folder?: string) => ipcRenderer.invoke('mail:cached', accountId, folder),
   listMail: (accountId: string | null, folder?: string) => ipcRenderer.invoke('mail:list', accountId, folder),
   olderMail: (accountId: string | null, folder: string, before: Record<string, number>) => ipcRenderer.invoke('mail:older', accountId, folder, before),
+  inboxUnseen: () => ipcRenderer.invoke('mail:inboxUnseen'),
+  setBadge: (n: number) => ipcRenderer.send('badge:set', n),
   getMail: (accountId: string, folder: string, uid: number, loadImages?: boolean, markRead = true) => ipcRenderer.invoke('mail:get', accountId, folder, uid, !!loadImages, markRead),
   setSeen: (accountId: string, folder: string, uids: number[], seen: boolean) => ipcRenderer.invoke('mail:seen', accountId, folder, uids, seen),
   setFlagged: (accountId: string, folder: string, uids: number[], flagged: boolean) => ipcRenderer.invoke('mail:flag', accountId, folder, uids, flagged),

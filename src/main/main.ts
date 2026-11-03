@@ -51,8 +51,10 @@ import {
   setFlagged,
   fetchFlagged,
   findByMessageIds,
+  inboxUnseen,
   fetchOlder,
   setOnNewMail,
+  setOnReconnect,
   startAccount,
   testConnection,
   markFolderSeen,
@@ -61,7 +63,7 @@ import {
 } from './imap';
 import { OutgoingMail, sendMail, testSmtp } from './smtp';
 import { addOutbox, outboxBusy, outboxItem, outboxList, removeOutbox, updateOutbox } from './outbox';
-import { offlineComplete, offlineProgress, onOfflineCleared, onOfflineProgress, restartOffline } from './offline';
+import { offlineComplete, offlineProgress, onOfflineCleared, onOfflineProgress, restartOffline, setOfflineBusy } from './offline';
 import { applyImport, buildExport, readExport, summarize } from './transfer';
 import { parseDateQuery } from './datequery';
 import { checkForUpdates, getUpdate, installUpdate, startUpdates, updateState } from './updater';
@@ -233,7 +235,12 @@ function createWindow(): void {
     if (st.maximized) win?.maximize();
     win?.show();
   });
-  win.on('focus', () => setTrayUnread(false));
+  win.on('focus', () => {
+    setTrayUnread(false);
+    // seen: the notifications leave the message list (the Ubuntu dock counts those as its number)
+    for (const n of liveNotifications) n.close();
+    liveNotifications.clear();
+  });
   // reload (Ctrl+R) of the main window: darken again if a compose popup is still open
   win.webContents.on('did-finish-load', () => paintDim());
   // to the tray and back: the compose popups go along
@@ -343,6 +350,11 @@ function createTray(): void {
 
 // Desktop notifications
 const liveNotifications = new Set<Notification>(); // keep a reference, otherwise the click gets lost
+
+// Number on the app icon (macOS dock, Linux launchers that support it): the unread mails of all inboxes
+ipcMain.on('badge:set', (_e, n: number) => {
+  app.setBadgeCount(Math.max(0, Math.floor(Number(n)) || 0));
+});
 
 function showNotification(title: string, body: string, icon?: Electron.NativeImage, onClick?: () => void): void {
   if (!Notification.isSupported()) return;
@@ -763,6 +775,7 @@ function freeSpace(cache = true, pop = false): void {
   }
 }
 onOfflineCleared(() => freeSpace());
+setOfflineBusy(outboxBusy); // sending first, the offline sync waits
 
 // Mail
 const accountsFor = (accountId: string | null) => listAccounts().filter((a) => !accountId || a.id === accountId);
@@ -807,6 +820,21 @@ ipcMain.handle('mail:list', async (_e, accountId: string | null, folder = 'INBOX
   });
   mails.sort((a, b) => b.date.localeCompare(a.date));
   return { mails, errors };
+});
+
+// Unread in the inbox per account (server numbers); an account that can't be reached is left out
+ipcMain.handle('mail:inboxUnseen', async () => {
+  const out: Record<string, number> = {};
+  await Promise.all(
+    listAccounts().map(async (acc) => {
+      try {
+        out[acc.id] = await inboxUnseen(acc);
+      } catch {
+        /* offline: the list's own count stays */
+      }
+    }),
+  );
+  return out;
 });
 
 // Scrolling down: the next 50 older mails per account, from the offline copy when it has them
@@ -1771,6 +1799,8 @@ async function rulesFor(accountId: string): Promise<void> {
     console.error('Rules:', friendlyError(err));
   }
 }
+
+setOnReconnect((accountId) => win?.webContents.send('mail:new', accountId, false)); // reload, no sound
 
 setOnNewMail(async (accountId, grew) => {
   win?.webContents.send('mail:new', accountId, grew);

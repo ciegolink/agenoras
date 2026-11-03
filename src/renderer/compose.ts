@@ -119,9 +119,24 @@ function updateToolbarState(): void {
   sel.value = ['h2', 'h3', 'blockquote'].includes(block) ? block : 'p';
 }
 
+// "Clear formatting": only the selected text – bold, colours, fonts, and headings, lists and quotes
+// back to plain paragraphs. Nothing selected: nothing happens.
+function clearFormat(fromKey = false): void {
+  if (!fromKey) restoreSelection(); // the button: bring back the selection the click took away
+  const sel = getSelection();
+  if (!sel || sel.isCollapsed || !editor.contains(sel.anchorNode)) return;
+  document.execCommand('removeFormat');
+  // the list commands switch a list off when the selection is in one (once per level)
+  for (let i = 0; i < 5 && document.queryCommandState('insertUnorderedList'); i++) document.execCommand('insertUnorderedList');
+  for (let i = 0; i < 5 && document.queryCommandState('insertOrderedList'); i++) document.execCommand('insertOrderedList');
+  const block = String(document.queryCommandValue('formatBlock') || '').toLowerCase();
+  if (block && block !== 'p' && block !== 'div') document.execCommand('formatBlock', false, 'p');
+  updateToolbarState();
+}
+
 cform.querySelectorAll<HTMLElement>('[data-cmd]').forEach((b) => {
   b.addEventListener('mousedown', (e) => e.preventDefault()); // keep the selection in the editor
-  b.addEventListener('click', () => exec(b.dataset.cmd!));
+  b.addEventListener('click', () => (b.dataset.cmd === 'removeFormat' ? clearFormat() : exec(b.dataset.cmd!)));
 });
 
 el('#fmt-block').addEventListener('change', () => exec('formatBlock', el<HTMLSelectElement>('#fmt-block').value));
@@ -169,6 +184,19 @@ editor.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
     e.preventDefault();
     openLinkRow();
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key === '\\') {
+    e.preventDefault();
+    clearFormat(true);
+  }
+  // Tab in a list: one level deeper, Shift+Tab one back (elsewhere Tab moves on to the next field)
+  if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const at = getSelection()?.anchorNode;
+    const li = (at instanceof Element ? at : at?.parentElement)?.closest('li');
+    if (li && editor.contains(li)) {
+      e.preventDefault();
+      document.execCommand(e.shiftKey ? 'outdent' : 'indent');
+    }
   }
 });
 

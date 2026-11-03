@@ -45,8 +45,10 @@ interface SmtpCfg {
 }
 
 // Password or OAuth access token
-function transport(cfg: SmtpCfg, secret: string | { accessToken: string }) {
+// pool: one login for many mails ("individually to each"), instead of connecting again for every one
+function transport(cfg: SmtpCfg, secret: string | { accessToken: string }, pool = false) {
   return nodemailer.createTransport({
+    ...(pool ? { pool: true, maxConnections: 2, maxMessages: 200 } : {}),
     host: cfg.smtpHost,
     port: cfg.smtpPort,
     secure: cfg.smtpSecure, // false → STARTTLS
@@ -116,7 +118,9 @@ export async function sendMail(
 ): Promise<SendResult> {
   const attachments = await collectAttachments(mail);
   const from = { name: identity.name || acc.name, address: identity.email };
-  const transporter = transport(acc, acc.oauth ? { accessToken: await accessToken(acc) } : await getPassword(acc.id));
+  const many = (mail.individual?.length ?? 0) > 1;
+  const transporter = transport(acc, acc.oauth ? { accessToken: await accessToken(acc) } : await getPassword(acc.id), many);
+  const filing: Promise<void>[] = []; // copies into "Sent": in the background, not in between the mails
 
   // Build once: the same message is sent and stored in "Sent".
   // Bcc is only in the envelope, never in the header – the other recipients do not see it.
@@ -144,7 +148,9 @@ export async function sendMail(
     await transporter.sendMail({ envelope: { from: identity.email, to: [...new Set([...to, ...cc, ...bcc].map((r) => r.address))] }, raw });
     // Gmail stores sent mail itself
     if (!/gmail\.com$/i.test(acc.smtpHost)) {
-      await appendToSent(acc, raw).catch((err) => console.error('Sent folder:', err?.message ?? err));
+      const copy = appendToSent(acc, raw).catch((err) => console.error('Sent folder:', err?.message ?? err));
+      if (many) filing.push(copy);
+      else await copy;
     }
   };
 
@@ -154,19 +160,28 @@ export async function sendMail(
       return { sent: 1, failed: [] };
     }
     const result: SendResult = { sent: 0, failed: [] };
-    const total = mail.individual.length;
-    for (const [i, item] of mail.individual.entries()) {
-      try {
-        await sendOne([item.to], [], [], item.subject, item.text, item.html);
-        result.sent++;
-      } catch (err) {
-        result.failed.push({ to: item.to, message: (err as Error)?.message ?? String(err) });
+    const list = mail.individual;
+    const total = list.length;
+    // two at a time over the pooled connections; a short pause each keeps below the servers' spam limits
+    let next = 0;
+    let done = 0;
+    const worker = async () => {
+      while (next < total) {
+        const item = list[next++];
+        try {
+          await sendOne([item.to], [], [], item.subject, item.text, item.html);
+          result.sent++;
+        } catch (err) {
+          result.failed.push({ to: item.to, message: (err as Error)?.message ?? String(err) });
+        }
+        onProgress?.(++done, total);
+        if (next < total) await pause(100);
       }
-      onProgress?.(i + 1, total);
-      if (i < total - 1) await pause(300); // stays below the mail servers' spam limits
-    }
+    };
+    await Promise.all([worker(), worker()]);
     return result;
   } finally {
+    await Promise.all(filing);
     transporter.close();
   }
 }

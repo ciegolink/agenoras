@@ -154,7 +154,7 @@ function renderAccounts(): void {
     .map((a) => {
       const open = expandedAccs.has(a.id);
       const folders = open ? folderCache.get(a.id) ?? [] : [];
-      const inboxUnseen = folderCache.get(a.id)?.find((f) => f.path === 'INBOX')?.unseen;
+      const inboxUnseen = unreadOf(a.id);
       let hideBelow = -1; // hide subfolders of a collapsed folder
       const tree = folders
         .map((f, i) => {
@@ -338,9 +338,45 @@ function openVirtual(kind: string): void {
   loadMails();
 }
 
+// Unread in the inbox per account, from the server: the list only holds the newest mails, and the folder
+// tree only knows the accounts that are open in the sidebar
+const inboxUnread = new Map<string, number>();
+let unreadTimer = 0;
+
+function refreshUnread(): void {
+  clearTimeout(unreadTimer);
+  unreadTimer = window.setTimeout(async () => {
+    const res = await window.api.inboxUnseen().catch(() => ({}) as Record<string, number>);
+    for (const [id, n] of Object.entries(res)) inboxUnread.set(id, n);
+    renderAccounts();
+    paintCounts(); // only paint: updateCounts would ask the server again
+  }, 1500); // after the server has taken the change
+}
+
+// Read / unread here: the number moves at once, the server's number confirms it a moment later
+function adjustUnread(list: (MailSummary | undefined)[], seen: boolean): void {
+  for (const m of list) {
+    if (!m || m.seen === seen || (m.folder ?? 'INBOX') !== 'INBOX' || !inboxUnread.has(m.accountId)) continue;
+    inboxUnread.set(m.accountId, Math.max(0, inboxUnread.get(m.accountId)! + (seen ? -1 : 1)));
+  }
+}
+
+// Per account the server's number; if it isn't known yet, what the loaded list shows
+function unreadOf(accountId: string): number | undefined {
+  return inboxUnread.get(accountId) ?? folderCache.get(accountId)?.find((f) => f.path === 'INBOX')?.unseen;
+}
+
+function paintCounts(): void {
+  let n = 0;
+  for (const a of accounts) n += unreadOf(a.id) ?? mails.filter((m) => m.accountId === a.id && !m.seen && (m.folder ?? 'INBOX') === 'INBOX').length;
+  el('#count-all').textContent = n ? String(n) : '';
+  if (n !== lastBadge) window.api.setBadge((lastBadge = n)); // same number on the app icon
+}
+let lastBadge = -1;
+
 function updateCounts(): void {
-  const unseen = mails.filter((m) => !m.seen && m.folder === 'INBOX').length;
-  if (!currentAccount) el('#count-all').textContent = unseen ? String(unseen) : '';
+  paintCounts();
+  refreshUnread(); // after reading, moving, deleting: the real numbers follow a moment later
 }
 
 // Mail list
@@ -403,7 +439,7 @@ async function loadOlder(): Promise<void> {
   // smallest UID shown per account = where the next page starts
   const before: Record<string, number> = {};
   for (const a of accs) {
-    const uids = mails.filter((m) => m.accountId === a.id && (m.folder ?? folder) === folder).map((m) => m.uid);
+    const uids = mails.filter((m) => m.accountId === a.id && (m.folder ?? folder) === folder && !m.beyond).map((m) => m.uid); // not the old unread ones
     if (uids.length) before[a.id] = Math.min(...uids);
     else olderDone.add(a.id);
   }
@@ -709,6 +745,7 @@ async function markFolderRead(accountId: string, folder: string): Promise<void> 
     const n = await window.api.markFolderSeen(accountId, folder);
     // the open list shows it right away
     for (const m of mails) if (m.accountId === accountId && m.folder === folder) m.seen = true;
+    if (folder === 'INBOX') inboxUnread.set(accountId, 0);
     renderList();
     updateCounts();
     loadFolders(accountId);
@@ -751,6 +788,7 @@ function clearReader(text = t('mail.noneSelected')): void {
 }
 
 function setSeenLocal(key: string): void {
+  adjustUnread([summaryOf(key)], true);
   for (const m of [summaryOf(key), ...mails, ...flaggedMails, ...(searchResults ?? [])]) if (m && mailKey(m) === key) m.seen = true;
 }
 
@@ -1893,6 +1931,7 @@ async function markSeen(keys: string[], seen: boolean): Promise<void> {
     groups.set(`${p.accountId}|${p.folder}`, g);
   }
   const set = new Set(keys);
+  adjustUnread([...new Map([...mails, ...(searchResults ?? [])].filter((m) => set.has(mailKey(m))).map((m) => [mailKey(m), m])).values()], seen);
   for (const m of [...mails, ...(searchResults ?? [])]) if (set.has(mailKey(m))) m.seen = seen;
   renderList();
   updateCounts();
@@ -2280,7 +2319,8 @@ window.api.onNewMail((accountId, grew) => {
   if (grew) newMailSound(accountId);
   clearTimeout(newMailTimer);
   newMailTimer = window.setTimeout(() => {
-    if (currentFolder === 'INBOX' || !currentAccount) loadMails();
+    // reconnected (grew = false): also the open folder of that account, so its error line goes away
+    if (currentFolder === 'INBOX' || !currentAccount || (!grew && currentAccount === accountId)) loadMails();
     if (folderCache.has(accountId)) loadFolders(accountId);
   }, 800);
 });

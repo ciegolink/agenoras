@@ -26,6 +26,7 @@ export interface MailSummary {
   priority: Priority;
   messageId: string; // for categories (stays the same when moving)
   inReplyTo?: string; // Message-ID of the mail this one answers – for conversations
+  beyond?: boolean; // unread mail further back than the newest ones of the list (not where "load older" starts)
   flagged: boolean; // star / "important" (\Flagged)
   answered?: boolean; // replied to (\Answered) – also set by other mail programs
   forwarded?: boolean; // forwarded ($Forwarded)
@@ -79,6 +80,13 @@ let stopping = false;
 let onNew: (accountId: string, grew: boolean) => void = () => {};
 
 // grew = really a new message (not just deleted/moved) → sound
+// Connected again after a drop: the main window reloads and its error line goes away
+let onReconnect: (accountId: string) => void = () => {};
+const wasConnected = new Set<string>();
+export function setOnReconnect(fn: (accountId: string) => void): void {
+  onReconnect = fn;
+}
+
 export function setOnNewMail(fn: (accountId: string, grew: boolean) => void): void {
   onNew = fn;
   pop.setOnNew(fn);
@@ -181,7 +189,10 @@ async function connectClient(acc: Account): Promise<ImapFlow> {
   // From here on everything counts as "new" (for notifications); do not reset on reconnect
   if (!lastUid.has(acc.id)) lastUid.set(acc.id, Math.max(0, Number(box.uidNext ?? 1) - 1));
   clients.set(acc.id, c);
+  if (wasConnected.has(acc.id)) onReconnect(acc.id);
+  wasConnected.add(acc.id);
   resolved('IMAP', acc.email);
+  resolved('Offline', acc.email); // connected again: the offline sync's complaints are over too
   return c;
 }
 
@@ -191,20 +202,29 @@ export async function startAccount(acc: Account): Promise<void> {
 }
 
 // Works in a folder and then returns to INBOX so IDLE reports new mail
-async function inFolder<T>(acc: Account, folder: string, fn: (c: ImapFlow) => Promise<T>): Promise<T> {
+// The connection went away in the middle (timeout, server closed it): not a real error, it reconnects
+const isDropped = (err: unknown) => DROPPED.has(String((err as { code?: string })?.code ?? '')) || /connection not available|connection closed/i.test(String((err as Error)?.message ?? ''));
+
+// Run fn with the folder selected. A dropped connection gets one more try on a fresh one, quietly.
+async function inFolder<T>(acc: Account, folder: string, fn: (c: ImapFlow) => Promise<T>, retry = true): Promise<T> {
   const c = await getClient(acc);
   let lock: Awaited<ReturnType<ImapFlow['getMailboxLock']>>;
   try {
     lock = await c.getMailboxLock(folder);
   } catch (err) {
+    if (retry && isDropped(err)) return inFolder(acc, folder, fn, false);
     log('error', 'IMAP', acc.email, `${folder}: ${friendlyError(err)}`);
     throw err;
   }
+  let again = false;
   try {
     return await fn(c);
   } catch (err) {
-    log('error', 'IMAP', acc.email, `${folder}: ${friendlyError(err)}`);
-    throw err;
+    if (retry && isDropped(err)) again = true;
+    else {
+      log('error', 'IMAP', acc.email, `${folder}: ${friendlyError(err)}`);
+      throw err;
+    }
   } finally {
     lock.release();
     if (folder !== 'INBOX') {
@@ -213,6 +233,9 @@ async function inFolder<T>(acc: Account, folder: string, fn: (c: ImapFlow) => Pr
         .catch(() => {});
     }
   }
+  // outside the finally: the old lock is released before the new connection is used
+  if (again) return inFolder(acc, folder, fn, false);
+  throw new Error('unreachable');
 }
 
 // Folders
@@ -297,11 +320,21 @@ async function findSpecial(c: ImapFlow, use: '\\Sent' | '\\Trash' | '\\Archive' 
   return box?.path ?? null;
 }
 
-export async function appendToSent(acc: Account, raw: Buffer): Promise<void> {
+// The Sent folder per account, looked up once (not again for every mail of a mass mailing)
+const sentPath = new Map<string, string | null>();
+
+export async function appendToSent(acc: Account, raw: Buffer, retry = true): Promise<void> {
   if (pop.isPop(acc)) return pop.appendToSent(acc, raw);
   const c = await getClient(acc);
-  const sent = await findSpecial(c, '\\Sent', /^(sent|sent items|sent messages|gesendet|gesendete elemente|gesendete objekte)$/i);
-  if (sent) await c.append(sent, raw, ['\\Seen']);
+  try {
+    if (!sentPath.has(acc.id)) sentPath.set(acc.id, await findSpecial(c, '\\Sent', /^(sent|sent items|sent messages|gesendet|gesendete elemente|gesendete objekte)$/i));
+    const sent = sentPath.get(acc.id);
+    if (sent) await c.append(sent, raw, ['\\Seen']);
+  } catch (err) {
+    sentPath.delete(acc.id); // renamed or gone: look again next time
+    if (retry && isDropped(err)) return appendToSent(acc, raw, false);
+    throw err;
+  }
 }
 
 // Mails
@@ -340,7 +373,11 @@ function toSummary(acc: Account, folder: string, msg: FetchedMsg): MailSummary {
   };
 }
 
-export async function fetchFolder(acc: Account, folder = 'INBOX', limit = 50): Promise<MailSummary[]> {
+// The newest mails of a folder plus every unread one further back (at most UNREAD_MAX), so the list,
+// its "Unread" filter and the unread count agree
+const UNREAD_MAX = 300;
+
+export async function fetchFolder(acc: Account, folder = 'INBOX', limit = 50, withUnread = true): Promise<MailSummary[]> {
   if (pop.isPop(acc)) return pop.fetchFolder(acc, folder);
   return inFolder(acc, folder, async (c) => {
     const mb = c.mailbox;
@@ -348,6 +385,11 @@ export async function fetchFolder(acc: Account, folder = 'INBOX', limit = 50): P
     const start = Math.max(1, mb.exists - limit + 1);
     const out: MailSummary[] = [];
     for await (const msg of c.fetch(`${start}:*`, SUMMARY_QUERY)) out.push(toSummary(acc, folder, msg as FetchedMsg));
+    if (start > 1 && withUnread) {
+      const have = new Set(out.map((m) => m.uid));
+      const unread = ((await c.search({ seen: false }, { uid: true })) || []).filter((u) => !have.has(u)).sort((a, b) => b - a).slice(0, UNREAD_MAX);
+      if (unread.length) for await (const msg of c.fetch(unread.join(','), SUMMARY_QUERY, { uid: true })) out.push({ ...toSummary(acc, folder, msg as FetchedMsg), beyond: true });
+    }
     return out;
   });
 }
@@ -515,6 +557,12 @@ export async function fetchOfflineBody(acc: Account, folder: string, uid: number
   });
 }
 
+// Unread mails in the inbox, for the sidebar and "All inboxes" (the folder list is only loaded for open accounts)
+export async function inboxUnseen(acc: Account): Promise<number> {
+  if (pop.isPop(acc)) return pop.listFolders(acc).find((f) => f.path === 'INBOX')?.unseen ?? 0;
+  return inFolder(acc, 'INBOX', async (c) => ((await c.search({ seen: false }, { uid: true })) || []).length);
+}
+
 // Mails with these Message-IDs in any folder of the account (categories of older mails that are not cached)
 export async function findByMessageIds(acc: Account, ids: string[]): Promise<MailSummary[]> {
   if (pop.isPop(acc) || !ids.length) return [];
@@ -628,6 +676,13 @@ export async function markSeen(acc: Account, folder: string, uid: number): Promi
 // Move several mails in one IMAP command (UID list "12,15,18")
 // Returns the new UIDs in the target folder (needed for undo)
 export async function moveMessages(acc: Account, folder: string, uids: number[], target: string): Promise<number[]> {
+  const moved = await moveRaw(acc, folder, uids, target);
+  // moved into the inbox by the user (undo, not spam …): that's not new mail for the notification
+  if (target === 'INBOX' && moved.length && !pop.isPop(acc)) lastUid.set(acc.id, Math.max(lastUid.get(acc.id) ?? 0, ...moved));
+  return moved;
+}
+
+async function moveRaw(acc: Account, folder: string, uids: number[], target: string): Promise<number[]> {
   if (pop.isPop(acc)) {
     pop.moveMessages(acc, folder, uids, target);
     return uids; // POP: UIDs stay the same

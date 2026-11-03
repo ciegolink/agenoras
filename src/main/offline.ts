@@ -5,7 +5,7 @@ import { listAccounts } from './accounts';
 import { clearOfflineAccount, folderKey, hasOffline, getKv, offlineStats, offlineUids, offlineWithoutBody, removeOffline, setKv, storeOffline, storeOfflineBody, updateOfflineFlags } from './cache';
 import { fetchFlags, fetchOfflineBody, fetchSummaries, friendlyError, listFolders, offlineFolderUids } from './imap';
 import { isPop } from './pop3';
-import { log } from './log';
+import { log, resolved } from './log';
 import { getSettings } from './settings';
 
 export interface OfflineProgress {
@@ -44,6 +44,14 @@ function statsNow(fresh = false): ReturnType<typeof offlineStats> {
 export const offlineProgress = (fresh = false): OfflineProgress => ({ ...progress, ...statsNow(fresh), finished: getKv<string>('offline:finished') ?? undefined });
 
 let afterClear: () => void = () => {};
+// busy = the outbox is sending: the sync waits meanwhile, both use the same connection
+let busy: () => boolean = () => false;
+export function setOfflineBusy(fn: () => boolean): void {
+  busy = fn;
+}
+// failed runs in a row per account: one dropout is retried quietly, only a second one is reported
+const failRuns = new Map<string, number>();
+const RETRY = 2 * 60_000;
 // called when the copy of an account was deleted (main.ts frees the disk space then)
 export function onOfflineCleared(fn: () => void): void {
   afterClear = fn;
@@ -74,11 +82,15 @@ export function restartOffline(): void {
 }
 
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+async function whileBusy(stale: () => boolean): Promise<void> {
+  while (busy() && !stale()) await pause(2000);
+}
 
 async function run(g: number): Promise<void> {
   const stale = () => g !== gen;
   const errors: string[] = [];
   let cleared = false;
+  let retrySoon = false;
   for (const acc of listAccounts()) {
     if (stale()) return;
     const days = isPop(acc) || acc.private ? 0 : daysOf(acc.id); // POP3 keeps its mails locally anyway; private accounts leave no copies
@@ -101,6 +113,7 @@ async function run(g: number): Promise<void> {
       for (const f of folders) {
         if (stale()) return;
         const key = folderKey(acc.id, f.path);
+        await whileBusy(stale);
         report({ state: 'running', phase: 'headers', account: acc.email, folder: f.name, done: 0, total: 0, error: undefined }, true);
         const { uidValidity, uids } = await offlineFolderUids(acc, f.path, since);
         if (getKv<string>(`offline:uv:${key}`) !== uidValidity) {
@@ -138,6 +151,7 @@ async function run(g: number): Promise<void> {
         for (;;) {
           const batch = offlineWithoutBody(key, 20);
           if (!batch.length) break;
+          await whileBusy(stale);
           for (const uid of batch) {
             if (stale()) return;
             try {
@@ -157,10 +171,17 @@ async function run(g: number): Promise<void> {
         }
       }
       setKv(`offline:done:${acc.id}`, true);
+      resolved('Offline', acc.email); // went through: earlier complaints are over
+      failRuns.delete(acc.id);
     } catch (err) {
       const msg = friendlyError(err);
-      errors.push(`${acc.email}: ${msg}`);
-      log('warn', 'Offline', acc.email, msg);
+      const runs = (failRuns.get(acc.id) ?? 0) + 1;
+      failRuns.set(acc.id, runs);
+      if (runs === 1) retrySoon = true; // a dropout (server busy, connection reset): quietly once more
+      else {
+        errors.push(`${acc.email}: ${msg}`);
+        log('warn', 'Offline', acc.email, msg);
+      }
     }
   }
   if (stale()) return;
@@ -170,6 +191,10 @@ async function run(g: number): Promise<void> {
   }
   const any = listAccounts().some((a) => daysOf(a.id));
   if (!any) return report({ state: 'off', phase: undefined, account: undefined, folder: undefined, done: 0, total: 0, error: undefined }, true);
-  if (!errors.length) setKv('offline:finished', new Date().toISOString());
+  if (retrySoon && timer) {
+    clearTimeout(timer);
+    timer = setTimeout(restartOffline, RETRY);
+  }
+  if (!errors.length && !retrySoon) setKv('offline:finished', new Date().toISOString());
   report({ state: errors.length ? 'error' : 'idle', phase: undefined, account: undefined, folder: undefined, done: 0, total: 0, error: errors.join(' · ') || undefined }, true);
 }

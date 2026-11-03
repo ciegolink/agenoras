@@ -106,7 +106,7 @@ export async function runRulesForNew(acc: Account): Promise<RuleResult> {
 export async function runRulesNow(accountId: string | null): Promise<RuleResult> {
   const total: RuleResult = { matched: 0, moved: 0 };
   for (const acc of listAccounts().filter((a) => !accountId || a.id === accountId)) {
-    const r = await applyRules(acc, 'INBOX', await fetchFolder(acc, 'INBOX', 200));
+    const r = await applyRules(acc, 'INBOX', await fetchFolder(acc, 'INBOX', 200, false));
     total.matched += r.matched;
     total.moved += r.moved;
   }

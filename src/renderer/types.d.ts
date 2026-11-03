@@ -174,6 +174,7 @@ interface MailSummary {
   priority?: Priority;
   messageId?: string;
   inReplyTo?: string;
+  beyond?: boolean; // unread, further back than the newest ones (see fetchFolder)
   flagged?: boolean;
   answered?: boolean;
   forwarded?: boolean;
@@ -520,6 +521,8 @@ interface Window {
     cachedMail(accountId: string | null, folder?: string): Promise<MailSummary[]>;
     listMail(accountId: string | null, folder?: string): Promise<{ mails: MailSummary[]; errors: { accountId: string; message: string }[] }>;
     olderMail(accountId: string | null, folder: string, before: Record<string, number>): Promise<{ mails: MailSummary[]; done: string[] }>;
+    inboxUnseen(): Promise<Record<string, number>>;
+    setBadge(n: number): void;
     getMail(accountId: string, folder: string, uid: number, loadImages?: boolean, markRead?: boolean): Promise<MailDetail>;
     setSeen(accountId: string, folder: string, uids: number[], seen: boolean): Promise<void>;
     setFlagged(accountId: string, folder: string, uids: number[], flagged: boolean): Promise<void>;

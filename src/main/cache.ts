@@ -108,7 +108,7 @@ export function cachedMail<T>(accountIds: string[]): T[] {
   if (!accountIds.length) return [];
   const marks = accountIds.map(() => '?').join(',');
   const rows = open()
-    .prepare(`SELECT summary FROM mail WHERE account_id IN (${marks}) ORDER BY date DESC LIMIT 500`)
+    .prepare(`SELECT summary FROM mail WHERE account_id IN (${marks}) ORDER BY date DESC LIMIT 2000`) // newest + the unread ones of several inboxes
     .all(...accountIds) as { summary: string }[];
   return rows.map((r) => JSON.parse(r.summary));
 }
