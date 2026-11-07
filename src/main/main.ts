@@ -66,6 +66,7 @@ import { addOutbox, outboxBusy, outboxItem, outboxList, removeOutbox, updateOutb
 import { offlineComplete, offlineProgress, onOfflineCleared, onOfflineProgress, restartOffline, setOfflineBusy } from './offline';
 import { applyImport, buildExport, readExport, summarize } from './transfer';
 import { parseDateQuery } from './datequery';
+import { canAutostart, getAutostart, setAutostart, startedHidden } from './autostart';
 import { checkForUpdates, getUpdate, installUpdate, startUpdates, updateState } from './updater';
 import { mailtoArg, parseMailto } from './mailto';
 import { closeStore as closePopStore, forgetAccount as forgetPopAccount, vacuumStore as vacuumPop } from './pop3';
@@ -133,6 +134,16 @@ app.on('open-url', (e, url) => {
 
 // Windows: without an app ID no notifications appear
 if (process.platform === 'win32') app.setAppUserModelId('ch.ciegolink.agenoras');
+
+// The system asks the app to end (log out, shut down, systemd stopping the session): quit cleanly
+let systemQuit = false; // no questions then, and don't wait long for the servers
+function quitNow(): void {
+  systemQuit = true;
+  quitting = true;
+  app.quit();
+}
+process.on('SIGTERM', quitNow);
+process.on('SIGHUP', quitNow);
 
 // A stray error (a dropped connection nobody waited for, a broken server answer) must not bring up
 // Electron's error dialog or stop the app: write it to the console and go on
@@ -231,7 +242,9 @@ function createWindow(): void {
   });
   trackWinState(win, 'main', true);
   win.loadFile(path.join(__dirname, '../../src/renderer/index.html'));
+  const hidden = startedHidden(); // started with the system "in the background": only the tray
   win.once('ready-to-show', () => {
+    if (hidden) return;
     if (st.maximized) win?.maximize();
     win?.show();
   });
@@ -1510,6 +1523,12 @@ ipcMain.handle('settings:prefs', (_e, p: { uiScale?: UiScale; language?: string;
   return { restartNeeded: p?.language !== undefined && p.language !== before };
 });
 ipcMain.handle('settings:languages', () => availableLanguages());
+// Start with the system
+ipcMain.handle('autostart:get', () => ({ ...getAutostart(), available: canAutostart() }));
+ipcMain.handle('autostart:set', (_e, on: boolean, hidden: boolean) => {
+  setAutostart(!!on, !!hidden);
+  return { ...getAutostart(), available: canAutostart() };
+});
 // Updates (see updater.ts)
 ipcMain.handle('update:state', () => updateState());
 ipcMain.handle('update:check', () => checkForUpdates());
@@ -1822,6 +1841,9 @@ app.whenReady().then(() => {
   applySpellcheck();
   nativeTheme.themeSource = getSettings().theme;
   powerMonitor.on('resume', () => setTimeout(reconnectAll, 3000)); // give the network a moment to come back
+  // Log out / shut down: quit on our own before the system takes the helper processes away
+  // (otherwise Chromium tries to restart them, can't, and ends with a crash report)
+  powerMonitor.on('shutdown', quitNow);
   if (pendingMailto) {
     const url = pendingMailto;
     pendingMailto = null;
@@ -1860,7 +1882,7 @@ app.on('window-all-closed', () => app.quit());
 let closing = false;
 app.on('before-quit', (e) => {
   // a mail is still on its way: it stays in the outbox, but better ask
-  if (!closing && outboxBusy()) {
+  if (!closing && !systemQuit && outboxBusy()) {
     const choice = dialog.showMessageBoxSync({ type: 'question', buttons: [t('outbox.quitWait'), t('outbox.quitAnyway')], defaultId: 0, cancelId: 0, message: t('outbox.quitTitle'), detail: t('outbox.quitDetail') });
     if (choice === 0) {
       quitting = false;
@@ -1873,7 +1895,9 @@ app.on('before-quit', (e) => {
   closing = true;
   flushWinState();
   flushLog();
-  closeAll().finally(() => {
+  // logging out from the servers; when the system is shutting down at most 2 s for that
+  const done = systemQuit ? Promise.race([closeAll(), new Promise((r) => setTimeout(r, 2000))]) : closeAll();
+  done.finally(() => {
     closeCache();
     closePopStore();
     closeLocal();

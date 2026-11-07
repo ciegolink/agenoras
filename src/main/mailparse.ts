@@ -79,7 +79,18 @@ export function buildDetail(acc: Account, folder: string, uid: number, parsed: P
     priority: priorityOf(parsed),
     attachments: files.map((f) => ({ filename: f.filename, size: f.content.length, contentType: f.contentType })),
     invite: ics ? parseInvite(ics) : null,
+    unsubscribe: listUnsubscribe(parsed),
   };
+}
+
+// Newsletters name their way out in the "List-Unsubscribe" header: <https://…>, <mailto:…>.
+// A web address first (opens the page); otherwise the mail address.
+function listUnsubscribe(parsed: ParsedMail): { url?: string; mail?: string } | undefined {
+  const line = parsed.headerLines?.find((h) => h.key === 'list-unsubscribe')?.line ?? '';
+  const targets = [...line.replace(/^list-unsubscribe:\s*/i, '').matchAll(/<([^>]+)>/g)].map((m) => m[1].trim());
+  const url = targets.find((x) => /^https?:\/\//i.test(x));
+  const mail = targets.find((x) => /^mailto:/i.test(x));
+  return url || mail ? { url, mail } : undefined;
 }
 
 // List entry from a fully parsed mail (POP3: there is no server-side envelope)

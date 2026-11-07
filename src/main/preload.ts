@@ -133,6 +133,10 @@ contextBridge.exposeInMainWorld('api', {
     },
     act: (act: string, word?: string) => ipcRenderer.invoke('ctx:act', act, word),
   },
+  autostart: {
+    get: () => ipcRenderer.invoke('autostart:get'),
+    set: (on: boolean, hidden: boolean) => ipcRenderer.invoke('autostart:set', on, hidden),
+  },
   update: {
     state: () => ipcRenderer.invoke('update:state'),
     check: () => ipcRenderer.invoke('update:check'),

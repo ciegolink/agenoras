@@ -1347,3 +1347,13 @@ input[type="search"]::-webkit-search-cancel-button:hover { background-color: var
 .about-update { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 4px 0 10px; font-size: 12.5px; color: var(--text-2); }
 .about-update .grow { flex: 1; min-width: 160px; }
 .about-update .check { font-size: 12px; }
+
+/* Link under the mouse in a mail or article: its real address, bottom left */
+.link-peek { position: fixed; left: 8px; bottom: 8px; z-index: 900; max-width: 720px; display: flex; flex-direction: column; gap: 2px; padding: 4px 10px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--bg-raise); color: var(--text-2); font: 11.5px var(--mono); box-shadow: 0 4px 14px var(--shadow); pointer-events: none; }
+.link-peek[hidden] { display: none; }
+.link-peek .peek-url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link-peek b { color: var(--text); }
+.link-peek.warn { border-color: var(--danger); }
+.link-peek .peek-warn { color: var(--danger); font: 700 11.5px var(--sans); }
+
+.autostart-sub { margin-left: 24px; }

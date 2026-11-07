@@ -55,6 +55,7 @@ export interface MailDetail {
   priority: Priority;
   attachments: { filename: string; size: number; contentType: string }[];
   invite?: InviteInfo | null; // meeting invitation/reply (text/calendar)
+  unsubscribe?: { url?: string; mail?: string }; // newsletter: List-Unsubscribe header
 }
 
 export interface FolderInfo {

@@ -1044,5 +1044,15 @@
   "update.restart": "Jetzt neu starten",
   "update.readyText": "Die neue Version ist geladen. Agenoras startet dafür kurz neu; sonst wird sie beim nächsten Start installiert.",
   "update.readyShort": "Version {v} ist geladen und wird beim nächsten Start installiert.",
-  "update.newShort": "Version {v} ist erschienen"
+  "update.newShort": "Version {v} ist erschienen",
+  "link.mismatch": "Achtung: Der Text zeigt {shown}, der Link führt aber zu {real}",
+  "link.mailTo": "E-Mail an {to}",
+  "bm.mailTo": "E-Mail schreiben an {to}",
+  "bm.copyAddr": "Adresse kopieren",
+  "bm.copyLink": "Link kopieren",
+  "mail.unsubscribe": "Abmelden",
+  "mail.newsletter": "Newsletter",
+  "autostart.on": "Beim Anmelden am Computer starten",
+  "autostart.hidden": "Im Hintergrund starten (nur im Tray, ohne Fenster)",
+  "autostart.dev": "Nur in der installierten Version verfügbar."
 }

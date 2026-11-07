@@ -36,6 +36,7 @@ async function openSettings(tab: SettingsTab = setTab): Promise<void> {
     prefs = { uiScale: s.uiScale ?? 'medium', language: s.language ?? 'system', weekStart: s.weekStart ?? -1, sendDelay: s.sendDelay ?? 2, composeMode: s.composeMode ?? 'window', spellcheck: s.spellcheck ?? 'system', linkOpen: s.linkOpen ?? 'browser', offline: s.offline ?? {}, autoUpdate: s.autoUpdate !== false };
     spellLangs = await window.api.spell.languages().catch(() => [] as string[]);
     langList = await window.api.settings.languages().catch(() => ['de', 'en']);
+    autostart = await window.api.autostart.get().catch(() => ({ on: false, hidden: false, available: false }));
     editLabels = (s.labels ?? labels).map((l) => ({ ...l }));
     editRules = JSON.parse(JSON.stringify(s.rules ?? []));
     await loadAccountLists();
@@ -693,6 +694,9 @@ function generalHtml(): string {
   <div class="set-card">
     <span class="mono">${esc(t('settings.background').toUpperCase())}</span>
     <label class="check sound-on"><input type="checkbox" data-notify="background"${notify.background !== false ? ' checked' : ''}> ${esc(t('notify.background'))}</label>
+    <label class="check"><input type="checkbox" data-autostart${autostart.on ? ' checked' : ''}${autostart.available ? '' : ' disabled'}> ${esc(t('autostart.on'))}</label>
+    <label class="check autostart-sub"><input type="checkbox" data-autostart-hidden${autostart.hidden ? ' checked' : ''}${autostart.available && autostart.on ? '' : ' disabled'}> ${esc(t('autostart.hidden'))}</label>
+    ${autostart.available ? '' : `<p class="hint">${esc(t('autostart.dev'))}</p>`}
   </div>`;
 }
 
@@ -1378,4 +1382,15 @@ el('#dlg-about').addEventListener('change', (e) => {
   if (!box) return;
   prefs.autoUpdate = box.checked;
   void window.api.settings.savePrefs({ autoUpdate: box.checked });
+});
+
+// Start with the system (and in the background, only in the tray)
+let autostart = { on: false, hidden: false, available: false };
+setDlg.addEventListener('change', async (e) => {
+  const tgt = e.target as HTMLInputElement;
+  if (tgt.dataset.autostart === undefined && tgt.dataset.autostartHidden === undefined) return;
+  const on = setDlg.querySelector<HTMLInputElement>('[data-autostart]')!.checked;
+  const hidden = setDlg.querySelector<HTMLInputElement>('[data-autostart-hidden]')!.checked;
+  autostart = await window.api.autostart.set(on, hidden).catch(() => autostart);
+  setDlg.querySelector<HTMLInputElement>('[data-autostart-hidden]')!.disabled = !autostart.on;
 });

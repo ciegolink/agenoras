@@ -238,6 +238,7 @@ interface MailDetail {
   remoteImages?: boolean; // HTML contains external images
   imagesLoaded?: boolean; // … and they were loaded
   invite?: InviteInfo | null;
+  unsubscribe?: { url?: string; mail?: string };
   attachments: { filename: string; size: number; contentType: string }[];
 }
 
@@ -566,6 +567,10 @@ interface Window {
     ctx: {
       onText(cb: (p: { x: number; y: number; spell: { word: string; suggestions: string[] } | null; editable: boolean; can: { cut: boolean; copy: boolean; paste: boolean } }) => void): void;
       act(act: 'replace' | 'learn' | 'cut' | 'copy' | 'paste' | 'selectAll', word?: string): Promise<void>;
+    };
+    autostart: {
+      get(): Promise<{ on: boolean; hidden: boolean; available: boolean }>;
+      set(on: boolean, hidden: boolean): Promise<{ on: boolean; hidden: boolean; available: boolean }>;
     };
     update: {
       state(): Promise<UpdateState>;

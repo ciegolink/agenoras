@@ -308,6 +308,7 @@ document.addEventListener('click', (e) => {
 
 // Insert the body. External images are blocked → banner with "Load images" / "Always load from …".
 function mountMailBody(box: HTMLElement, msg: MailDetail, reload: () => void): void {
+  linkPeek.hidden = true; // another mail: the old link is gone
   bodyMsg = msg;
   // another mail: menu and translation of the previous one go away; own addresses may have changed
   trMenu.hidden = true;
@@ -335,6 +336,7 @@ function mountMailBody(box: HTMLElement, msg: MailDetail, reload: () => void): v
     });
     box.appendChild(bar);
   }
+  if (msg.unsubscribe) addUnsubscribe(box, msg, msg.unsubscribe.url ?? msg.unsubscribe.mail ?? '');
   if (msg.html) {
     // Sandbox without scripts; the CSP only allows data: images (the main process fetches external ones on request)
     const frame = document.createElement('iframe');
@@ -346,6 +348,10 @@ function mountMailBody(box: HTMLElement, msg: MailDetail, reload: () => void): v
       fit();
       frame.contentDocument?.querySelectorAll('img').forEach((img) => img.addEventListener('load', fit));
       hookTranslate(frame);
+      if (frame.contentDocument) {
+        hookLinkPeek(frame.contentDocument);
+        if (!msg.unsubscribe) addUnsubscribe(box, msg, unsubscribeLink(frame.contentDocument)); // no header: a link in the text
+      }
     };
     box.appendChild(frame);
   } else {
@@ -688,6 +694,25 @@ trPop.hidden = true;
 document.body.append(trMenu, trPop);
 let trText = '';
 let trAt = { x: 0, y: 0 }; // where the menu opened, in window coordinates
+let trMail: { to: string; subject: string; body: string; cc: string[] } | null = null; // address under the mouse
+let trLink = ''; // web link under the mouse
+
+// The email address under the mouse: a mailto link, or an address written in the text
+function mailAt(e: MouseEvent, doc: Document): typeof trMail {
+  const a = (e.target as Element).closest?.('a[href]') as HTMLAnchorElement | null;
+  const href = a?.getAttribute('href') ?? '';
+  if (/^mailto:/i.test(href)) {
+    const [to, query = ''] = href.slice(7).split('?');
+    const q = new URLSearchParams(query);
+    return { to: decodeURIComponent(to), subject: q.get('subject') ?? '', body: q.get('body') ?? '', cc: (q.get('cc') ?? '').split(',').filter(Boolean) };
+  }
+  const at = doc.caretRangeFromPoint?.(e.clientX, e.clientY);
+  const text = at?.startContainer.nodeType === Node.TEXT_NODE ? at.startContainer.nodeValue ?? '' : '';
+  for (const m of text.matchAll(new RegExp(MAIL_IN_TEXT.source, 'g'))) {
+    if (at!.startOffset >= m.index! && at!.startOffset <= m.index! + m[0].length) return { to: m[0], subject: '', body: '', cc: [] };
+  }
+  return null;
+}
 
 function placeFixed(box: HTMLElement, x: number, y: number): void {
   box.style.left = `${Math.max(8, Math.min(x, innerWidth - box.offsetWidth - 8))}px`;
@@ -714,10 +739,16 @@ function openBodyMenu(e: MouseEvent, sel: Selection | null, frame?: HTMLIFrameEl
   const off = frame?.getBoundingClientRect() ?? { left: 0, top: 0 };
   trText = sel && !sel.isCollapsed ? sel.toString().trim() : '';
   trAt = { x: off.left + e.clientX, y: off.top + e.clientY };
+  const doc = (e.target as Node).ownerDocument ?? document;
+  trMail = mailAt(e, doc);
+  const link = (e.target as Element).closest?.('a[href]')?.getAttribute('href') ?? '';
+  trLink = /^https?:/i.test(link) ? link : '';
   const item = (attr: string, ico: string, label: string) => `<button type="button" role="menuitem" ${attr}>${ico}<span>${esc(label)}</span></button>`;
   const people = participants(msg);
   const def = translateTarget(trAi);
   trMenu.innerHTML = [
+    trMail ? item('data-bm="mailto"', ACT_ICONS.newMail, t('bm.mailTo', { to: trMail.to })) + item('data-bm="copyAddr"', ACT_ICONS.copy, t('bm.copyAddr')) + '<hr>' : '',
+    trLink ? item('data-bm="copyLink"', ACT_ICONS.copy, t('bm.copyLink')) + '<hr>' : '',
     trText ? item('data-bm="copy"', ACT_ICONS.copy, t('tr.copy')) : '',
     trText && trAi?.ready ? item(`data-tr-lang="${def}"`, ACT_ICONS.translate, t('tr.translateDefault', { lang: trLangName(def) })) : '',
     trText ? '<hr>' : '',
@@ -763,6 +794,12 @@ trMenu.addEventListener('click', (e) => {
   if (d.trLang) return void runTranslate(d.trLang);
   if (d.bmReact) return void sendReaction(msg, d.bmReact, bodyStatus);
   if (d.bm === 'copy') return void navigator.clipboard.writeText(trText).catch(() => {});
+  if (d.bm === 'copyAddr' && trMail) return void navigator.clipboard.writeText(trMail.to).catch(() => {});
+  if (d.bm === 'copyLink' && trLink) return void navigator.clipboard.writeText(trLink).catch(() => {});
+  // a new mail to that address, from the account (and alias) this mail came to
+  if (d.bm === 'mailto' && trMail) {
+    return void window.api.compose.open({ accountId: msg.accountId, matchAddresses: [...msg.toList, ...msg.ccList], to: [trMail.to], cc: trMail.cc, subject: trMail.subject, body: trMail.body });
+  }
   if (d.bm === 'reply' || d.bm === 'replyAll') return void window.api.compose.open(replyOpts(msg, d.bm === 'replyAll'));
   if (d.bmTo !== undefined) {
     const addr = (JSON.parse(trMenu.dataset.people || '[]') as string[])[Number(d.bmTo)];
@@ -792,6 +829,111 @@ document.addEventListener('keydown', (e) => {
   }
 });
 document.addEventListener('scroll', () => (trMenu.hidden = true), true);
+
+// Newsletter: an "Unsubscribe" button next to Reply. The address comes from the List-Unsubscribe
+// header; without it from a link in the text that says unsubscribe / abmelden / abbestellen …
+const UNSUB_TEXT = /unsubscribe|abmelden|abbestellen|austragen|abmeldung|désabonner|desabonner|se désinscrire|disiscriv|cancella.{0,10}iscrizione|darse de baja|cancelar.{0,10}suscripci|uitschrijven|afmelden|opt.?out/i;
+
+function unsubscribeLink(doc: Document): string {
+  const links = [...doc.querySelectorAll<HTMLAnchorElement>('a[href]')].filter((a) => /^(https?|mailto):/i.test(a.getAttribute('href') ?? ''));
+  const byText = links.filter((a) => UNSUB_TEXT.test(a.textContent ?? '')).pop(); // usually at the end
+  const byHref = links.filter((a) => /unsubscribe|abmelden|optout|opt-out/i.test(a.getAttribute('href') ?? '')).pop();
+  return (byText ?? byHref)?.getAttribute('href') ?? '';
+}
+
+// In the bar above the mail, next to "Load images"; without blocked images in a bar of its own
+function addUnsubscribe(box: HTMLElement, msg: MailDetail, target: string): void {
+  if (!target || box.querySelector('[data-unsub]')) return;
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'btn ghost sm';
+  b.dataset.unsub = '1';
+  b.textContent = t('mail.unsubscribe');
+  b.title = target.replace(/^mailto:/i, '');
+  b.addEventListener('click', () => {
+    if (/^mailto:/i.test(target)) {
+      // a mail to the list's address, from the account it came to
+      const [to, query = ''] = target.slice(7).split('?');
+      const q = new URLSearchParams(query);
+      void window.api.compose.open({ accountId: msg.accountId, matchAddresses: [...msg.toList, ...msg.ccList], to: [decodeURIComponent(to)], subject: q.get('subject') || 'unsubscribe', body: q.get('body') ?? '' });
+    } else window.open(target, '_blank'); // browser or the browser column, as set
+  });
+  let bar = box.querySelector<HTMLElement>('.img-banner');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.className = 'img-banner';
+    bar.innerHTML = `${ACT_ICONS.newMail}<span>${esc(t('mail.newsletter'))}</span>`;
+    box.insertBefore(bar, box.querySelector('.mail-frame, .text-body'));
+  }
+  bar.appendChild(b);
+}
+
+// Hovering a link in a mail or feed article: its real address at the bottom left, like a browser,
+// the domain in bold. A warning when the visible text names another domain than the link goes to
+// ("www.bank.ch" that really leads to bank-login.example) – a typical sign of phishing.
+const linkPeek = document.createElement('div');
+linkPeek.className = 'link-peek';
+linkPeek.hidden = true;
+document.body.appendChild(linkPeek);
+
+const bareHost = (h: string) => h.toLowerCase().replace(/^www\./, '');
+// the domain the visible text shows, if it looks like one ("ubs.com", "https://www.ubs.com/login")
+function shownHost(text: string): string {
+  const m = text.trim().match(/^(?:https?:\/\/)?((?:[a-z0-9-]+\.)+[a-z]{2,})(?:[/:?#]|$)/i);
+  return m ? bareHost(m[1]) : '';
+}
+const sameSite = (a: string, b: string) => a === b || a.endsWith('.' + b) || b.endsWith('.' + a);
+
+function showLinkPeek(a: HTMLAnchorElement): void {
+  placePeek(a);
+  const href = a.getAttribute('href') ?? '';
+  if (!href || href.startsWith('#')) return;
+  if (/^mailto:/i.test(href)) {
+    linkPeek.innerHTML = `<span>${esc(t('link.mailTo', { to: decodeURIComponent(href.slice(7).split('?')[0]) }))}</span>`;
+    linkPeek.classList.remove('warn');
+    linkPeek.hidden = false;
+    return;
+  }
+  let url: URL;
+  try {
+    url = new URL(href);
+  } catch {
+    linkPeek.textContent = href;
+    linkPeek.hidden = false;
+    return;
+  }
+  const real = bareHost(url.hostname); // punycode (xn--) stays visible: look-alike letters show up
+  const shown = shownHost(a.textContent ?? '');
+  const warn = !!shown && !!real && !sameSite(shown, real);
+  const rest = url.href.slice(url.href.indexOf(url.hostname) + url.hostname.length);
+  linkPeek.innerHTML =
+    (warn ? `<span class="peek-warn">${esc(t('link.mismatch', { shown, real }))}</span>` : '') +
+    `<span class="peek-url">${esc(url.protocol === 'https:' ? '' : url.protocol + '//')}<b>${esc(url.hostname)}</b>${esc(rest.length > 120 ? rest.slice(0, 120) + '…' : rest)}</span>`;
+  linkPeek.classList.toggle('warn', warn);
+  linkPeek.hidden = false;
+}
+
+// bottom left of the pane the mail or article is shown in (not of the whole window)
+function placePeek(a: HTMLAnchorElement): void {
+  const frame = a.ownerDocument.defaultView?.frameElement as HTMLElement | null;
+  const pane = frame?.closest<HTMLElement>('#reader, #rss-detail') ?? document.body;
+  const r = pane.getBoundingClientRect();
+  linkPeek.style.left = `${Math.max(0, r.left) + 8}px`;
+  linkPeek.style.bottom = `${Math.max(0, innerHeight - Math.min(innerHeight, r.bottom)) + 8}px`;
+  linkPeek.style.maxWidth = `${Math.max(200, Math.min(r.right, innerWidth) - Math.max(0, r.left) - 16)}px`;
+}
+
+function hookLinkPeek(doc: Document): void {
+  doc.addEventListener('mouseover', (e) => {
+    const a = (e.target as Element).closest?.('a[href]') as HTMLAnchorElement | null;
+    if (a) showLinkPeek(a);
+  });
+  doc.addEventListener('mouseout', (e) => {
+    if ((e.target as Element).closest?.('a[href]')) linkPeek.hidden = true;
+  });
+  doc.documentElement.addEventListener('mouseleave', () => (linkPeek.hidden = true));
+}
+window.addEventListener('blur', () => (linkPeek.hidden = true));
 
 function hookTranslate(frame: HTMLIFrameElement): void {
   const doc = frame.contentDocument;

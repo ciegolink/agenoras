@@ -504,7 +504,10 @@ async function showRssItem(key: string): Promise<void> {
   frame.setAttribute('sandbox', 'allow-same-origin allow-popups allow-popups-to-escape-sandbox');
   frame.srcdoc = wrapHtml(clean);
   frame.onload = () => {
-    if (frame.contentDocument) mailtoLinks(frame.contentDocument);
+    if (frame.contentDocument) {
+      mailtoLinks(frame.contentDocument);
+      hookLinkPeek(frame.contentDocument);
+    }
     const fit = () => (frame.style.height = (frame.contentDocument?.documentElement.scrollHeight ?? 600) + 'px');
     fit();
     frame.contentDocument?.querySelectorAll('img').forEach((img) => img.addEventListener('load', fit));
