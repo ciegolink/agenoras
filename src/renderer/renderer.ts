@@ -13,6 +13,9 @@ let listFilter: 'all' | 'unread' | 'attach' | 'flagged' = 'all'; // filter above
 let searchAccount: string | null = null; // null = all accounts
 let viewBeforeSearch: View = 'mail';
 let searchResults: MailSummary[] | null = null; // hits of the server search (full text)
+const SEARCH_STEP = 300;
+let searchShown = SEARCH_STEP; // drawn rows of the hit list
+let searchMore = false; // accounts with a local copy were not asked on the server
 let searchSeq = 0;
 type SearchKind = 'all' | 'mail' | 'event' | 'contact' | 'task' | 'feed';
 let searchKind: SearchKind = 'all'; // search: which kind of hits is shown
@@ -29,6 +32,7 @@ const LOCK_ICO = '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 
 const UNLOCK_ICO = '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/>';
 // categories (local, per mail via Message-ID) – managed in labels.ts
 let labels: MailLabel[] = [];
+let savedSearches: SavedSearch[] = []; // search folders
 let mailLabels: Record<string, string[]> = {};
 let labelFilter: string | null = null;
 // Collection views under "All inboxes": starred mails or a category (across all accounts/folders)
@@ -216,8 +220,121 @@ function renderVirtualList(showAll = false): void {
         `<button class="box vbox lbl-box${labelView === l.id ? ' active' : ''}" data-virtual="label:${esc(l.id)}" title="${esc(t('labels.dropTip'))}"><span class="vico"><span class="dot" style="background:${l.color}"></span></span><span class="name">${esc(l.name)}</span><span class="count">${n || ''}</span></button>`,
     )
     .join('');
-  box.innerHTML = outbox + star + cats;
+  const searches = savedSearches
+    .map(
+      (s) =>
+        `<button class="box vbox search-box-v" data-virtual="search:${esc(s.id)}" title="${esc(s.query)}"><span class="vico">${svgIco('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>', 14)}</span><span class="name">${esc(s.name)}</span></button>`,
+    )
+    .join('');
+  box.innerHTML = outbox + star + cats + searches;
 }
+
+// Search folders: a search kept under a name, run again on every click (always up to date)
+function openSavedSearch(id: string): void {
+  const s = savedSearches.find((x) => x.id === id);
+  if (!s) return;
+  const input = el<HTMLInputElement>('#search');
+  input.value = s.query;
+  el('#search-clear').hidden = false;
+  searchAccount = s.account && accounts.some((a) => a.id === s.account) ? s.account : null;
+  searchKind = 'all';
+  searchResults = null;
+  openSearchPage();
+  renderSearchSide(s.query);
+  renderList();
+  void runSearch();
+}
+
+async function storeSearches(list: SavedSearch[]): Promise<void> {
+  try {
+    savedSearches = await window.api.settings.saveSearches(list);
+  } catch (err) {
+    setStatus(errMsg(err));
+  }
+  renderVirtualList();
+  paintSearchSave();
+}
+
+const currentSearchSaved = () => {
+  const q = el<HTMLInputElement>('#search').value.trim();
+  return savedSearches.some((s) => s.query === q && s.account === searchAccount);
+};
+function paintSearchSave(): void {
+  const btn = document.querySelector<HTMLButtonElement>('#search-save');
+  if (!btn) return;
+  btn.hidden = el<HTMLInputElement>('#search').value.trim().length < 2 || currentSearchSaved();
+}
+
+async function saveCurrentSearch(): Promise<void> {
+  const q = el<HTMLInputElement>('#search').value.trim();
+  if (q.length < 2 || currentSearchSaved()) return;
+  const acc = searchAccount ? accountOf(searchAccount) : null;
+  const name = acc ? `${q} · ${accLabel(acc)}` : q;
+  await storeSearches([...savedSearches, { id: crypto.randomUUID(), name, query: q, account: searchAccount }]);
+  setStatus(t('search.saved', { name }));
+}
+
+// Right click on a search folder: rename, delete
+const searchMenu = document.createElement('div');
+searchMenu.className = 'ctx-menu';
+searchMenu.setAttribute('role', 'menu');
+searchMenu.hidden = true;
+document.body.appendChild(searchMenu);
+let searchMenuId = '';
+
+function renameSavedSearch(id: string): void {
+  const box = document.querySelector<HTMLElement>(`#virtual-list [data-virtual="search:${CSS.escape(id)}"]`);
+  const s = savedSearches.find((x) => x.id === id);
+  const name = box?.querySelector<HTMLElement>('.name');
+  if (!box || !s || !name) return;
+  const input = document.createElement('input');
+  input.className = 'vbox-rename';
+  input.value = s.name;
+  name.replaceWith(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = (save: boolean) => {
+    if (done) return;
+    done = true;
+    const v = input.value.trim();
+    if (save && v && v !== s.name) void storeSearches(savedSearches.map((x) => (x.id === id ? { ...x, name: v } : x)));
+    else renderVirtualList();
+  };
+  input.addEventListener('keydown', (e) => {
+    e.stopPropagation();
+    if (e.key === 'Enter') finish(true);
+    else if (e.key === 'Escape') finish(false);
+  });
+  input.addEventListener('click', (e) => e.stopPropagation());
+  input.addEventListener('blur', () => finish(true));
+}
+
+el('#virtual-list').addEventListener('contextmenu', (e) => {
+  const kind = (e.target as HTMLElement).closest<HTMLElement>('[data-virtual]')?.dataset.virtual;
+  if (!kind?.startsWith('search:')) return;
+  e.preventDefault();
+  e.stopPropagation();
+  searchMenuId = kind.slice(7);
+  searchMenu.innerHTML =
+    `<button type="button" role="menuitem" data-ssearch-act="rename"><span>${esc(t('search.rename'))}</span></button>` +
+    `<button type="button" role="menuitem" class="danger" data-ssearch-act="delete">${ACT_ICONS.trash}<span>${esc(t('search.deleteSaved'))}</span></button>`;
+  searchMenu.hidden = false;
+  const r = searchMenu.getBoundingClientRect();
+  searchMenu.style.left = `${Math.min(e.clientX, innerWidth - r.width - 6)}px`;
+  searchMenu.style.top = `${Math.min(e.clientY, innerHeight - r.height - 6)}px`;
+});
+searchMenu.addEventListener('click', (e) => {
+  const act = (e.target as HTMLElement).closest<HTMLElement>('[data-ssearch-act]')?.dataset.ssearchAct;
+  if (!act) return;
+  searchMenu.hidden = true;
+  if (act === 'rename') renameSavedSearch(searchMenuId);
+  else void storeSearches(savedSearches.filter((x) => x.id !== searchMenuId));
+});
+document.addEventListener('mousedown', (e) => {
+  if (!searchMenu.contains(e.target as Node)) searchMenu.hidden = true;
+});
+document.addEventListener('scroll', () => (searchMenu.hidden = true), true);
 
 // Outbox list: what is being sent (with progress) and what failed (with the reason and what to do)
 function renderOutbox(): void {
@@ -327,6 +444,7 @@ el('#quick-filter').addEventListener('keydown', (e) => {
 });
 
 function openVirtual(kind: string): void {
+  if (kind.startsWith('search:')) return openSavedSearch(kind.slice(7));
   flaggedView = kind === 'flagged';
   outboxView = kind === 'outbox';
   labelView = kind.startsWith('label:') ? kind.slice(6) : null;
@@ -470,7 +588,12 @@ function paintOlderRow(): void {
 
 el('#mail-list').addEventListener('scroll', () => {
   const list = el('#mail-list');
-  if (list.scrollTop + list.clientHeight > list.scrollHeight - 400) void loadOlder();
+  if (list.scrollTop + list.clientHeight <= list.scrollHeight - 400) return;
+  if (!isSearchView()) return void loadOlder();
+  if ((searchResults?.length ?? 0) > searchShown) {
+    searchShown += SEARCH_STEP;
+    renderList();
+  }
 });
 
 async function loadMails(): Promise<void> {
@@ -682,10 +805,19 @@ function renderList(): void {
   if (q && searchKind !== 'all' && searchKind !== 'mail') shown = [];
   const progressRow = (text: string) => `<div class="search-progress" role="status"><span class="search-spin"></span>${esc(text)}</div>`;
   // first the fast hits; the mails from the server are added below them later
-  const serverRow = phase === 'server' && (searchKind === 'all' || searchKind === 'mail') ? progressRow(t('search.runningServer')) : '';
+  const mailKind = searchKind === 'all' || searchKind === 'mail';
+  const serverRow =
+    phase === 'server' && mailKind
+      ? progressRow(t('search.runningServer'))
+      : searchPage && q && phase === 'idle' && searchMore && mailKind
+        ? `<button type="button" class="hit-more search-server" data-search-server>${esc(t('search.onServer'))}</button>`
+        : '';
   const extraHtml = (typing ? progressRow(t('search.runningAll')) : '') + (q ? searchHitsHtml(evs, cts, tks, fds, shown.length) : '') + serverRow;
   // Conversations: only in normal folders, not while searching or in filtered/virtual views
-  const rows = !q && !qf && !inVirtual() ? buildThreads(shown) : shown;
+  let rows = !q && !qf && !inVirtual() ? buildThreads(shown) : shown;
+  // many hits: drawn in steps, more follow while scrolling down
+  const hiddenHits = searchPage ? Math.max(0, rows.length - searchShown) : 0;
+  if (hiddenHits) rows = rows.slice(0, searchShown);
   closedThreads.clear(); // filled again while the rows are drawn
   const rowOpts = { showTo, listFolder, animateNew };
   shownKeys = rows.flatMap((row) => (isThread(row) ? (expandedThreads.has(row.id) ? row.mails : [row.mails[0]]) : [row]).map(mailKey));
@@ -699,7 +831,7 @@ function renderList(): void {
     extraHtml +
     (rows
       .map((row) => (isThread(row) ? threadRowsHtml(row, rowOpts) : mailRowHtml(row, rowOpts)))
-      .join('') + (qf && rows.length ? searchElsewhereHtml(qfRaw, true) : '') || (extraHtml || busy ? '' : qf ? searchElsewhereHtml(qfRaw, false) : `<div class="list-empty">${esc(q ? t('mail.noHits') : listFilter !== 'all' || labelFilter ? t('mail.noFiltered') : t('mail.folderEmpty'))}</div>`));
+      .join('') + (hiddenHits ? `<div class="list-more">${esc(t('search.moreHits', { n: hiddenHits }))}</div>` : '') + (qf && rows.length ? searchElsewhereHtml(qfRaw, true) : '') || (extraHtml || busy ? '' : qf ? searchElsewhereHtml(qfRaw, false) : `<div class="list-empty">${esc(q ? t('mail.noHits') : listFilter !== 'all' || labelFilter ? t('mail.noFiltered') : t('mail.folderEmpty'))}</div>`));
   listKeysBefore = new Set(shownKeys);
   if (typeof renderLabelSidebar === 'function') renderLabelSidebar();
 }
@@ -1570,6 +1702,7 @@ el('#mail-list').addEventListener('click', (e) => {
   if (tgt.closest('[data-action="add-account"]')) return openAddMailAccount();
   const go = tgt.closest<HTMLElement>('[data-kind-go]')?.dataset.kindGo;
   if (go) return setSearchKind(go as SearchKind);
+  if (tgt.closest('[data-search-server]')) return void searchOnServer();
   const evIdx = tgt.closest<HTMLElement>('[data-hit-event]')?.dataset.hitEvent;
   if (evIdx !== undefined) {
     const ev = eventHits[Number(evIdx)];
@@ -1678,6 +1811,8 @@ async function quickTasks(ql: string): Promise<Task[]> {
 async function runSearch(): Promise<void> {
   const q = el<HTMLInputElement>('#search').value.trim();
   const seq = ++searchSeq;
+  searchShown = SEARCH_STEP;
+  searchMore = false;
   if (q.length < 2) {
     setSearchPhase('idle');
     return renderList();
@@ -1686,7 +1821,7 @@ async function runSearch(): Promise<void> {
   renderList();
   setStatus(t('search.running'));
   const ql = q.toLowerCase();
-  type MailRes = { mails: MailSummary[] | null; errors: { accountId: string; message: string }[]; failed?: string };
+  type MailRes = { mails: MailSummary[] | null; errors: { accountId: string; message: string }[]; more?: boolean; failed?: string };
   const server: Promise<MailRes> = accounts.length
     ? window.api.searchMail(searchAccount, null, q).catch((err) => ({ mails: null, errors: [], failed: errMsg(err) }))
     : Promise.resolve({ mails: [], errors: [] });
@@ -1721,14 +1856,36 @@ async function runSearch(): Promise<void> {
     // server hits plus local ones the server limit cut off; server version wins
     const byKey = new Map(local.map((m) => [mailKey(m), m]));
     for (const m of mailRes.mails) byKey.set(mailKey(m), m);
-    searchResults = [...byKey.values()].sort((a, b) => b.date.localeCompare(a.date));
+    searchResults = [...byKey.values()].sort((a, b) => b.date.localeCompare(a.date)).slice(0, SEARCH_MAX);
   }
+  searchMore = !!mailRes.more;
   setSearchPhase('idle');
   renderList();
   const errs = mailRes.errors.map((er) => `${accountOf(er.accountId)?.email ?? ''}: ${er.message}`);
   if (mailRes.failed) errs.unshift(mailRes.failed);
   const n = (searchResults?.length ?? 0) + eventHits.length + contactHits.length + taskHits.length + feedHits.length;
-  setStatus([t('search.done', { n }), ...errs].join(' · '));
+  const capped = (searchResults?.length ?? 0) >= SEARCH_MAX ? [t('search.capped', { n: SEARCH_MAX })] : [];
+  setStatus([t('search.done', { n }), ...capped, ...errs].join(' · '));
+}
+
+const SEARCH_MAX = 20000; // same limit as in main.ts
+// Accounts with a local copy: the server only on request, for mails older than the copy
+async function searchOnServer(): Promise<void> {
+  const q = el<HTMLInputElement>('#search').value.trim();
+  const seq = searchSeq;
+  searchMore = false;
+  setSearchPhase('server');
+  renderList();
+  setStatus(t('search.running'));
+  const res = await window.api.searchMail(searchAccount, null, q, true).catch((err) => ({ mails: [] as MailSummary[], errors: [{ accountId: '', message: errMsg(err) }] }));
+  if (seq !== searchSeq) return;
+  const byKey = new Map((searchResults ?? []).map((m) => [mailKey(m), m]));
+  for (const m of res.mails) byKey.set(mailKey(m), m);
+  searchResults = [...byKey.values()].sort((a, b) => b.date.localeCompare(a.date)).slice(0, SEARCH_MAX);
+  setSearchPhase('idle');
+  renderList();
+  const errs = res.errors.map((er) => [accountOf(er.accountId)?.email, er.message].filter(Boolean).join(': '));
+  setStatus([t('search.done', { n: searchHitCount() }), ...errs].join(' · '));
 }
 
 const HIT_PREVIEW = 3; // under "All": this many appointments/contacts, the rest behind "show more"
@@ -1862,6 +2019,7 @@ function renderSearchSide(q: string): void {
   el('#search-kinds').innerHTML = SEARCH_KINDS.filter(([k]) => k !== 'feed' || rssFeeds.length)
     .map(([k, ico]) => `<button class="box${searchKind === k ? ' active' : ''}" data-skind="${k}"><span class="vico">${svgIco(ico, 15)}</span><span class="name">${esc(t(`search.kind.${k}`))}</span><span class="count" data-skind-n="${k}"></span></button>`)
     .join('');
+  paintSearchSave();
   el('#search-accounts').innerHTML = [
     `<button class="box${searchAccount === null ? ' active' : ''}" data-sacc=""><span class="name">${esc(t('search.allAccounts'))}</span></button>`,
     ...accounts.map((a) => `<button class="box${searchAccount === a.id ? ' active' : ''}" data-sacc="${esc(a.id)}"><span class="dot" style="background:${colorOf(a.id)}"></span><span class="name">${esc(accLabel(a))}</span></button>`),
@@ -1883,9 +2041,11 @@ el('#side-search').addEventListener('click', (e) => {
   const tgt = e.target as HTMLElement;
   const kind = tgt.closest<HTMLElement>('[data-skind]')?.dataset.skind as SearchKind | undefined;
   if (kind) return setSearchKind(kind);
+  if (tgt.closest('#search-save')) return void saveCurrentSearch();
   const acc = tgt.closest<HTMLElement>('[data-sacc]')?.dataset.sacc;
   if (acc === undefined || (acc || null) === searchAccount) return;
   searchAccount = acc || null;
+  paintSearchSave();
   searchResults = null;
   renderList();
   runSearch();
@@ -2280,6 +2440,8 @@ window.api.settings
   .then((s) => {
     if (s.notify) notify = s.notify;
     labels = s.labels ?? [];
+    savedSearches = s.savedSearches ?? [];
+    renderVirtualList();
     readDelay = s.readDelay ?? 3;
     mailLabels = s.mailLabels ?? {};
     renderList();

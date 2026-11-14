@@ -192,6 +192,7 @@ export async function applyImport(f: ExportFile, password: string): Promise<{ ad
       labels: byId(mine.labels, theirs.labels),
       mailLabels: { ...(mine.mailLabels as object), ...(theirs.mailLabels as object) },
       trustedSenders: union(mine.trustedSenders, theirs.trustedSenders),
+      blockedRecipients: union(mine.blockedRecipients, theirs.blockedRecipients),
       imageMails: union(mine.imageMails, theirs.imageMails),
       offline: { ...(mine.offline as object), ...(theirs.offline as object) },
       notify: {

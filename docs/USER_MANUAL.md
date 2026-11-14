@@ -130,7 +130,11 @@ The search field in the title bar searches everything: emails (full text on the 
 - **Mails from** (left): all accounts or a single account. Emails are always searched in all folders.
 - The hits are in the middle, an email opens in the preview on the right. Appointments, contacts, tasks and feed articles open in their own view; click into the search field again to get back to the hits.
 - The **All**, **Unread**, attachment and star buttons above the hits filter the email results.
+- **Local first**: for accounts with an offline copy (**Available offline**, see the account settings) Agenoras searches only that copy, which is instant and works without internet. For accounts set to **All emails** that is everything. With a shorter period, **Also search on the server (older emails)** above the hits asks the server too. Accounts without an offline copy are always searched on the server as well.
+- Many hits: all are listed; the list shows 300 at a time and adds more as you scroll down.
 - **Search by date**: type a date such as **12.3.2024**, **12.3.** (this year), **2024-03-12** or **12/3/2024**, or a month such as **March 2024** or **Mar 24**. You get the emails of that day or month, plus emails that contain the text.
+
+**Search folders**: click **Save as search folder** on the left of the search page to keep the search (with the account chosen under **Mails from**) in the sidebar of the mail view, below the categories. Clicking it runs the search again, so it always shows the current hits; nothing is copied. Right-click a search folder to **Rename** or delete it.
 
 Click **×** in the search field or press **Esc** to close the search and return to where you were.
 
@@ -256,6 +260,10 @@ The toolbar shows icons only; hover over an icon to see what it does.
 
 Type a name or address into **To**, **Cc** or **Bcc**. Agenoras suggests addresses from your contacts and people you have emailed before. Use the arrow keys and **Enter** or **Tab** to pick one. Separate several recipients with **Enter**, a comma or a semicolon. **Backspace** in an empty field removes the last recipient. Type the name of a [distribution list](#distribution-lists) to add all its recipients at once.
 
+If an address should not be used any more, for example because someone has changed companies, hover over the suggestion and click **Don't use**, or select it with the arrow keys and press **Shift+Delete**. The address is then no longer suggested and is not accepted as a recipient, even when you type it or use **Reply all**. Emails from that address still arrive. You find the list under **Settings → Writing & reading → Addresses not to use**, where you can remove an address again.
+
+Right-click a recipient for **Add as contact** (only for addresses not yet in your address book; the main window opens a new contact with name and address filled in), **Copy email address** and **Edit**, which puts the recipient back into the field so you can fix a typo. Double-clicking a recipient also edits it.
+
 ### Sender
 
 Choose the sender address under **From**. When you reply, Agenoras automatically picks the address the email was sent to. Aliases are set up under **Settings → Senders & signatures**.
@@ -336,7 +344,7 @@ Rules run from top to bottom for every new email in the inbox, including emails 
 
 ## 7. Calendar
 
-The calendar shows a week view with a month overview. Use **Today**, **Previous week** and **Next week** to move around. Tick or untick calendars in the sidebar to show or hide them.
+The calendar shows a week view with a month overview. Use **Today**, **Previous week** and **Next week** to move around. Tick or untick calendars in the sidebar to show or hide them. In the month overview at the bottom of the sidebar, a dot under a day means there is an appointment that day; click a day to jump to its week. The red line in the week view marks the current time.
 
 ### Creating and changing events
 
@@ -386,7 +394,8 @@ The contacts view lists all address books from your CardDAV accounts and local a
 - **New contact**: first and last name, company, job title, emails and phone numbers (one per line), birthday, note and address book.
 - **Photo**: drop an image onto the photo area or click it. It is cropped to a square automatically. Contact photos are also shown next to emails from that person.
 - **Write email** starts a new email to the contact. **Recent emails** shows your latest correspondence.
-- To create a contact from an email, click the sender's name and choose **Add as contact**.
+- **Move to another address book**: open the contact, click **Edit** and choose a different **Address book**. Agenoras creates the contact there with all its details and removes it from the old one, also between a server and a local address book.
+- To create a contact from an email, click the sender's name and choose **Add as contact**; while writing, right-click a recipient.
 
 ### Selecting several contacts
 
@@ -458,7 +467,7 @@ Apart from that, **About Agenoras** in the gear menu shows your version, **Look 
 
 Add, edit and remove email, CalDAV and CardDAV accounts and RSS feeds (see [First start](#2-first-start-adding-accounts)). Under **Edit** you can also change an account's colour and make it private with a PIN.
 
-**Available offline** (IMAP accounts, under **Edit**): by default Agenoras stores only the newest emails of each folder and the ones you opened. Choose **Last 30 days**, **Last 90 days**, **Last year**, **Last 5 years** or **All emails** to keep every email of that period on your computer, with its text and a full-text index (subject, people, text and the names of attachments). Agenoras first loads the headers of all folders, so searching by sender and subject works offline right away, then the texts, newest first. Attachments are loaded only when you open them; of very large emails only the first 512 KB are stored. While it downloads, a line at the bottom of the sidebar shows the folder and how far it is. In the account dialog you see how many emails are stored and how much space they take; **Sync now** starts a run at once (otherwise every 30 minutes). As a guide: 100'000 emails take about 2–3 GB including the index, and a search in them takes well under a second. With **All emails**, once everything is stored, the search no longer asks this account's server at all. Going back to **Newest emails only** deletes the account's offline copy and gives the disk space back (the status line says how much); removing an account with an offline copy or a POP3 account does the same. Private accounts are not included. POP3 accounts keep all their emails locally anyway; there you choose instead whether to **Leave a copy on the server**.
+**Available offline** (IMAP accounts, under **Edit**): by default Agenoras stores only the newest emails of each folder and the ones you opened. Choose **Last 30 days**, **Last 90 days**, **Last year**, **Last 5 years** or **All emails** to keep every email of that period on your computer, with its text and a full-text index (subject, people, text and the names of attachments). Agenoras first loads the headers of all folders, so searching by sender and subject works offline right away, then the texts, newest first. Attachments are loaded only when you open them; of very large emails only the first 512 KB are stored. While it downloads, a line at the bottom of the sidebar shows the folder and how far it is. In the account dialog you see how many emails are stored and how much space they take; **Sync now** starts a run at once (otherwise every 30 minutes). As a guide: 100'000 emails take about 2–3 GB including the index, and a search in them takes well under a second. Searching such an account stays local; with **All emails**, once everything is stored, the server is no longer asked at all, with a shorter period only when you click **Also search on the server**. Going back to **Newest emails only** deletes the account's offline copy and gives the disk space back (the status line says how much); removing an account with an offline copy or a POP3 account does the same. Private accounts are not included. POP3 accounts keep all their emails locally anyway; there you choose instead whether to **Leave a copy on the server**.
 
 ### Senders & signatures
 
@@ -475,6 +484,7 @@ Your mail server must allow you to send from an alias address.
 - **Mark as read**: when an opened email counts as read (immediately, after 1–10 seconds, or only by hand)
 - **Spell check**: red underlines while writing and the dictionary part of proofreading – **Off**, **System language** or one language of your choice (on macOS the system's spell checker chooses the language itself)
 - **External emails**: mark external senders, additional internal domains
+- **Addresses not to use**: addresses that are no longer suggested or accepted as recipients, one per line
 
 ### Notifications
 

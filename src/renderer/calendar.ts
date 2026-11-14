@@ -320,9 +320,27 @@ el('#cal-today').addEventListener('click', () => {
   loadEvents();
 });
 
-setInterval(() => {
-  if (el('.app').dataset.view === 'cal') renderWeek();
-}, 60_000);
+// Red line "now": moved on every full minute and right away when the window comes back
+// (hidden windows and sleep delay timers, so a fixed interval lags behind)
+function updateNowLine(): void {
+  if (el('.app').dataset.view !== 'cal') return;
+  const today = ymd(new Date());
+  const col = document.querySelector<HTMLElement>('#week .day-col.today');
+  const shown = document.querySelector<HTMLElement>(`#week .day-col[data-day="${today}"]`);
+  if ((col && col !== shown) || (!col && shown)) return renderWeek(); // the day changed
+  const line = col?.querySelector<HTMLElement>('.now-line');
+  if (!line) return;
+  const now = new Date();
+  line.style.top = `${((now.getHours() * 60 + now.getMinutes()) / 60) * HOUR_PX}px`;
+}
+function nowLineTick(): void {
+  updateNowLine();
+  setTimeout(nowLineTick, 60_000 - (Date.now() % 60_000) + 50);
+}
+nowLineTick();
+document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && updateNowLine());
+window.addEventListener('focus', updateNowLine);
+document.addEventListener('viewchange', () => setTimeout(updateNowLine, 0));
 
 // Calendar list: show/hide, remove account
 el('#cal-list').addEventListener('change', (e) => {
@@ -915,7 +933,58 @@ function renderCalMini(): void {
       <b>${esc(calMiniMonth.toLocaleDateString(LOCALE, { month: 'long', year: 'numeric' }))}</b>
       <button type="button" class="icon-btn sm" data-mini-nav="1" aria-label="${esc(t('agenda.nextMonth'))}">›</button>
     </div>
-    ${miniMonthHtml(calMiniMonth, { weekOf: weekStart, attr: 'data-mini-day' })}`;
+    ${miniMonthHtml(calMiniMonth, { weekOf: weekStart, attr: 'data-mini-day', dots: (d) => miniBusy(d) })}`;
+  void loadMiniDots();
+}
+
+// Dots under the days with appointments: the six weeks of the small month, loaded in the background.
+// The shown week comes from what the week view just loaded, so a new appointment shows at once.
+let miniEvents: CalEvent[] = [];
+let miniKey = '';
+let miniAt = 0;
+let miniLoading = '';
+function eventDays(list: CalEvent[]): Set<string> {
+  const days = new Set<string>();
+  for (const ev of list) {
+    let d = ev.allDay ? parseYmd(ev.start) : new Date(ev.start);
+    d = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    // all-day: end is exclusive; timed: up to the last minute
+    const end = ev.allDay ? parseYmd(ev.end || ev.start) : new Date(new Date(ev.end || ev.start).getTime() - 1);
+    for (let i = 0; i < 62 && (i === 0 || d < end); i++) {
+      days.add(ymd(d));
+      d = addDays(d, 1);
+      if (!ev.allDay && d > end) break;
+    }
+  }
+  return days;
+}
+function miniBusy(d: Date): boolean {
+  const k = ymd(d);
+  const wkFrom = ymd(weekStart);
+  const wkTo = ymd(addDays(weekStart, 6));
+  if (calLoaded && k >= wkFrom && k <= wkTo) return eventDays(calEvents).has(k);
+  return eventDays(miniEvents).has(k);
+}
+async function loadMiniDots(): Promise<void> {
+  const ids = visibleCalIds();
+  const first = new Date(calMiniMonth.getFullYear(), calMiniMonth.getMonth(), 1);
+  const gridStart = addDays(first, -((first.getDay() - WEEK_START + 7) % 7));
+  const key = `${ymd(gridStart)}|${ids.join(',')}`;
+  if (!ids.length || miniLoading === key || (key === miniKey && Date.now() - miniAt < 60_000)) return;
+  miniLoading = key;
+  try {
+    const res = await window.api.cal.listEvents(ids, gridStart.toISOString(), addDays(gridStart, 42).toISOString());
+    if (calMiniMonth.getTime() !== first.getTime()) return; // month changed meanwhile: its own load follows
+    miniEvents = res.events;
+    miniKey = key;
+    miniAt = Date.now();
+  } catch {
+    return; // offline: no dots outside the shown week
+  } finally {
+    miniLoading = '';
+  }
+  const box = document.querySelector<HTMLElement>('#cal-mini .ag-grid');
+  if (box) box.outerHTML = miniMonthHtml(calMiniMonth, { weekOf: weekStart, attr: 'data-mini-day', dots: (d) => miniBusy(d) });
 }
 
 el('#cal-mini').addEventListener('click', (e) => {

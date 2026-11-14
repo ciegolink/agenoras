@@ -99,7 +99,7 @@ el('#mail-list').addEventListener('dragstart', () => setTimeout(() => renderVirt
 el('#mail-list').addEventListener('dragend', () => renderVirtualList());
 
 el('#virtual-list').addEventListener('dragover', (e) => {
-  const box = (e.target as HTMLElement).closest<HTMLElement>('[data-virtual]');
+  const box = (e.target as HTMLElement).closest<HTMLElement>('[data-virtual]:not([data-virtual^="search:"])');
   document.querySelectorAll('#virtual-list .drop-target').forEach((r) => r !== box && r.classList.remove('drop-target'));
   if (!box || !dragKeys.length) return;
   e.preventDefault();
@@ -110,7 +110,7 @@ el('#virtual-list').addEventListener('dragleave', (e) => {
   if (!el('#virtual-list').contains(e.relatedTarget as Node)) document.querySelectorAll('#virtual-list .drop-target').forEach((r) => r.classList.remove('drop-target'));
 });
 el('#virtual-list').addEventListener('drop', async (e) => {
-  const box = (e.target as HTMLElement).closest<HTMLElement>('[data-virtual]');
+  const box = (e.target as HTMLElement).closest<HTMLElement>('[data-virtual]:not([data-virtual^="search:"])');
   if (!box || !dragKeys.length) return;
   e.preventDefault();
   const keys = dragKeys;

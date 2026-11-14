@@ -300,6 +300,15 @@ export async function saveContact(input: ContactInput): Promise<void> {
   if (input.url) {
     const raw = rawCards.get(input.url);
     if (!raw) throw new Error(t('err.contactNotLoaded'));
+    // another address book chosen: create it there (with everything the card holds), then remove the old one
+    if (input.bookId && input.bookId !== raw.bookId) {
+      const to = await connFor(input.bookId);
+      await check(await to.client.createVCard({ addressBook: to.book, filename: `${crypto.randomUUID()}.vcf`, vCardString: buildVCard(input, raw) }));
+      const from = await connFor(raw.bookId);
+      await check(await from.client.deleteVCard({ vCard: { url: input.url, etag: raw.etag } }));
+      rawCards.delete(input.url);
+      return;
+    }
     const { client } = await connFor(raw.bookId);
     await check(await client.updateVCard({ vCard: { url: input.url, etag: raw.etag, data: buildVCard(input, raw) } }));
     return;

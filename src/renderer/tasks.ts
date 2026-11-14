@@ -35,6 +35,11 @@ function longDay(v: string): string {
 
 // counts saves: a reload that started before a save would bring back the old state
 let taskSaves = 0;
+// tasks being saved or deleted: greyed out until the server has them
+const busyTasks = new Set<string>();
+function paintBusyTasks(): void {
+  document.querySelectorAll<HTMLElement>('[data-task], [data-ag-task]').forEach((r) => r.classList.toggle('busy-item', busyTasks.has(r.dataset.task ?? r.dataset.agTask ?? '')));
+}
 
 async function loadTasks(): Promise<void> {
   const saves = taskSaves;
@@ -186,6 +191,7 @@ function renderTasks(): void {
   el('#task-groups').innerHTML = html + elsewhere || `<div class="tasks-empty">${esc(!taskLists.length ? t('tasks.noLists') : t('tasks.allDone'))}</div>`;
   if (typeof renderAgendaTasks === 'function') renderAgendaTasks();
   renderTaskDetail();
+  paintBusyTasks();
   void syncPins();
 }
 
@@ -226,7 +232,15 @@ async function setTaskPercent(task: Task, pct: number): Promise<void> {
 // onSaved: runs once the server has the task, before the list is reloaded (closes the dialog)
 async function saveTaskInput(input: TaskInput, onSaved?: () => void): Promise<void> {
   taskSaves++;
-  const saved = await window.api.tasks.save(input);
+  if (input.id) busyTasks.add(input.id);
+  paintBusyTasks();
+  let saved: Awaited<ReturnType<typeof window.api.tasks.save>>;
+  try {
+    saved = await window.api.tasks.save(input);
+  } finally {
+    if (input.id) busyTasks.delete(input.id);
+    paintBusyTasks();
+  }
   onSaved?.();
   if (saved?.tasks) {
     // only this task changed: no reload of all lists
@@ -382,7 +396,14 @@ async function deleteTaskAsk(task: Task): Promise<boolean> {
   if (!confirm(t('tasks.confirmDelete', { title: task.title }))) return false;
   try {
     taskSaves++;
-    await window.api.tasks.delete(task.id);
+    busyTasks.add(task.id);
+    paintBusyTasks();
+    try {
+      await window.api.tasks.delete(task.id);
+    } finally {
+      busyTasks.delete(task.id);
+      paintBusyTasks();
+    }
     if (selectedTask === task.id) selectedTask = '';
     taskItems = taskItems.filter((x) => x.id !== task.id); // no reload of all lists
     renderTasks();

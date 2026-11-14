@@ -5,6 +5,11 @@ let books: AddressBookInfo[] = [];
 let contacts: Contact[] = [];
 let currentBook: string | null = null;
 let selectedContact = '';
+// contacts being saved, moved or deleted: greyed out until the server has them
+const busyContacts = new Set<string>();
+function paintBusyContacts(): void {
+  document.querySelectorAll<HTMLElement>('#contact-list [data-contact], #contact-detail').forEach((r) => r.classList.toggle('busy-item', busyContacts.has(r.dataset.contact ?? (r.id === 'contact-detail' ? selectedContact : ''))));
+}
 let pickedContacts = new Set<string>(); // multi-select (Ctrl/Shift+click, Ctrl+A)
 let anchorContact = '';
 let shownContactIds: string[] = [];
@@ -106,7 +111,7 @@ function renderContacts(): void {
       const head = letter !== last ? `<div class="letter">${esc(letter)}</div>` : '';
       last = letter;
       const sub = c.org || c.emails[0]?.value || c.phones[0]?.value || '';
-      return `${head}<button class="person${pickedContacts.has(c.id) || c.id === selectedContact ? ' selected' : ''}" data-contact="${esc(c.id)}" draggable="true">
+      return `${head}<button class="person${pickedContacts.has(c.id) || c.id === selectedContact ? ' selected' : ''}${busyContacts.has(c.id) ? ' busy-item' : ''}" data-contact="${esc(c.id)}" draggable="true">
         <span class="avatar${c.photo ? ' has-img' : ''}">${c.photo ? `<img src="${esc(c.photo)}" alt="">` : esc(initials(c.name))}</span>
         <span class="who"><b>${esc(c.name)}</b><span>${esc(sub)}</span></span>
       </button>`;
@@ -303,10 +308,11 @@ function openContactDialog(c: Contact | null): void {
   ctForm.reset();
   el('#contact-error').textContent = '';
   el('#contact-title').innerHTML = t(c ? 'contacts.editTitle' : 'contacts.newTitle');
-  const options = c ? books.filter((b) => b.id === c.bookId) : books;
-  ctBook().innerHTML = options.map((b) => `<option value="${esc(b.id)}">${esc(b.name)} · ${esc(b.accountName)}</option>`).join('');
-  ctBook().disabled = !!c;
-  if (!c && currentBook) ctBook().value = currentBook;
+  // editing: choosing another address book moves the contact there
+  ctBook().innerHTML = books.map((b) => `<option value="${esc(b.id)}">${esc(b.name)} · ${esc(b.accountName)}</option>`).join('');
+  ctBook().disabled = false;
+  if (c) ctBook().value = c.bookId;
+  else if (currentBook) ctBook().value = currentBook;
   if (c) {
     ctField('firstName').value = c.firstName;
     ctField('lastName').value = c.lastName;
@@ -422,9 +428,12 @@ ctForm.addEventListener('submit', async (e) => {
   const btn = el<HTMLButtonElement>('#btn-contact-save');
   savingBtn(btn, true);
   el('#contact-error').textContent = '';
+  const busyId = editingContact?.id;
+  if (busyId) busyContacts.add(busyId);
+  paintBusyContacts();
   try {
     await window.api.contacts.save({
-      bookId: editingContact?.bookId ?? ctBook().value,
+      bookId: ctBook().value || editingContact?.bookId || '',
       url: editingContact?.id,
       firstName: ctField('firstName').value,
       lastName: ctField('lastName').value,
@@ -435,19 +444,26 @@ ctForm.addEventListener('submit', async (e) => {
       note: ctField('note').value,
       photo: ctPhoto,
     });
+    const moved = !!editingContact && ctBook().value !== editingContact.bookId;
     ctDlg.close();
+    if (moved) selectedContact = ''; // it has a new address there
     await loadContacts();
+    if (moved) setContactsStatus(t('contacts.moved', { book: ctBook().selectedOptions[0]?.textContent ?? '' }));
     if (ctPhoto !== undefined) refreshAvatars([...lines('emails'), ...(editingContact?.emails.map((m) => m.value) ?? [])]);
   } catch (err) {
     el('#contact-error').textContent = errMsg(err);
   } finally {
     savingBtn(btn, false);
+    if (busyId) busyContacts.delete(busyId);
+    paintBusyContacts();
   }
 });
 
 el('#btn-contact-delete').addEventListener('click', async () => {
   const c = editingContact;
   if (!c || !confirm(t('contacts.confirmDelete', { name: c.name }))) return;
+  busyContacts.add(c.id);
+  paintBusyContacts();
   try {
     await window.api.contacts.delete(c.id);
     ctDlg.close();
@@ -455,6 +471,9 @@ el('#btn-contact-delete').addEventListener('click', async () => {
     await loadContacts();
   } catch (err) {
     el('#contact-error').textContent = errMsg(err);
+  } finally {
+    busyContacts.delete(c.id);
+    paintBusyContacts();
   }
 });
 
@@ -531,6 +550,7 @@ window.api.contacts
   .catch(() => {});
 
 // From a mail: create a new contact from a sender/recipient (dialog prefilled)
+window.api.contacts.onCreateFrom((name, email) => void readerCreateContact?.(name, email));
 readerCreateContact = async (name: string, email: string) => {
   setView('contacts');
   await ensureContacts();

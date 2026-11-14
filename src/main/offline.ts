@@ -71,6 +71,8 @@ function report(p: Partial<OfflineProgress>, force = false): void {
 // Search can skip the server for an account whose whole mailbox is here
 const daysOf = (accountId: string) => getSettings().offline[accountId] ?? 0;
 export const offlineComplete = (accountId: string): boolean => daysOf(accountId) === -1 && getKv<boolean>(`offline:done:${accountId}`) === true;
+// A local copy is kept: search stays local, the server only on request ("also search on the server")
+export const offlineCovers = (accountId: string): boolean => daysOf(accountId) !== 0 && hasOffline(accountId);
 
 // Start (at launch, after a settings change, every 30 min); a running pass stops at the next mail
 export function restartOffline(): void {

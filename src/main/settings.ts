@@ -46,13 +46,28 @@ interface Settings {
   accountLabel: 'name' | 'email'; // mailboxes in the sidebar/list by name or address
   externalMark: boolean; // mark mails from outside the own domains
   internalDomains: string[]; // additional domains that count as internal
+  blockedRecipients: string[]; // addresses that are no longer suggested or accepted as recipients (lower case)
   rules: MailRule[]; // mail rules
   spellcheck: string; // spell check while writing: 'off' | 'system' | a dictionary code like 'de-CH'
   linkOpen: 'browser' | 'agenoras'; // web links: system browser (default) or the browser column in Agenoras
   autoUpdate: boolean; // look for a new release at start (default on)
   skipVersion: string; // "Skip this version": not announced again
   offline: Record<string, number>; // offline copy per mail account: 0/missing = only the newest (default), 30/90/365/1825 days, -1 = everything
+  savedSearches: SavedSearch[]; // search folders in the sidebar
 }
+
+// A search kept under a name: run again each time it is opened, so it is always up to date
+export interface SavedSearch {
+  id: string;
+  name: string;
+  query: string;
+  account: string | null; // null = all accounts
+}
+const cleanSearches = (v: unknown): SavedSearch[] =>
+  (Array.isArray(v) ? v : [])
+    .map((x) => ({ id: String(x?.id || crypto.randomUUID()), name: String(x?.name ?? '').trim().slice(0, 60), query: String(x?.query ?? '').trim().slice(0, 200), account: typeof x?.account === 'string' && x.account ? x.account : null }))
+    .filter((x) => x.name && x.query.length >= 2)
+    .slice(0, 100);
 
 export const OFFLINE_DAYS = [0, 30, 90, 365, 1825, -1];
 const cleanOffline = (v: unknown): Record<string, number> =>
@@ -105,6 +120,8 @@ const THEMES: Theme[] = ['dark', 'light', 'system'];
 const EMAIL_RE = /^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/;
 const file = () => path.join(app.getPath('userData'), 'settings.json');
 
+const cleanBlocked = (v: unknown): string[] => [...new Set((Array.isArray(v) ? v : []).map((e) => String(e ?? '').trim().toLowerCase()).filter((e) => EMAIL_RE.test(e)))].slice(0, 500);
+
 function read(): Settings {
   try {
     const s = JSON.parse(fs.readFileSync(file(), 'utf8'));
@@ -124,9 +141,11 @@ function read(): Settings {
       accountLabel: s.accountLabel === 'name' ? 'name' : 'email',
       externalMark: s.externalMark === true,
       internalDomains: Array.isArray(s.internalDomains) ? s.internalDomains.filter((d: unknown) => typeof d === 'string') : [],
+      blockedRecipients: cleanBlocked(s.blockedRecipients),
       rules: Array.isArray(s.rules) ? s.rules : [],
       linkOpen: s.linkOpen === 'agenoras' ? 'agenoras' : 'browser',
       offline: cleanOffline(s.offline),
+      savedSearches: cleanSearches(s.savedSearches),
       autoUpdate: s.autoUpdate !== false,
       skipVersion: typeof s.skipVersion === 'string' ? s.skipVersion.slice(0, 40) : '',
       spellcheck: typeof s.spellcheck === 'string' && /^(off|system|[a-zA-Z]{2,3}(-[a-zA-Z]{2,4})?)$/.test(s.spellcheck) ? s.spellcheck : 'system',
@@ -134,7 +153,7 @@ function read(): Settings {
       notify: { ...DEFAULT_NOTIFY, ...(s.notify ?? {}), perAccount: { ...(s.notify?.perAccount ?? {}) }, desktopOff: [...(s.notify?.desktopOff ?? [])] },
     };
   } catch {
-    return { identities: [], templates: [], theme: 'dark', trustedSenders: [], imageMails: [], labels: [], mailLabels: {}, uiScale: 'medium', language: 'system', weekStart: -1, sendDelay: 2, readDelay: 3, composeMode: 'window', accountLabel: 'email', externalMark: false, internalDomains: [], rules: [], spellcheck: 'system', linkOpen: 'browser', offline: {}, autoUpdate: true, skipVersion: '', notify: { ...DEFAULT_NOTIFY, perAccount: {}, desktopOff: [] } };
+    return { identities: [], templates: [], theme: 'dark', trustedSenders: [], imageMails: [], labels: [], mailLabels: {}, uiScale: 'medium', language: 'system', weekStart: -1, sendDelay: 2, readDelay: 3, composeMode: 'window', accountLabel: 'email', externalMark: false, internalDomains: [], blockedRecipients: [], rules: [], spellcheck: 'system', linkOpen: 'browser', offline: {}, savedSearches: [], autoUpdate: true, skipVersion: '', notify: { ...DEFAULT_NOTIFY, perAccount: {}, desktopOff: [] } };
   }
 }
 
@@ -255,6 +274,12 @@ export function saveNotify(n: NotifySettings): NotifySettings {
   return clean;
 }
 
+export function saveSearches(list: SavedSearch[]): SavedSearch[] {
+  const clean = cleanSearches(list);
+  write({ ...read(), savedSearches: clean });
+  return clean;
+}
+
 // Categories (stored locally, per mail via Message-ID)
 export function saveLabels(list: MailLabel[]): MailLabel[] {
   const clean = (list ?? [])
@@ -291,7 +316,7 @@ export function setMailLabel(keys: string[], labelId: string, on: boolean): Reco
 // Appearance / language / week start (saved individually)
 export const READ_DELAYS = [0, 1, 3, 5, 10, -1];
 
-export function savePrefs(p: { uiScale?: UiScale; language?: string; weekStart?: number; sendDelay?: number; readDelay?: number; composeMode?: 'window' | 'popup'; externalMark?: boolean; internalDomains?: string[]; accountLabel?: 'name' | 'email'; spellcheck?: string; linkOpen?: 'browser' | 'agenoras'; offline?: Record<string, number>; autoUpdate?: boolean; skipVersion?: string }): void {
+export function savePrefs(p: { uiScale?: UiScale; language?: string; weekStart?: number; sendDelay?: number; readDelay?: number; composeMode?: 'window' | 'popup'; externalMark?: boolean; internalDomains?: string[]; blockedRecipients?: string[]; accountLabel?: 'name' | 'email'; spellcheck?: string; linkOpen?: 'browser' | 'agenoras'; offline?: Record<string, number>; autoUpdate?: boolean; skipVersion?: string }): void {
   const s = read();
   write({
     ...s,
@@ -311,7 +336,16 @@ export function savePrefs(p: { uiScale?: UiScale; language?: string; weekStart?:
     ...(Array.isArray(p.internalDomains)
       ? { internalDomains: [...new Set(p.internalDomains.map((d) => String(d).trim().toLowerCase().replace(/^@/, '')).filter((d) => /^[a-z0-9.-]+\.[a-z]{2,}$/.test(d)))].slice(0, 50) }
       : {}),
+    ...(Array.isArray(p.blockedRecipients) ? { blockedRecipients: cleanBlocked(p.blockedRecipients) } : {}),
   });
+}
+
+// Block a recipient: no longer suggested or accepted when writing
+export function blockRecipient(email: string): string[] {
+  const s = read();
+  const list = cleanBlocked([...s.blockedRecipients, email]);
+  if (list.length !== s.blockedRecipients.length) write({ ...s, blockedRecipients: list });
+  return list;
 }
 
 // For startup (before the language is loaded): read only the language choice

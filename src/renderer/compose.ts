@@ -245,8 +245,15 @@ const toList = (v?: string | string[]) => (Array.isArray(v) ? v.join(', ') : v ?
 const recipBox = (f: RecipField) => el(`.recips[data-field="${f}"]`);
 const recipInput = (f: RecipField) => recipBox(f).querySelector('input') as HTMLInputElement;
 
+// Blocked addresses (settings): never suggested, never accepted as recipients
+let cBlocked = new Set<string>();
+const isBlocked = (address: string) => cBlocked.has(address.trim().toLowerCase());
+
 function addRecipients(f: RecipField, list: Recipient[]): void {
+  const refused = list.filter((r) => isBlocked(r.address));
+  if (refused.length) setInfo(t('compose.blockedRefused', { list: refused.map((r) => r.address).join(', ') }));
   for (const r of list) {
+    if (isBlocked(r.address)) continue;
     if (!recipients[f].some((x) => x.address.toLowerCase() === r.address.toLowerCase())) recipients[f].push(r);
   }
   renderRecipients(f);
@@ -287,7 +294,7 @@ function suggestionSource(): Recipient[] {
   const out: Recipient[] = [];
   const add = (name: string, address: string) => {
     const key = address.toLowerCase();
-    if (!address || seen.has(key)) return;
+    if (!address || seen.has(key) || cBlocked.has(key)) return;
     seen.add(key);
     out.push({ name, address });
   };
@@ -318,7 +325,10 @@ function showSuggest(f: RecipField): void {
   suggestField = f;
   suggestIndex = 0;
   suggestBox.innerHTML = suggestItems
-    .map((r, i) => `<li role="option" data-i="${i}" class="${i === 0 ? 'on' : ''}"><b>${esc(r.name || r.address)}</b><span>${esc(r.address)}</span></li>`)
+    .map(
+      (r, i) =>
+        `<li role="option" data-i="${i}" class="${i === 0 ? 'on' : ''}"><b>${esc(r.name || r.address)}</b><span>${esc(r.address)}</span>${r.members ? '' : `<button type="button" tabindex="-1" data-block="${i}" title="${esc(t('compose.blockAddress'))}" aria-label="${esc(t('compose.blockAddress'))}">${esc(t('compose.block'))}</button>`}</li>`,
+    )
     .join('');
   const box = recipBox(f);
   suggestBox.style.top = `${box.offsetTop + box.offsetHeight + 4}px`;
@@ -342,11 +352,87 @@ function pickSuggestion(i: number): void {
   recipInput(f).focus();
 }
 
+// Block the address of a suggestion: gone from the suggestions, refused as a recipient
+async function blockSuggestion(i: number): Promise<void> {
+  const f = suggestField;
+  const r = suggestItems[i];
+  if (!f || !r || r.members) return;
+  try {
+    cBlocked = new Set(await window.api.settings.blockRecipient(r.address));
+    setInfo(t('compose.blocked', { addr: r.address }));
+  } catch (err) {
+    setInfo(errMsg(err));
+  }
+  showSuggest(f);
+}
+
 suggestBox.addEventListener('mousedown', (e) => {
   e.preventDefault(); // keep focus in the input field
+  const block = (e.target as HTMLElement).closest<HTMLElement>('[data-block]');
+  if (block) return void blockSuggestion(Number(block.dataset.block));
   const li = (e.target as HTMLElement).closest<HTMLElement>('[data-i]');
   if (li) pickSuggestion(Number(li.dataset.i));
 });
+
+// Right click on a recipient: save as contact, copy, edit
+const chipMenu = document.createElement('div');
+chipMenu.className = 'ctx-menu text-menu';
+chipMenu.setAttribute('role', 'menu');
+chipMenu.popover = 'manual';
+document.body.appendChild(chipMenu);
+let chipAt: { f: RecipField; i: number } | null = null;
+const hideChipMenu = () => {
+  if (chipMenu.matches(':popover-open')) chipMenu.hidePopover();
+};
+const knownAddress = (address: string) => cContacts.some((c) => c.emails.some((m) => m.value.toLowerCase() === address.toLowerCase()));
+
+function showChipMenu(f: RecipField, i: number, x: number, y: number): void {
+  const r = recipients[f][i];
+  if (!r) return;
+  chipAt = { f, i };
+  const item = (act: string, label: string) => `<button type="button" role="menuitem" data-chip-act="${act}"><span>${esc(label)}</span></button>`;
+  chipMenu.innerHTML =
+    `<div class="ctx-sub">${esc(r.address)}</div>` +
+    (EMAIL_RE.test(r.address) && !knownAddress(r.address) ? item('contact', t('people.addContact')) : '') +
+    item('copy', t('people.copy')) +
+    item('edit', t('compose.editRecipient'));
+  chipMenu.showPopover();
+  const b = chipMenu.getBoundingClientRect();
+  chipMenu.style.left = `${Math.max(4, Math.min(x, innerWidth - b.width - 6))}px`;
+  chipMenu.style.top = `${Math.max(4, Math.min(y, innerHeight - b.height - 6))}px`;
+}
+
+// back into the input field, e.g. to fix a typo
+function editRecipient(f: RecipField, i: number): void {
+  const r = recipients[f][i];
+  if (!r) return;
+  commitInput(f);
+  recipients[f].splice(i, 1);
+  renderRecipients(f);
+  const input = recipInput(f);
+  input.value = r.name ? `${r.name} <${r.address}>` : r.address;
+  input.focus();
+  input.select();
+}
+
+chipMenu.addEventListener('click', (e) => {
+  const act = (e.target as HTMLElement).closest<HTMLElement>('[data-chip-act]')?.dataset.chipAct;
+  if (!act || !chipAt) return;
+  hideChipMenu();
+  const { f, i } = chipAt;
+  const r = recipients[f][i];
+  if (!r) return;
+  if (act === 'copy') void navigator.clipboard.writeText(r.address);
+  else if (act === 'edit') editRecipient(f, i);
+  else if (act === 'contact') void window.api.contacts.createFrom(r.name, r.address);
+});
+document.addEventListener('mousedown', (e) => {
+  if (!chipMenu.contains(e.target as Node)) hideChipMenu();
+}, true);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') hideChipMenu();
+}, true);
+window.addEventListener('blur', hideChipMenu);
 
 (['to', 'cc', 'bcc'] as RecipField[]).forEach((f) => {
   const box = recipBox(f);
@@ -359,6 +445,16 @@ suggestBox.addEventListener('mousedown', (e) => {
       renderRecipients(f);
     }
     input.focus();
+  });
+  box.addEventListener('contextmenu', (e) => {
+    const chip = (e.target as HTMLElement).closest<HTMLElement>('.chip-r');
+    if (!chip) return;
+    e.preventDefault();
+    showChipMenu(f, [...box.querySelectorAll('.chip-r')].indexOf(chip), e.clientX, e.clientY);
+  });
+  box.addEventListener('dblclick', (e) => {
+    const chip = (e.target as HTMLElement).closest<HTMLElement>('.chip-r');
+    if (chip) editRecipient(f, [...box.querySelectorAll('.chip-r')].indexOf(chip));
   });
 
   input.addEventListener('input', () => {
@@ -393,6 +489,9 @@ suggestBox.addEventListener('mousedown', (e) => {
     } else if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
       commitInput(f);
+    } else if (open && e.key === 'Delete' && e.shiftKey) {
+      e.preventDefault();
+      void blockSuggestion(suggestIndex);
     } else if (e.key === 'Escape' && open) {
       e.preventDefault();
       hideSuggest();
@@ -894,9 +993,13 @@ function initCompose(o: ComposeOpts): void {
   // Never take over own addresses (account + aliases) as recipients
   const own = new Set([...cAccounts.map((a) => a.email), ...identities.map((i) => i.email)].map((a) => a.toLowerCase()));
   const notOwn = (r: Recipient) => !own.has(r.address.toLowerCase());
-  recipients.to = parseRecipients(toList(o.to));
-  recipients.cc = parseRecipients(toList(o.cc)).filter(notOwn);
-  recipients.bcc = parseRecipients(toList(o.bcc)).filter(notOwn);
+  // Blocked addresses are left out (e.g. on "Reply all")
+  const refused: string[] = [];
+  const allowed = (r: Recipient) => !isBlocked(r.address) || (refused.push(r.address), false);
+  recipients.to = parseRecipients(toList(o.to)).filter(allowed);
+  recipients.cc = parseRecipients(toList(o.cc)).filter(notOwn).filter(allowed);
+  recipients.bcc = parseRecipients(toList(o.bcc)).filter(notOwn).filter(allowed);
+  if (refused.length) setInfo(t('compose.blockedRefused', { list: [...new Set(refused)].join(', ') }));
   el('#row-cc').toggleAttribute('hidden', !recipients.cc.length);
   el('#row-bcc').toggleAttribute('hidden', !recipients.bcc.length);
   (['to', 'cc', 'bcc'] as RecipField[]).forEach((f) => renderRecipients(f));
@@ -1127,6 +1230,7 @@ function sendCountdown(): Promise<boolean> {
   undoMs = Math.min(5, Math.max(0, (settings as { sendDelay?: number }).sendDelay ?? 2)) * 1000;
   cContacts = book.contacts;
   cSenders = inbox.map((m) => ({ name: m.from, address: m.fromAddress }));
+  cBlocked = new Set((settings as { blockedRecipients?: string[] }).blockedRecipients ?? []);
   window.api.lists
     .get()
     .then((l) => (cLists = l))

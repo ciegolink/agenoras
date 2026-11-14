@@ -77,7 +77,7 @@ contextBridge.exposeInMainWorld('api', {
   mailsByMessageIds: (ids: string[]) => ipcRenderer.invoke('mail:byMessageIds', ids),
   findByMessageIds: (ids: string[]) => ipcRenderer.invoke('mail:findByMessageIds', ids),
   knownAddresses: () => ipcRenderer.invoke('addresses:list'),
-  searchMail: (accountId: string | null, folder: string | null, query: string) => ipcRenderer.invoke('mail:search', accountId, folder, query),
+  searchMail: (accountId: string | null, folder: string | null, query: string, onServer = false) => ipcRenderer.invoke('mail:search', accountId, folder, query, onServer),
   searchCachedMail: (accountId: string | null, folder: string | null, query: string) => ipcRenderer.invoke('mail:search:cached', accountId, folder, query),
   avatars: (emails: string[]) => ipcRenderer.invoke('avatars:get', emails),
   invite: {
@@ -221,6 +221,10 @@ contextBridge.exposeInMainWorld('api', {
     list: () => ipcRenderer.invoke('contacts:list'),
     save: (input: unknown) => ipcRenderer.invoke('contacts:save', input),
     delete: (url: string) => ipcRenderer.invoke('contacts:delete', url),
+    createFrom: (name: string, email: string) => ipcRenderer.invoke('contacts:createFrom', name, email),
+    onCreateFrom: (cb: (name: string, email: string) => void) => {
+      ipcRenderer.on('contacts:createFrom', (_e, name: string, email: string) => cb(name, email));
+    },
   },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
@@ -229,8 +233,10 @@ contextBridge.exposeInMainWorld('api', {
     setTheme: (theme: string) => ipcRenderer.invoke('settings:theme', theme),
     signatureFile: () => ipcRenderer.invoke('settings:signatureFile'),
     trustSender: (email: string) => ipcRenderer.invoke('settings:trustSender', email),
+    blockRecipient: (email: string) => ipcRenderer.invoke('settings:blockRecipient', email),
     saveNotify: (n: unknown) => ipcRenderer.invoke('settings:notify', n),
     saveLabels: (list: unknown) => ipcRenderer.invoke('labels:save', list),
+    saveSearches: (list: unknown) => ipcRenderer.invoke('searches:save', list),
     savePrefs: (p: unknown) => ipcRenderer.invoke('settings:prefs', p),
     saveRules: (list: unknown) => ipcRenderer.invoke('rules:save', list),
     runRules: (accountId: string | null) => ipcRenderer.invoke('rules:run', accountId),

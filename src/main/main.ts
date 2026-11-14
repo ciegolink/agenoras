@@ -63,16 +63,16 @@ import {
 } from './imap';
 import { OutgoingMail, sendMail, testSmtp } from './smtp';
 import { addOutbox, outboxBusy, outboxItem, outboxList, removeOutbox, updateOutbox } from './outbox';
-import { offlineComplete, offlineProgress, onOfflineCleared, onOfflineProgress, restartOffline, setOfflineBusy } from './offline';
+import { offlineComplete, offlineCovers, offlineProgress, onOfflineCleared, onOfflineProgress, restartOffline, setOfflineBusy } from './offline';
 import { applyImport, buildExport, readExport, summarize } from './transfer';
 import { parseDateQuery } from './datequery';
 import { canAutostart, getAutostart, setAutostart, startedHidden } from './autostart';
 import { checkForUpdates, getUpdate, installUpdate, startUpdates, updateState } from './updater';
 import { mailtoArg, parseMailto } from './mailto';
-import { closeStore as closePopStore, forgetAccount as forgetPopAccount, vacuumStore as vacuumPop } from './pop3';
+import { closeStore as closePopStore, forgetAccount as forgetPopAccount, vacuumStore as vacuumPop, isPop } from './pop3';
 import { closeLocal, forgetLocal, isLocalDav, renameLocal } from './localdav';
 import { aiState, cancelAiDownload, deleteAiModel, downloadAiModel, proofread, setAiEnabled, setAiLang, setAiModel, setAiTranslateLang, stopWorker as stopAi, suggestSubjects, writeText, translate } from './ai';
-import { allowImages, getIdentity, getSettings, Identity, imagesAllowed, isTrustedSender, MailLabel, MailRule, NotifySettings, saveRules, SCALE_FACTOR, saveIdentities, saveLabels, saveNotify, savePrefs, saveTemplates, saveTheme, savedLanguage, setMailLabel, Template, Theme, trustSender, UiScale } from './settings';
+import { allowImages, blockRecipient, getIdentity, getSettings, Identity, imagesAllowed, isTrustedSender, MailLabel, MailRule, NotifySettings, saveRules, SCALE_FACTOR, saveIdentities, saveLabels, saveSearches, SavedSearch, saveNotify, savePrefs, saveTemplates, saveTheme, savedLanguage, setMailLabel, Template, Theme, trustSender, UiScale } from './settings';
 import { listSounds, openSoundFolder, soundData } from './sounds';
 import { flushWinState, loadWinState, trackWinState } from './winstate';
 import { addPin, listPins, PinItem, removePin, togglePin, updatePins } from './pins';
@@ -309,6 +309,12 @@ function createFromTray(kind: 'event' | 'task' | 'contact'): void {
   showWindow();
   whenMainReady(() => win?.webContents.send('app:create', kind));
 }
+
+// From the compose window: the main window opens "New contact" with name and address
+ipcMain.handle('contacts:createFrom', (_e, name: unknown, email: unknown) => {
+  showWindow();
+  whenMainReady(() => win?.webContents.send('contacts:createFrom', String(name ?? ''), String(email ?? '')));
+});
 
 // Tray
 let tray: Tray | null = null;
@@ -1007,10 +1013,12 @@ ipcMain.handle('mail:seen', async (_e, accountId: string, folder: string, uids: 
 });
 
 // Instant hits from the local cache (before the server search answers)
+// Practically all hits; the list shows them in steps while scrolling
+const SEARCH_MAX = 20000;
 ipcMain.handle('mail:search:cached', (_e, accountId: string | null, folder: string | null, query: string) => {
   const q = String(query ?? '').trim();
   if (q.length < 2) return [];
-  return searchCachedMail<MailSummary>(accountsFor(accountId).map((a) => a.id), folder || null, q, 200, parseDateQuery(q));
+  return searchCachedMail<MailSummary>(accountsFor(accountId).map((a) => a.id), folder || null, q, SEARCH_MAX, parseDateQuery(q));
 });
 
 // Full-text search on the server: one folder or all folders (without Gmail's "All Mail")
@@ -1020,13 +1028,16 @@ let searchGen = 0;
 const SEARCH_ORDER = ['', '\\Sent', '\\Archive', '\\Drafts', '\\Junk', '\\Trash'];
 const searchRank = (f: FolderInfo) => (f.path === 'INBOX' ? -1 : SEARCH_ORDER.indexOf(f.specialUse) === -1 ? 0 : SEARCH_ORDER.indexOf(f.specialUse));
 
-ipcMain.handle('mail:search', async (_e, accountId: string | null, folder: string | null, query: string) => {
+ipcMain.handle('mail:search', async (_e, accountId: string | null, folder: string | null, query: string, onServer = false) => {
   const q = String(query ?? '').trim();
   const gen = ++searchGen;
   if (q.length < 2) return { mails: [], errors: [] };
   const cancelled = () => gen !== searchGen;
-  // whole mailbox stored offline: the local search already found everything
-  const accs = accountsFor(accountId).filter((a) => !offlineComplete(a.id));
+  // whole mailbox stored offline: the local search already found everything.
+  // With a local copy of a period the server is only asked on request (older mails).
+  const open = accountsFor(accountId).filter((a) => !offlineComplete(a.id));
+  const accs = onServer ? open : open.filter((a) => isPop(a) || !offlineCovers(a.id));
+  const more = !onServer && accs.length < open.length;
   const errors: { accountId: string; message: string }[] = [];
   const perAccount = await Promise.all(
     accs.map(async (acc) => {
@@ -1040,15 +1051,15 @@ ipcMain.handle('mail:search', async (_e, accountId: string | null, folder: strin
               .filter((f) => f.selectable && f.specialUse !== '\\All')
               .sort((a, b) => searchRank(a) - searchRank(b))
               .map((f) => f.path);
-        return await searchFolders(acc, folders, q, folder ? 100 : 30, cancelled, parseDateQuery(q));
+        return await searchFolders(acc, folders, q, folder ? 5000 : 2000, cancelled, parseDateQuery(q));
       } catch (err) {
         errors.push({ accountId: acc.id, message: friendlyError(err) });
         return [];
       }
     }),
   );
-  const mails = perAccount.flat().sort((a, b) => b.date.localeCompare(a.date)).slice(0, 300);
-  return { mails, errors };
+  const mails = perAccount.flat().sort((a, b) => b.date.localeCompare(a.date)).slice(0, SEARCH_MAX);
+  return { mails, errors, more };
 });
 
 // Move or delete several mails of a folder (UIDs as a list)
@@ -1438,6 +1449,7 @@ ipcMain.handle('settings:signatureFile', async (e) => {
   return loadSignatureFile(res.filePaths[0]);
 });
 ipcMain.handle('settings:trustSender', (_e, email: string) => trustSender(email));
+ipcMain.handle('settings:blockRecipient', (_e, email: string) => blockRecipient(email));
 ipcMain.handle('settings:notify', (_e, n: NotifySettings) => saveNotify(n));
 // Spell check while writing (red underlines, and the dictionary part of proofreading).
 // Off, the system languages, or one dictionary. macOS uses its own checker and picks the language itself.
@@ -1513,7 +1525,7 @@ ipcMain.handle('web:external', (_e, url: string) => {
 
 ipcMain.handle('spell:languages', () => (process.platform === 'darwin' ? [] : session.defaultSession.availableSpellCheckerLanguages));
 
-ipcMain.handle('settings:prefs', (_e, p: { uiScale?: UiScale; language?: string; weekStart?: number; sendDelay?: number; readDelay?: number; composeMode?: 'window' | 'popup'; externalMark?: boolean; internalDomains?: string[]; accountLabel?: 'name' | 'email'; spellcheck?: string; linkOpen?: 'browser' | 'agenoras'; offline?: Record<string, number>; autoUpdate?: boolean; skipVersion?: string }) => {
+ipcMain.handle('settings:prefs', (_e, p: { uiScale?: UiScale; language?: string; weekStart?: number; sendDelay?: number; readDelay?: number; composeMode?: 'window' | 'popup'; externalMark?: boolean; internalDomains?: string[]; blockedRecipients?: string[]; accountLabel?: 'name' | 'email'; spellcheck?: string; linkOpen?: 'browser' | 'agenoras'; offline?: Record<string, number>; autoUpdate?: boolean; skipVersion?: string }) => {
   const before = getSettings().language;
   const offlineBefore = JSON.stringify(getSettings().offline);
   savePrefs(p ?? {});
@@ -1581,6 +1593,7 @@ ipcMain.handle('app:relaunch', () => {
   app.quit();
 });
 ipcMain.handle('labels:save', (_e, list: MailLabel[]) => saveLabels(list));
+ipcMain.handle('searches:save', (_e, list: SavedSearch[]) => saveSearches(list));
 ipcMain.handle('labels:set', (_e, keys: string[], labelId: string, on: boolean) => setMailLabel(keys, labelId, !!on));
 
 // Sounds for new mail

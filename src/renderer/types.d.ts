@@ -199,6 +199,12 @@ interface MailRule {
   stop: boolean;
 }
 
+interface SavedSearch {
+  id: string;
+  name: string;
+  query: string;
+  account: string | null;
+}
 interface MailLabel {
   id: string;
   name: string;
@@ -532,7 +538,7 @@ interface Window {
     mailsByMessageIds(ids: string[]): Promise<MailSummary[]>;
     findByMessageIds(ids: string[]): Promise<{ found: number; missing: number }>;
     knownAddresses(): Promise<{ name: string; address: string }[]>;
-    searchMail(accountId: string | null, folder: string | null, query: string): Promise<{ mails: MailSummary[]; errors: { accountId: string; message: string }[] }>;
+    searchMail(accountId: string | null, folder: string | null, query: string, onServer?: boolean): Promise<{ mails: MailSummary[]; errors: { accountId: string; message: string }[]; more?: boolean }>;
     searchCachedMail(accountId: string | null, folder: string | null, query: string): Promise<MailSummary[]>;
     avatars(emails: string[]): Promise<Record<string, string | null>>;
     invite: {
@@ -602,9 +608,10 @@ interface Window {
       onDim(cb: (on: boolean) => void): void;
     };
     settings: {
-      get(): Promise<{ identities: Identity[]; templates: Template[]; theme: 'dark' | 'light' | 'system'; notify?: NotifySettings; labels?: MailLabel[]; mailLabels?: Record<string, string[]>; uiScale?: 'small' | 'medium' | 'large'; language?: string; weekStart?: number; sendDelay?: number; readDelay?: number; composeMode?: 'window' | 'popup'; externalMark?: boolean; internalDomains?: string[]; accountLabel?: 'name' | 'email'; rules?: MailRule[]; spellcheck?: string; linkOpen?: 'browser' | 'agenoras'; offline?: Record<string, number>; autoUpdate?: boolean; skipVersion?: string }>;
+      get(): Promise<{ identities: Identity[]; templates: Template[]; theme: 'dark' | 'light' | 'system'; notify?: NotifySettings; labels?: MailLabel[]; mailLabels?: Record<string, string[]>; uiScale?: 'small' | 'medium' | 'large'; language?: string; weekStart?: number; sendDelay?: number; readDelay?: number; composeMode?: 'window' | 'popup'; externalMark?: boolean; internalDomains?: string[]; blockedRecipients?: string[]; accountLabel?: 'name' | 'email'; rules?: MailRule[]; spellcheck?: string; linkOpen?: 'browser' | 'agenoras'; offline?: Record<string, number>; autoUpdate?: boolean; skipVersion?: string; savedSearches?: SavedSearch[] }>;
       saveLabels(list: MailLabel[]): Promise<MailLabel[]>;
-      savePrefs(p: { uiScale?: 'small' | 'medium' | 'large'; language?: string; weekStart?: number; sendDelay?: number; readDelay?: number; composeMode?: 'window' | 'popup'; externalMark?: boolean; internalDomains?: string[]; accountLabel?: 'name' | 'email'; spellcheck?: string; linkOpen?: 'browser' | 'agenoras'; offline?: Record<string, number>; autoUpdate?: boolean; skipVersion?: string }): Promise<{ restartNeeded: boolean }>;
+      saveSearches(list: SavedSearch[]): Promise<SavedSearch[]>;
+      savePrefs(p: { uiScale?: 'small' | 'medium' | 'large'; language?: string; weekStart?: number; sendDelay?: number; readDelay?: number; composeMode?: 'window' | 'popup'; externalMark?: boolean; internalDomains?: string[]; blockedRecipients?: string[]; accountLabel?: 'name' | 'email'; spellcheck?: string; linkOpen?: 'browser' | 'agenoras'; offline?: Record<string, number>; autoUpdate?: boolean; skipVersion?: string }): Promise<{ restartNeeded: boolean }>;
       saveRules(list: MailRule[]): Promise<MailRule[]>;
       runRules(accountId: string | null): Promise<{ matched: number; moved: number }>;
       languages(): Promise<string[]>;
@@ -616,6 +623,7 @@ interface Window {
       setTheme(theme: 'dark' | 'light' | 'system'): Promise<string>;
       signatureFile(): Promise<string | null>;
       trustSender(email: string): Promise<void>;
+      blockRecipient(email: string): Promise<string[]>;
       saveIdentities(list: Identity[]): Promise<Identity[]>;
       saveTemplates(list: Template[]): Promise<Template[]>;
     };
@@ -673,6 +681,8 @@ interface Window {
       list(): Promise<{ books: AddressBookInfo[]; contacts: Contact[]; errors: { accountId: string; message: string }[] }>;
       save(input: ContactInput): Promise<void>;
       delete(url: string): Promise<void>;
+      createFrom(name: string, email: string): Promise<void>;
+      onCreateFrom(cb: (name: string, email: string) => void): void;
     };
     onNewMail(cb: (accountId: string, grew: boolean) => void): void;
     onOpenMail(cb: (ref: MailRef) => void): void;

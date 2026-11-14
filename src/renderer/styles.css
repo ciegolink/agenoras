@@ -125,6 +125,10 @@ body.agenda-on .app[data-view="mail"] { --agenda-col: 300px; }
 .side-foot { flex: none; margin: auto 12px 0; border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 1px; }
 .search-back { display: flex; align-items: center; gap: 7px; margin: 0 0 6px; padding: 6px 8px; border: none; border-radius: 6px; background: none; color: var(--text-2); font: 600 12.5px var(--sans); text-align: left; cursor: pointer; }
 .search-back:hover { background: rgba(var(--fg-rgb), 0.05); color: var(--text); }
+.search-save { display: flex; align-items: center; gap: 7px; margin: 0 0 6px; padding: 6px 8px; border: 1px dashed var(--line-strong); border-radius: 6px; background: none; color: var(--text-2); font: 500 12px var(--sans); text-align: left; cursor: pointer; width: 100%; }
+.search-save:hover { color: var(--text); border-color: var(--accent); }
+.search-save[hidden] { display: none; }
+.vbox-rename { flex: 1; min-width: 0; padding: 2px 6px; border: 1px solid var(--accent); border-radius: 4px; background: var(--bg); color: var(--text); font: 13px var(--sans); }
 .offline-sync { display: flex; align-items: center; gap: 7px; margin: 0 0 6px; padding: 4px 8px; border: none; border-radius: 6px; background: var(--accent-soft); color: var(--accent-text); font: 600 11px var(--mono); text-align: left; cursor: pointer; }
 .offline-sync[hidden] { display: none; }
 .offline-sync svg { flex: none; animation: offlineBob 1.4s ease-in-out infinite; }
@@ -188,6 +192,8 @@ h1 { margin: 0; font-family: var(--serif); font-weight: 400; font-size: 24px; li
 #mail-list.searching > :not(.search-progress) { opacity: 0.45; transition: opacity 0.15s; }
 #mail-list, #contact-list, #rss-list { overflow-y: auto; flex: 1; }
 .list-empty { padding: 30px 16px; color: var(--muted); text-align: center; }
+.busy-item { opacity: 0.45; pointer-events: none; transition: opacity 0.15s; }
+.list-more { padding: 12px 16px; color: var(--muted); font-size: 12px; text-align: center; }
 /* Search: appointments and contacts above the mail hits */
 .seg-n { font: 600 10px var(--mono); opacity: 0.7; }
 .seg-n:empty { display: none; }
@@ -312,6 +318,9 @@ dialog form { display: flex; flex-direction: column; gap: 10px; }
 .suggest li { display: flex; gap: 8px; align-items: baseline; padding: 6px 8px; border-radius: 5px; cursor: pointer; font-size: 13px; }
 .suggest li span { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .suggest li.on, .suggest li:hover { background: var(--accent-soft); }
+.suggest li button { margin-left: auto; flex: none; align-self: center; height: 20px; padding: 0 7px; border: 1px solid var(--line-strong); border-radius: 4px; background: transparent; color: var(--muted); font-size: 11px; line-height: 1; cursor: pointer; visibility: hidden; }
+.suggest li.on button, .suggest li:hover button { visibility: visible; }
+.suggest li button:hover { background: rgba(var(--fg-rgb), 0.12); color: var(--text); }
 
 /* Editor (WYSIWYG) – white paper so you see what the recipient sees */
 .editor-wrap { border: var(--bw) solid var(--line-strong); border-radius: 8px; overflow: hidden; }

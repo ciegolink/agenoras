@@ -37,6 +37,7 @@ async function openSettings(tab: SettingsTab = setTab): Promise<void> {
     spellLangs = await window.api.spell.languages().catch(() => [] as string[]);
     langList = await window.api.settings.languages().catch(() => ['de', 'en']);
     autostart = await window.api.autostart.get().catch(() => ({ on: false, hidden: false, available: false }));
+    blockedRecips = s.blockedRecipients ?? [];
     editLabels = (s.labels ?? labels).map((l) => ({ ...l }));
     editRules = JSON.parse(JSON.stringify(s.rules ?? []));
     await loadAccountLists();
@@ -322,6 +323,7 @@ function appearanceHtml(): string {
 }
 
 let extDomainsExtra: string[] = [];
+let blockedRecips: string[] = []; // loaded in openSettings (the compose window can add to it)
 window.api.settings
   .get()
   .then((s) => (extDomainsExtra = s.internalDomains ?? []))
@@ -383,6 +385,14 @@ el('#settings-body').addEventListener('change', async (e) => {
     setExternalPrefs(extMarkOn, extDomainsExtra);
     renderSettings();
     renderList();
+  } else if (tgt.dataset.prefBlocked !== undefined) {
+    const typed = tgt.value.split(/[\s,;]+/).filter(Boolean);
+    await window.api.settings.savePrefs({ blockedRecipients: typed }).catch(() => {});
+    const s = await window.api.settings.get().catch(() => null);
+    if (s) blockedRecips = s.blockedRecipients ?? [];
+    const dropped = typed.filter((a) => !blockedRecips.includes(a.toLowerCase()));
+    renderSettings();
+    el('#settings-error').textContent = dropped.length ? t('compose.invalidAddress', { list: dropped.join(', ') }) : '';
   } else if (tgt.dataset.prefWeek !== undefined) {
     prefs.weekStart = Number(tgt.value);
     await window.api.settings.savePrefs({ weekStart: prefs.weekStart }).catch(() => {});
@@ -737,6 +747,11 @@ function writingHtml(): string {
            <p class="hint">${esc(t('ext.domainsHint', { own: [...extDomains].filter((d) => !extDomainsExtra.includes(d)).join(', ') || '–' }))}</p>`
         : ''
     }
+  </div>
+  <div class="set-card">
+    <span class="mono">${esc(t('block.title').toUpperCase())}</span>
+    <p class="hint">${esc(t('block.hint'))}</p>
+    <label>${esc(t('block.addresses'))}<textarea data-pref-blocked rows="${Math.min(8, Math.max(2, blockedRecips.length))}" placeholder="name@example.com" spellcheck="false">${esc(blockedRecips.join('\n'))}</textarea></label>
   </div>
 `;
 }
