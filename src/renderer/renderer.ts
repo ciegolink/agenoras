@@ -981,6 +981,7 @@ async function openMail(key: string, loadImages = false): Promise<void> {
       ${replyButtonsHtml()}
       <span class="spacer"></span>
       <button class="icon-btn sm star-btn${flagged ? ' on' : ''}" data-action="flag" aria-pressed="${flagged}" aria-label="${esc(t(flagged ? 'mail.unflag' : 'mail.flag'))}" title="${esc(t(flagged ? 'mail.unflag' : 'mail.flag'))}">${flagged ? '★' : '☆'}</button>
+      <button class="icon-btn sm" data-action="print" aria-label="${esc(t('print.button'))}" title="${esc(t('print.buttonTip'))}">${ACT_ICONS.print}</button>
       <button class="icon-btn sm" data-action="window" aria-label="${esc(t('mail.openWindow'))}" title="${esc(t('mail.openWindow'))}">${ACT_ICONS.window}</button>
       <button class="icon-btn sm" data-action="unread" aria-label="${esc(t('mail.markUnread'))}" title="${esc(t('mail.markUnread'))}">${ACT_ICONS.unread}</button>
       ${inJunk ? `<button class="icon-btn sm" data-action="notspam" aria-label="${esc(t('mail.notSpam'))}" title="${esc(t('mail.notSpam'))}">${ACT_ICONS.notSpam}</button>` : hasJunk ? `<button class="icon-btn sm" data-action="spam" aria-label="${esc(t('mail.spam'))}" title="${esc(t('mail.spam'))}">${ACT_ICONS.spam}</button>` : ''}
@@ -996,6 +997,41 @@ async function openMail(key: string, loadImages = false): Promise<void> {
   void fillAnswered(reader, msg, summaryOf(key));
   fillInviteCalendars();
 }
+
+// Print the open mail (button in the reader, Ctrl+P)
+function printCurrentMail(): void {
+  const m = currentMsg;
+  if (!m) return;
+  printMail(bodyMsg && mailKey(bodyMsg) === mailKey(m) ? { ...bodyMsg, folder: m.folder } : m, `${accLabel(accountOf(m.accountId)).toUpperCase()} · ${folderLabel(m.accountId, m.folder).toUpperCase()}`, setStatus);
+}
+
+// Overview (button in the title bar, Ctrl+Shift+P): the calendar week as a list, the task list, the contacts
+const OVERVIEW_VIEWS = new Set(['cal', 'tasks', 'contacts']);
+function printOverview(): void {
+  const view = el('.app').dataset.view;
+  if (view === 'cal') printWeek();
+  else if (view === 'tasks') printTaskOverview();
+  else if (view === 'contacts') printContactOverview();
+}
+el('#btn-print-overview').addEventListener('click', printOverview);
+document.addEventListener('viewchange', (e) => {
+  el('#btn-print-overview').hidden = !OVERVIEW_VIEWS.has((e as CustomEvent<string>).detail);
+});
+
+// Ctrl+P: whatever is open – an event being edited, else the mail, task or feed article of the view
+// (the calendar has nothing single open: its week). Ctrl+Shift+P: the overview.
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== 'p') return;
+  e.preventDefault();
+  if (!e.shiftKey && el<HTMLDialogElement>('#dlg-event').open) return printOpenEvent();
+  if (document.querySelector('dialog[open]')) return; // another dialog in front
+  const view = el('.app').dataset.view;
+  if (e.shiftKey || view === 'cal') printOverview();
+  else if (view === 'mail' || view === 'search') printCurrentMail();
+  else if (view === 'tasks') printSelectedTask();
+  else if (view === 'rss') printRssArticle();
+  else if (view === 'contacts') printSelectedContact();
+});
 
 // Selection: Ctrl+click single, Shift+click range, Ctrl+A all
 function paintSelection(): void {
@@ -1610,6 +1646,7 @@ el('#reader').addEventListener('click', async (e) => {
   if (action === 'reply') return reply(false);
   if (action === 'replyAll') return reply(true);
   if (action === 'forward') return forward();
+  if (action === 'print') return printCurrentMail();
   if (action === 'window' && currentMsg) return void window.api.mailview.open(parseKey(mailKey(currentMsg)));
   if (action === 'flag' && currentMsg) return toggleFlag([mailKey(currentMsg)]);
   if (action === 'spam' && currentMsg) return removeMails([mailKey(currentMsg)], { move: '\\Junk' });

@@ -1,6 +1,7 @@
 // Mail in its own window (double-click in the list). Display building blocks come from reader.ts.
 
 let viewMsg: MailDetail | null = null;
+let viewKicker = '';
 const setViewStatus = (s: string) => (el('#status').textContent = s);
 
 async function showMail(ref: MailRef, loadImages = false): Promise<void> {
@@ -16,8 +17,9 @@ async function showMail(ref: MailRef, loadImages = false): Promise<void> {
   document.title = `${msg.subject || t('mail.noSubject')} – Agenoras`;
   const acc = (await window.api.listAccounts().catch(() => [] as Account[])).find((a) => a.id === ref.accountId);
   const folderName = ref.folder === 'INBOX' ? t('folder.inbox') : ref.folder.split(/[/.]/).pop() || ref.folder;
+  viewKicker = `${accLabel(acc).toUpperCase()} · ${folderName.toUpperCase()}`;
   reader.innerHTML = `
-    <div class="reader-actions">${replyButtonsHtml()}</div>
+    <div class="reader-actions">${replyButtonsHtml()}<span class="spacer"></span><button class="icon-btn sm" data-action="print" aria-label="${esc(t('print.button'))}" title="${esc(t('print.buttonTip'))}">${ACT_ICONS.print}</button></div>
     ${metaHtml(msg, `${accLabel(acc).toUpperCase()} · ${folderName.toUpperCase()}`, readable(acc?.color ?? '#969993'))}
     ${inviteCardHtml(msg)}
     <div id="body"></div>
@@ -34,11 +36,17 @@ el('#reader').addEventListener('click', async (e) => {
   if (!msg) return;
   if (action === 'reply' || action === 'replyAll') return void window.api.compose.open(replyOpts(msg, action === 'replyAll'));
   if (action === 'forward') return void window.api.compose.open(forwardOpts(msg));
+  if (action === 'print') return printMail(bodyMsg ?? msg, viewKicker, setViewStatus);
   if (await reactionAction(msg, tgt, setViewStatus)) return;
   await attachmentAction(msg, tgt, setViewStatus);
 });
 
 document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'p') {
+    e.preventDefault();
+    if (viewMsg) printMail(bodyMsg ?? viewMsg, viewKicker, setViewStatus);
+    return;
+  }
   if (e.key === 'Escape') window.api.win.close();
 });
 

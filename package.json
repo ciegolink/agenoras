@@ -30,6 +30,7 @@
     "watch": "tsc --watch",
     "start": "tsc && electron . --ozone-platform=x11",
     "icons": "electron scripts/make-icons.js",
+    "menu-icons": "electron scripts/make-menu-icons.js",
     "dist": "tsc && electron-builder",
     "dist:linux": "tsc && electron-builder --linux",
     "dist:win": "tsc && electron-builder --win",

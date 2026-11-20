@@ -263,6 +263,8 @@ function renderContactDetail(): void {
       ${c.emails[0] ? `<button class="btn primary" data-mailto="${esc(c.emails[0].value)}">${esc(t('contacts.writeMail'))} →</button>` : ''}
       <button class="btn ghost" id="btn-contact-edit">${esc(t('btn.edit'))}</button>
       ${c.emails[0] ? `<button class="btn ghost" data-mlist-for="${esc(c.id)}">${esc(t('lists.addContact'))}</button>` : ''}
+      <span class="spacer"></span>
+      <button type="button" class="icon-btn sm" data-contact-print aria-label="${esc(t('print.button'))}" title="${esc(t('print.buttonTip'))}">${ACT_ICONS.print}</button>
     </div>
     ${fields.length ? `<div class="c-fields">${fields.join('')}</div>` : ''}
     ${recentHtml}`;
@@ -287,11 +289,86 @@ el('#contact-detail').addEventListener('click', (e) => {
     showPhotoLarge((photo as HTMLImageElement).src, c?.name ?? '');
     return;
   }
+  if (tgt.closest('[data-contact-print]')) return printSelectedContact();
   if (tgt.closest('#btn-contact-edit')) {
     const c = contacts.find((x) => x.id === selectedContact);
     if (c) openContactDialog(c);
   }
 });
+
+// Print one contact: all addresses and numbers with their kind, birthday, photo and note
+function printContact(c: Contact): void {
+  const book = books.find((b) => b.id === c.bookId);
+  // the kind only when it is known (contacts made in Agenoras have none)
+  const kind = (label: string, type: string) => (['work', 'home', 'cell', 'fax'].includes(type) ? `${label} · ${t(`contacts.type.${type}`)}` : label);
+  const bday = c.birthday ? new Date(c.birthday) : null;
+  openPrint(
+    {
+      kicker: book ? printKicker(book.name, book.accountName) : '',
+      title: c.name || t('contacts.unnamed'),
+      fields: [
+        [t('contacts.jobTitle'), c.title],
+        [t('contacts.company'), c.org],
+        ...c.emails.map((m): [string, string] => [kind(t('field.email'), m.type), m.value]),
+        ...c.phones.map((p): [string, string] => [kind(t('contacts.phone'), p.type), p.value]),
+        [t('contacts.birthday'), !bday ? '' : isNaN(bday.getTime()) ? c.birthday : bday.toLocaleDateString(LOCALE, { day: 'numeric', month: 'long', year: 'numeric' })],
+      ],
+      text: c.note,
+      photo: c.photo,
+    },
+    setContactsStatus,
+  );
+}
+
+function printSelectedContact(): void {
+  const c = contacts.find((x) => x.id === selectedContact);
+  if (c && pickedContacts.size <= 1) printContact(c);
+  else printContactOverview(); // several selected: those as a list
+}
+
+// Overview: the contacts as shown (address book, filter) or only the selected ones, A–Z;
+// an open distribution list prints its members
+function printContactOverview(): void {
+  const q = el<HTMLInputElement>('#contact-search').value.trim();
+  const ql = q.toLowerCase();
+  const fields: [string, string][] = [[t('print.filter'), q], [t('print.printed'), fmtLong(new Date().toISOString())]];
+  const ml = currentList ? mlistOf(currentList) : null;
+  if (ml) {
+    const members = ml.members.filter((m) => !ql || `${m.name} ${m.address}`.toLowerCase().includes(ql));
+    const rows = members.map((m) => `<tr><td>${esc(m.name || m.address)}</td><td class="ce">${esc(m.address)}</td></tr>`).join('');
+    openPrint({ kicker: t('lists.title').toUpperCase(), title: ml.name, fields: [[t('print.count'), String(members.length)], ...fields], html: rows ? `<table class="pl">${rows}</table>` : '' }, setContactsStatus);
+    return;
+  }
+  const picked = pickedContacts.size > 1;
+  const list = picked ? pickedList() : contacts.filter((c) => (!currentBook || c.bookId === currentBook) && contactMatches(c, ql));
+  const book = currentBook ? books.find((b) => b.id === currentBook) : null;
+  const byLetter = new Map<string, Contact[]>();
+  for (const c of list) {
+    const letter = (c.name[0] || '#').toUpperCase();
+    byLetter.set(letter, [...(byLetter.get(letter) ?? []), c]);
+  }
+  const lines = (xs: string[]) => xs.map(esc).join('<br>');
+  const html = [...byLetter]
+    .map(([letter, cs]) => {
+      const rows = cs
+        .map((c) => {
+          const sub = [c.title, c.org].filter(Boolean).join(' · ');
+          return `<tr><td><b>${esc(c.name || t('contacts.unnamed'))}</b>${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</td><td class="ce">${lines(c.emails.map((m) => m.value))}</td><td class="cp">${lines(c.phones.map((p) => p.value))}</td></tr>`;
+        })
+        .join('');
+      return `<section class="pl-sec"><h2>${esc(letter)}</h2><table class="pl">${rows}</table></section>`;
+    })
+    .join('');
+  openPrint(
+    {
+      kicker: book ? book.accountName.toUpperCase() : '',
+      title: picked ? t('contacts.picked', { n: list.length }) : book ? book.name : t('view.contacts'),
+      fields: [[t('print.count'), String(list.length)], ...(picked ? fields.slice(1) : fields)],
+      html,
+    },
+    setContactsStatus,
+  );
+}
 
 // Contact dialog
 const ctDlg = el<HTMLDialogElement>('#dlg-contact');

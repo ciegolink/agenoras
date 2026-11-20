@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src file:; object-src 'none'">
+<title>Agenoras</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=JetBrains+Mono:wght@500;700&family=Manrope:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body class="view-page print-page">
+<header class="titlebar">
+  <div class="brand"><img class="brand-logo" alt="" hidden><span class="logo">Agenoras<span class="dot">.</span></span></div>
+  <span class="pv-title" id="pv-title"></span>
+  <div class="tb-fill"></div>
+  <div class="win-ctls"></div>
+</header>
+<div class="pv-bar">
+  <label class="pv-field"><span data-i18n="print.paper"></span>
+    <select id="pv-size">
+      <option value="A4">A4</option>
+      <option value="Letter">Letter</option>
+    </select>
+  </label>
+  <div class="seg mini" role="group" data-i18n-aria="print.orientation" id="pv-orient">
+    <button type="button" data-orient="portrait" data-i18n="print.portrait"></button>
+    <button type="button" data-orient="landscape" data-i18n="print.landscape"></button>
+  </div>
+  <span class="pv-status" id="pv-status" role="status"></span>
+  <span class="spacer"></span>
+  <button type="button" class="btn ghost" id="pv-cancel" data-i18n="btn.cancel"></button>
+  <button type="button" class="btn ghost" id="pv-save" data-i18n="print.savePdf"></button>
+  <button type="button" class="btn primary" id="pv-print" data-i18n="print.print"></button>
+</div>
+<main class="pv-main">
+  <iframe id="pv-frame" title="" hidden></iframe>
+  <div class="empty" id="pv-loading" data-i18n="print.preparing"></div>
+</main>
+<script src="../../dist/renderer/common.js"></script>
+<script src="../../dist/renderer/print.js"></script>
+</body>
+</html>

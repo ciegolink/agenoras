@@ -5,6 +5,7 @@ let rssFeeds: RssFeed[] = [];
 let rssItems: RssItem[] = [];
 let currentFeed: string | null = null;
 let selectedRss = '';
+let rssPrintable = { key: '', html: '' }; // the loaded text of the open article (for printing)
 let rssFilter: 'all' | 'unread' = 'all';
 let rssArchive = false; // the Archive folder of currentFeed is open
 let rssStarred = false; // "Important": starred articles of all feeds
@@ -479,6 +480,7 @@ async function showRssItem(key: string): Promise<void> {
         <button type="button" class="icon-btn sm star-btn${item.flagged ? ' on' : ''}" data-rss-flag aria-pressed="${!!item.flagged}" aria-label="${esc(t(item.flagged ? 'mail.unflag' : 'mail.flag'))}" title="${esc(t(item.flagged ? 'mail.unflag' : 'mail.flag'))}">${item.flagged ? '★' : '☆'}</button>
         ${item.link ? `<button type="button" class="btn primary" data-rss-open>${esc(t('rss.openBrowser'))}</button>` : ''}
         <button type="button" class="btn ghost" data-rss-unread>${esc(t('rss.markUnread'))}</button>
+        <button type="button" class="icon-btn sm" data-rss-print aria-label="${esc(t('print.button'))}" title="${esc(t('print.buttonTip'))}">${ACT_ICONS.print}</button>
         <button type="button" class="icon-btn sm" data-rss-pin aria-label="${esc(t('pins.pin'))}" title="${esc(t('pins.pinTip'))}">${PIN_ICON}</button>
         <button type="button" class="btn ghost with-ico" data-rss-archive>${ACT_ICONS.archive}${esc(t(item.archived ? 'rss.unarchive' : 'mail.archive'))}</button>
       </div>
@@ -494,6 +496,7 @@ async function showRssItem(key: string): Promise<void> {
   if (selectedRss !== key) return; // user clicked another one
   box.querySelector('.status')?.remove();
   const clean = sanitizeHtml(html).trim();
+  rssPrintable = { key, html: clean };
   if (!clean) {
     box.insertAdjacentHTML('beforeend', `<p class="hint">${esc(t('rss.noContent'))}</p>`);
     return;
@@ -540,7 +543,29 @@ el('#rss-detail').addEventListener('click', (e) => {
   else if (tgt.closest('[data-rss-archive]')) void archiveRss([item.key], !item.archived);
   else if (tgt.closest('[data-rss-flag]')) void flagRss([item.key], !item.flagged);
   else if (tgt.closest('[data-rss-pin]')) void pinFeedItem(item);
+  else if (tgt.closest('[data-rss-print]')) printRssArticle();
 });
+
+// Print the open article: feed, title, author, date, link and the text (as far as it has loaded)
+function printRssArticle(): void {
+  const item = rssItems.find((i) => i.key === selectedRss);
+  if (!item) return;
+  const f = feedOf(item.feedId);
+  const html = rssPrintable.key === item.key ? rssPrintable.html : '';
+  openPrint(
+    {
+      kicker: f ? f.name.toUpperCase() : '',
+      title: item.title || t('rss.untitled'),
+      fields: [
+        [t('print.author'), item.author],
+        [t('print.date'), item.date ? fmtLong(item.date) : ''],
+        [t('print.link'), item.link],
+      ],
+      ...(html ? { html } : { text: item.snippet }),
+    },
+    setRssStatus,
+  );
+}
 
 // Plain e-mail and web addresses in an article → links (a new mail in Agenoras, the page in the browser)
 function mailtoLinks(doc: Document): void {

@@ -28,6 +28,9 @@
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/><path d="M17.5 9h1M17.5 12h1"/></svg>
   </button>
   <button type="button" class="tb-btn" id="tb-pins" aria-pressed="false" data-i18n-aria="pins.toggle" data-i18n-title="pins.toggle"><span class="tb-pin-ico"></span><span class="tb-n" id="tb-pins-n"></span></button>
+  <button type="button" class="tb-btn" id="btn-print-overview" hidden data-i18n-aria="print.overview" data-i18n-title="print.overviewTip">
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 14h12v7H6z"/></svg>
+  </button>
   <button type="button" class="tb-btn tb-gear" id="btn-settings" aria-haspopup="menu" data-i18n-aria="view.settings" data-i18n-title="view.settings">
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
   </button>
@@ -554,7 +557,10 @@
 
 <dialog id="dlg-event">
   <form id="form-event">
-    <h2 id="event-title"></h2>
+    <div class="dlg-head">
+      <h2 id="event-title"></h2>
+      <button type="button" class="icon-btn sm" id="btn-event-print" data-i18n-aria="print.button" data-i18n-title="print.buttonTip"></button>
+    </div>
     <label><span data-i18n="cal.eventTitle"></span><input name="title" required></label>
     <label><span data-i18n="cal.calendar"></span><select name="calendar"></select></label>
     <label class="check"><input name="allDay" type="checkbox"> <span data-i18n="cal.allDay"></span></label>

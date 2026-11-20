@@ -147,6 +147,23 @@ async function syncPins(): Promise<void> {
   if (tasks.length) await window.api.pins.update(tasks.map(taskPin)).catch(() => {});
 }
 
+// The groups of the task list as shown: chosen list, filter text, open or all (also for printing)
+function shownTaskGroups(): [string, string, Task[]][] {
+  const q = el<HTMLInputElement>('#task-search').value.trim().toLowerCase();
+  const mine = taskItems.filter((x) => (!currentTaskList || x.listId === currentTaskList) && (!q || `${x.title} ${x.notes}`.toLowerCase().includes(q)));
+  const today = dayKey(new Date());
+  const byDue = (a: Task, b: Task) => (a.due || '9999').localeCompare(b.due || '9999') || (a.priority === 'high' ? -1 : 0) - (b.priority === 'high' ? -1 : 0);
+  const pending = mine.filter((x) => !x.done);
+  const groups: [string, string, Task[]][] = [
+    ['overdue', t('tasks.groupOverdue'), pending.filter((x) => x.due && dueDay(x) < today).sort(byDue)],
+    ['today', t('tasks.groupToday'), pending.filter((x) => dueDay(x) === today).sort(byDue)],
+    ['later', t('tasks.groupLater'), pending.filter((x) => x.due && dueDay(x) > today).sort(byDue)],
+    ['nodate', t('tasks.groupNoDate'), pending.filter((x) => !x.due).sort((a, b) => (b.priority === 'high' ? 1 : 0) - (a.priority === 'high' ? 1 : 0) || a.created.localeCompare(b.created))],
+  ];
+  if (showDoneTasks) groups.push(['done', t('tasks.groupDone'), mine.filter((x) => x.done).sort((a, b) => b.completed.localeCompare(a.completed))]);
+  return groups.filter(([, , items]) => items.length);
+}
+
 function renderTasks(): void {
   // Sidebar: lists per account with the number of open tasks
   const open = taskItems.filter((x) => !x.done);
@@ -172,17 +189,7 @@ function renderTasks(): void {
   el('#tasks-title').textContent = t(showDoneTasks ? 'tasks.allShort' : 'tasks.open');
 
   const q = el<HTMLInputElement>('#task-search').value.trim().toLowerCase();
-  const mine = taskItems.filter((x) => (!currentTaskList || x.listId === currentTaskList) && (!q || `${x.title} ${x.notes}`.toLowerCase().includes(q)));
-  const today = dayKey(new Date());
-  const byDue = (a: Task, b: Task) => (a.due || '9999').localeCompare(b.due || '9999') || (a.priority === 'high' ? -1 : 0) - (b.priority === 'high' ? -1 : 0);
-  const pending = mine.filter((x) => !x.done);
-  const groups: [string, string, Task[]][] = [
-    ['overdue', t('tasks.groupOverdue'), pending.filter((x) => x.due && dueDay(x) < today).sort(byDue)],
-    ['today', t('tasks.groupToday'), pending.filter((x) => dueDay(x) === today).sort(byDue)],
-    ['later', t('tasks.groupLater'), pending.filter((x) => x.due && dueDay(x) > today).sort(byDue)],
-    ['nodate', t('tasks.groupNoDate'), pending.filter((x) => !x.due).sort((a, b) => (b.priority === 'high' ? 1 : 0) - (a.priority === 'high' ? 1 : 0) || a.created.localeCompare(b.created))],
-  ];
-  if (showDoneTasks) groups.push(['done', t('tasks.groupDone'), mine.filter((x) => x.done).sort((a, b) => b.completed.localeCompare(a.completed))]);
+  const groups = shownTaskGroups();
   const html = groups
     .filter(([, , items]) => items.length)
     .map(([key, title, items]) => `<section class="task-group"><h3 class="${key}">${esc(title.toUpperCase())} <span class="n">${items.length}</span></h3>${items.map(taskRow).join('')}</section>`)
@@ -304,6 +311,7 @@ function renderTaskDetail(): void {
         <input type="range" min="0" max="100" step="10" value="${pct}" data-td-pct aria-label="${esc(t('tasks.progress'))}">
         <span id="td-pct">${pct} %</span>
       </label>
+      <button type="button" class="icon-btn sm" data-td="print" aria-label="${esc(t('print.button'))}" title="${esc(t('print.buttonTip'))}">${ACT_ICONS.print}</button>
       <button type="button" class="icon-btn sm" data-td="pin" aria-label="${esc(t('pins.pin'))}" title="${esc(t('pins.pinTip'))}">${PIN_ICON}</button>
       <button type="button" class="icon-btn sm danger" data-td="delete" aria-label="${esc(t('btn.delete'))}" title="${esc(t('btn.delete'))}">${ACT_ICONS.trash}</button>
     </div>
@@ -318,6 +326,62 @@ function renderTaskDetail(): void {
       </div>
     </div>
     ${task.notes.trim() ? `<div class="td-notes">${linkText(esc(task.notes.trim()))}</div>` : `<p class="hint">${esc(t('tasks.noNotes'))}</p>`}`;
+}
+
+// Print: list, title, dates, progress, priority and the note
+function printTask(task: Task): void {
+  const list = tlistOf(task.listId);
+  openPrint(
+    {
+      kicker: list ? printKicker(list.name, list.accountName) : '',
+      title: task.title,
+      fields: [
+        [t('tasks.start'), task.start ? longDay(task.start) : ''],
+        [t('tasks.due'), task.due ? longDay(task.due) : ''],
+        [t('tasks.doneField'), task.done ? (task.completed ? fmtLong(task.completed) : '✓') : ''],
+        [t('tasks.progress'), !task.done && task.percent ? `${task.percent} %` : ''],
+        [t('compose.priority'), task.priority !== 'normal' ? t(`prio.${task.priority}`) : ''],
+      ],
+      text: task.notes,
+    },
+    setTasksStatus,
+  );
+}
+
+// Print the task list as shown, in the same groups; a box to tick by hand on paper
+function printTaskOverview(): void {
+  const list = currentTaskList ? tlistOf(currentTaskList) : null;
+  const filter = el<HTMLInputElement>('#task-search').value.trim();
+  const sections = shownTaskGroups().map(([, title, items]) => {
+    const rows = items
+      .map((x) => {
+        const dates = [x.start ? shortDay(x.start) : '', x.due ? shortDay(x.due) : ''].filter(Boolean).join(' – ');
+        const note = x.notes.trim().split('\n')[0].slice(0, 160);
+        const l = !list && taskLists.length > 1 ? tlistOf(x.listId) : null;
+        const pct = !x.done && x.percent ? `${x.percent} %` : '';
+        return `<tr><td><span class="pl-box">${x.done ? '✓' : ''}</span>${x.priority === 'high' ? '<span class="hi">! </span>' : ''}<span class="${x.done ? 'done' : ''}">${esc(x.title)}</span>${note ? `<span class="sub">${esc(note)}</span>` : ''}</td>
+          <td class="c">${esc(dates)}</td><td class="r">${esc([l?.name ?? '', pct].filter(Boolean).join(' · '))}</td></tr>`;
+      })
+      .join('');
+    return `<section class="pl-sec"><h2>${esc(title)} <span class="n">${items.length}</span></h2><table class="pl">${rows}</table></section>`;
+  });
+  openPrint(
+    {
+      kicker: list ? printKicker(list.name, list.accountName) : '',
+      title: `${list ? list.name : t('view.tasks')} – ${t(showDoneTasks ? 'tasks.allShort' : 'tasks.open').replace(/\.$/, '')}`,
+      fields: [
+        [t('print.filter'), filter],
+        [t('print.printed'), fmtLong(new Date().toISOString())],
+      ],
+      html: sections.join('') || `<div class="pl-empty">${esc(t('tasks.allDone'))}</div>`,
+    },
+    setTasksStatus,
+  );
+}
+
+function printSelectedTask(): void {
+  const task = taskItems.find((x) => x.id === selectedTask);
+  if (task) printTask(task);
 }
 
 // An e-mail address in the note (e.g. a task made from a mail: "… wrote Name <address>:") → answer by mail
@@ -424,6 +488,7 @@ el('#task-detail').addEventListener('click', (e) => {
     if (!senderMenu.hidden) hideSenderMenu(); // second click on Reply closes the list again
     else void pickReplySender(task, (e.target as HTMLElement).closest<HTMLElement>('[data-td]')!);
   }
+  else if (act === 'print') printTask(task);
   else if (act === 'pin') pinTask(task);
   else if (act === 'delete') void deleteTaskAsk(task);
 });

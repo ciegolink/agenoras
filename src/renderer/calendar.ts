@@ -503,6 +503,7 @@ function openEventDialog(ev: CalEvent | null, start?: Date, end?: Date, prefill?
   el('#event-hint').textContent = ev?.recurring ? t('cal.seriesHint') : '';
   el<HTMLButtonElement>('#btn-event-delete').hidden = !ev;
   el<HTMLButtonElement>('#btn-event-mail').hidden = !ev;
+  el<HTMLButtonElement>('#btn-event-print').hidden = !ev;
   fillAttendees(ev);
   evDlg.showModal();
   evField('title').focus();
@@ -1077,6 +1078,94 @@ function readAttendees(): { email: string; name?: string }[] | undefined {
 }
 
 // Send event by mail (.ics as attachment)
+// Print the saved event (not unsaved changes in the dialog): calendar, time, series, place, people, note
+function eventWhen(ev: CalEvent): string {
+  const day = (d: Date) => d.toLocaleDateString(LOCALE, { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' });
+  const s = new Date(ev.start);
+  const e = new Date(ev.end);
+  if (ev.allDay) {
+    const last = addDays(e, -1); // all-day: the end is exclusive
+    return `${day(s)}${last > s ? ` – ${day(last)}` : ''} · ${t('cal.allDay')}`;
+  }
+  return ymd(s) === ymd(e) ? `${day(s)}, ${hm(s)}–${hm(e)}` : `${day(s)}, ${hm(s)} – ${day(e)}, ${hm(e)}`;
+}
+
+function eventRepeat(ev: CalEvent): string {
+  const r = ev.rrule;
+  if (!ev.recurring) return '';
+  if (!r || r.custom) return t('rec.seriesTip');
+  const weekdays = r.freq === 'WEEKLY' && r.interval === 1 && [...r.byday].sort().join() === 'FR,MO,TH,TU,WE';
+  const parts = [weekdays ? t('rec.weekdays') : t(`rec.${r.freq.toLowerCase()}`)];
+  if (r.interval > 1) parts.push(`${t('rec.every')} ${r.interval}`);
+  if (r.until) parts.push(`${t('rec.ends')}: ${new Date(r.until.length === 10 ? `${r.until}T12:00` : r.until).toLocaleDateString(LOCALE)}`);
+  else if (r.count) parts.push(`${t('rec.ends')}: ${t('rec.endCount')} ${r.count} ${t('rec.times')}`);
+  return parts.join(' · ');
+}
+
+function printOpenEvent(): void {
+  const ev = editingEvent;
+  if (!ev) return;
+  const cal = calOf(ev.calendarId);
+  const person = (p: { email: string; name?: string }) => (p.name && p.name !== p.email ? `${p.name} <${p.email}>` : p.email);
+  openPrint(
+    {
+      kicker: cal ? printKicker(cal.name, cal.accountName) : '',
+      title: ev.title,
+      fields: [
+        [t('print.when'), eventWhen(ev)],
+        [t('rec.repeat'), eventRepeat(ev)],
+        [t('cal.location'), ev.location],
+        [t('invite.organizer'), ev.organizer ? person(ev.organizer) : ''],
+        [t('invite.attendees'), (ev.attendees ?? []).map(person).join(', ')],
+      ],
+      text: ev.description,
+    },
+    (s) => (el('#event-error').textContent = s),
+  );
+}
+
+// Print the shown week as a list: day by day, all-day first, then by time (visible calendars only)
+function printWeek(): void {
+  const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+  const last = days[6];
+  const shown = calendars.filter((c) => !hiddenCals.has(c.id));
+  const sections = days.map((d) => {
+    const from = d.getTime();
+    const to = addDays(d, 1).getTime();
+    const evs = calEvents
+      .filter((e) => {
+        const s = new Date(e.start).getTime();
+        const en = new Date(e.end).getTime();
+        return s < to && Math.max(en, s + 1) > from; // all-day: the end is exclusive, so this fits both
+      })
+      .sort((a, b) => Number(b.allDay) - Number(a.allDay) || a.start.localeCompare(b.start) || a.title.localeCompare(b.title));
+    const rows = evs
+      .map((e) => {
+        const s = new Date(e.start);
+        const en = new Date(e.end);
+        const time = e.allDay ? t('cal.allDay') : `${s.getTime() < from ? '…' : hm(s)}–${en.getTime() > to ? '…' : hm(en)}`;
+        const cal = calOf(e.calendarId);
+        const sub = [e.location, shown.length > 1 && cal ? cal.name : ''].filter(Boolean).join(' · ');
+        return `<tr><td class="c">${esc(time)}</td><td><span class="pl-dot" style="background:${esc(calColor(e.calendarId))}"></span>${esc(e.title || t('cal.untitled'))}${e.recurring ? ' ↻' : ''}${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</td></tr>`;
+      })
+      .join('');
+    const head = d.toLocaleDateString(LOCALE, { weekday: 'long', day: 'numeric', month: 'long' });
+    return `<section class="pl-sec"><h2>${esc(head)}</h2>${rows ? `<table class="pl">${rows}</table>` : `<div class="pl-empty">${esc(t('print.noEvents'))}</div>`}</section>`;
+  });
+  openPrint(
+    {
+      kicker: `${t('cal.week', { n: isoWeek(addDays(weekStart, (8 - WEEK_START) % 7)) })} · ${weekStart.getFullYear()}`.toUpperCase(),
+      title: `${new Intl.DateTimeFormat(LOCALE, { day: 'numeric', month: 'long' }).formatRange(weekStart, last)} ${last.getFullYear()}`,
+      fields: [[t('print.calendars'), shown.map((c) => c.name).join(', ')]],
+      html: sections.join(''),
+    },
+    setCalStatus,
+  );
+}
+
+el('#btn-event-print').innerHTML = ACT_ICONS.print;
+el('#btn-event-print').addEventListener('click', printOpenEvent);
+
 el('#btn-event-mail').addEventListener('click', async () => {
   const ev = editingEvent;
   if (!ev) return;

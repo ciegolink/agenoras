@@ -246,6 +246,13 @@ contextBridge.exposeInMainWorld('api', {
     setDefaultMail: () => ipcRenderer.invoke('mailto:setDefault'),
     setMailLabel: (keys: string[], labelId: string, on: boolean) => ipcRenderer.invoke('labels:set', keys, labelId, on),
   },
+  print: {
+    open: (job: unknown) => ipcRenderer.invoke('print:open', job),
+    init: () => ipcRenderer.invoke('print:init'),
+    pdf: (opts: unknown) => ipcRenderer.invoke('print:pdf', opts),
+    print: (opts: unknown) => ipcRenderer.invoke('print:print', opts),
+    save: (opts: unknown) => ipcRenderer.invoke('print:save', opts),
+  },
   compose: {
     open: (opts: unknown) => ipcRenderer.invoke('compose:open', opts),
     init: () => ipcRenderer.invoke('compose:init'),

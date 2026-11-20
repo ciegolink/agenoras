@@ -105,6 +105,7 @@ import { cachedContacts, ContactInput, deleteContact, forgetCardAccount, listCon
 import { cachedByMessageIds, cachedReplies, hasOffline, offlineBody, offlineOlder, tidyCache, vacuumCache, knownAddresses, rememberAddresses, cachedBody, cachedMail, closeCache, folderKey, forgetFolder, forgetMailAccount, getKv, removeCachedMail, searchCachedMail, setCachedSeen, setKv, storeBody, storeMail } from './cache';
 import { availableLanguages, i18nData, initI18n, chromiumLocale, regionWeekStart, t } from './i18n';
 import { writeFileSafe } from './files';
+import { cleanPrintFiles, openPrintPreview, PrintJob, registerPrintIpc } from './print';
 
 // Language: system language if lang/<code>.json exists – otherwise English.
 // The locale also drives date fields and formats (e.g. de-CH).
@@ -332,6 +333,15 @@ function setTrayUnread(unread: boolean): void {
   tray?.setToolTip(unread ? t('tray.tooltipNew') : 'Agenoras');
 }
 
+// Small black icons in the tray menu (build/menu, made by npm run menu-icons); macOS: template images it colours itself
+function menuIcon(name: string): Electron.NativeImage | undefined {
+  const mac = process.platform === 'darwin';
+  const img = nativeImage.createFromPath(path.join(BUILD_DIR, 'menu', `${name}${mac ? 'Template' : ''}.png`)); // @2x is loaded automatically
+  if (img.isEmpty()) return undefined;
+  if (mac) img.setTemplateImage(true);
+  return img;
+}
+
 function createTray(): void {
   try {
     tray = new Tray(trayIcon(false));
@@ -343,20 +353,22 @@ function createTray(): void {
   tray.setToolTip('Agenoras');
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: t('tray.open'), click: showWindow },
+      { label: t('tray.open'), icon: menuIcon('open'), click: showWindow },
       {
         label: t('tray.newMail'),
+        icon: menuIcon('mail'),
         click: () => {
           showWindow();
           openComposeWindow({});
         },
       },
-      { label: t('tb.newEvent'), click: () => createFromTray('event') },
-      { label: t('tb.newTask'), click: () => createFromTray('task') },
-      { label: t('tb.newContact'), click: () => createFromTray('contact') },
+      { label: t('tb.newEvent'), icon: menuIcon('event'), click: () => createFromTray('event') },
+      { label: t('tb.newTask'), icon: menuIcon('task'), click: () => createFromTray('task') },
+      { label: t('tb.newContact'), icon: menuIcon('contact'), click: () => createFromTray('contact') },
       { type: 'separator' },
       {
         label: t('tray.quit'),
+        icon: menuIcon('quit'),
         click: () => {
           quitting = true;
           app.quit();
@@ -558,6 +570,36 @@ ipcMain.handle('pins:toggle', (_e, key: string) => {
 ipcMain.handle('pins:update', (_e, items: PinItem[]) => {
   if (updatePins(items)) sendPins();
 });
+
+// Print preview: own window with the PDF of the page (the PDF viewer needs plugins in this window only)
+function makePrintWindow(parent: BrowserWindow | null): BrowserWindow {
+  const st = loadWinState('print', { width: 980, height: 900 });
+  const b = parent?.getBounds();
+  const pv = new BrowserWindow({
+    width: st.width,
+    height: st.height,
+    icon: APP_ICON,
+    minWidth: 640,
+    minHeight: 480,
+    ...(b ? { x: b.x + Math.max(0, Math.round((b.width - st.width) / 2)), y: b.y + 40 } : {}),
+    backgroundColor: bgColor(),
+    title: 'Agenoras',
+    show: false,
+    ...frameOpts,
+    webPreferences: { ...webPreferences, plugins: true },
+  });
+  lockDown(pv);
+  trackWinState(pv, 'print', false);
+  pv.loadFile(path.join(__dirname, '../../src/renderer/print.html'));
+  pv.once('ready-to-show', () => {
+    if (st.maximized) pv.maximize();
+    pv.show();
+  });
+  return pv;
+}
+
+ipcMain.handle('print:open', (e, job: PrintJob) => openPrintPreview(job, BrowserWindow.fromWebContents(e.sender), makePrintWindow));
+registerPrintIpc();
 
 ipcMain.handle('mailview:open', (_e, ref: { accountId: string; folder: string; uid: number }) => openMailWindow(ref));
 ipcMain.handle('mailview:init', (e) => viewerOpts.get(e.sender.id) ?? null);
@@ -1852,6 +1894,7 @@ ipcMain.handle('rules:run', async (_e, accountId: string | null) => {
 
 app.whenReady().then(() => {
   applySpellcheck();
+  cleanPrintFiles();
   nativeTheme.themeSource = getSettings().theme;
   powerMonitor.on('resume', () => setTimeout(reconnectAll, 3000)); // give the network a moment to come back
   // Log out / shut down: quit on our own before the system takes the helper processes away

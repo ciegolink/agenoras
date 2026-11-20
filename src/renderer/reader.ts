@@ -22,6 +22,7 @@ const ACT_ICONS = {
   newMail: svgIco('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>', 16),
   newEvent: svgIco('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M12 13v5M9.5 15.5h5"/>', 16),
   newTask: svgIco('<rect x="3" y="3" width="18" height="18" rx="4"/><path d="m8 12 3 3 5-6"/>', 16),
+  print: svgIco('<path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 14h12v7H6z"/>'),
   newContact: svgIco('<circle cx="10" cy="8" r="4"/><path d="M3 20a7 7 0 0 1 12.5-4.3"/><path d="M19 14v6M16 17h6"/>', 16),
 };
 
@@ -88,6 +89,103 @@ function wrapHtml(html: string): string {
   return `<!doctype html><html><head><meta charset="utf-8"><base target="_blank">
 <style>body{margin:18px;font-family:Manrope,system-ui,sans-serif;font-size:14px;line-height:1.5;color:#1F2126;background:#fff;overflow-wrap:anywhere}img{max-width:100%;height:auto}</style>
 </head><body>${html}</body></html>`;
+}
+
+// Printing: a self-contained page (heading, fields, content) for the print preview.
+// The page is shown without JavaScript and without network; images only as data: (already inlined).
+interface PrintPart {
+  kicker?: string; // small line above the title, e.g. "NORTHWIND · INBOX"
+  title: string;
+  fields: [string, string][]; // label → value (plain text); empty values are left out
+  html?: string; // content as HTML (mail, feed article)
+  text?: string; // content as plain text (note, description)
+  photo?: string; // data: image, round at the top right (contact)
+}
+
+// Only what can show on paper: no scripts, frames or remote style sheets; images only if they are
+// embedded (not loaded external images would print as broken icons)
+function printableHtml(html: string): string {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.querySelectorAll('script, iframe, frame, object, embed, link, meta, base, title, noscript').forEach((n) => n.remove());
+  doc.querySelectorAll('img').forEach((img) => {
+    if (!/^data:/i.test(img.getAttribute('src') ?? '')) img.remove();
+    else img.removeAttribute('srcset');
+  });
+  const styles = [...doc.head.querySelectorAll('style')].map((s) => s.outerHTML).join('');
+  return styles + doc.body.innerHTML;
+}
+
+function printPage(p: PrintPart): string {
+  const rows = p.fields
+    .filter(([, v]) => v && v.trim())
+    .map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`)
+    .join('');
+  const body = p.html ? `<div id="pm-html">${printableHtml(p.html)}</div>` : p.text?.trim() ? `<div id="pm-text">${esc(p.text.trim())}</div>` : '';
+  return `<!doctype html><html lang="${esc(I18N.lang)}"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:">
+<title>${esc(p.title)}</title>
+<style>
+html,body{margin:0;padding:0;background:#fff}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:10.5pt;line-height:1.5;color:#1F2126;overflow-wrap:anywhere}
+#pm-head{break-inside:avoid;margin:0 0 14pt;padding:0 0 10pt;border-bottom:1px solid #C9CBC4}
+#pm-head{display:flow-root}
+#pm-head #pm-photo{float:right;width:72pt;height:72pt;object-fit:cover;border-radius:50%;margin:0 0 6pt 16pt}
+#pm-head #pm-kicker{font:600 8pt ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;letter-spacing:.12em;color:#6B6F68;margin:0 0 4pt}
+#pm-head #pm-title{font:400 19pt/1.25 Georgia,"DejaVu Serif","Times New Roman",serif;margin:0 0 8pt;color:#1F2126}
+#pm-head table#pm-meta{border-collapse:collapse;width:auto;margin:0;font-size:9.5pt}
+#pm-head table#pm-meta th{text-align:left;vertical-align:top;font-weight:600;color:#6B6F68;padding:1pt 12pt 1pt 0;white-space:nowrap;border:0;background:none}
+#pm-head table#pm-meta td{vertical-align:top;padding:1pt 0;border:0;background:none;color:#1F2126}
+#pm-text{white-space:pre-wrap}
+#pm-html .pl-sec{break-inside:avoid-page;margin:0 0 12pt}
+#pm-html .pl-sec h2{font:600 10.5pt/1.3 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;margin:0 0 3pt;padding:0 0 3pt;border-bottom:1px solid #C9CBC4;color:#1F2126}
+#pm-html .pl-sec h2 .n{font-weight:400;color:#6B6F68}
+#pm-html table.pl{border-collapse:collapse;width:100%}
+#pm-html table.pl tr{break-inside:avoid}
+#pm-html table.pl td{padding:3pt 10pt 3pt 0;vertical-align:top;border-bottom:1px solid #EBECE7}
+#pm-html table.pl{table-layout:fixed}
+#pm-html table.pl td.c{white-space:nowrap;width:84pt;font-variant-numeric:tabular-nums;color:#4A4E47}
+#pm-html table.pl td.r{white-space:nowrap;width:96pt;text-align:right;padding-right:0;color:#6B6F68;font-size:9pt;overflow:hidden;text-overflow:ellipsis}
+#pm-html table.pl td.ce{width:38%}
+#pm-html table.pl td.cp{width:24%;white-space:nowrap}
+#pm-html table.pl .sub{display:block;color:#6B6F68;font-size:9pt}
+#pm-html table.pl .done{text-decoration:line-through;color:#6B6F68}
+#pm-html table.pl .hi{color:#C2410C;font-weight:700}
+#pm-html .pl-dot{display:inline-block;width:6.5pt;height:6.5pt;border-radius:50%;margin-right:5pt}
+#pm-html .pl-box{display:inline-block;width:8pt;height:8pt;border:1px solid #6B6F68;border-radius:2pt;margin-right:6pt;vertical-align:-1pt;text-align:center;font-size:7pt;line-height:8pt}
+#pm-html .pl-empty{color:#9A9D96;font-style:italic;padding:2pt 0}
+#pm-html img{max-width:100%;height:auto}
+#pm-html{max-width:100%}
+</style></head><body>
+<div id="pm-head">${p.photo?.startsWith('data:image/') ? `<img id="pm-photo" src="${esc(p.photo)}" alt="">` : ''}${p.kicker ? `<div id="pm-kicker">${esc(p.kicker)}</div>` : ''}<h1 id="pm-title">${esc(p.title)}</h1>${rows ? `<table id="pm-meta">${rows}</table>` : ''}</div>
+${body}
+</body></html>`;
+}
+
+// "Name · Account" for the line above the title, the name once if both are the same (local calendars)
+const printKicker = (name: string, account: string) => (name === account || !account ? name : `${name} · ${account}`).toUpperCase();
+
+function openPrint(p: PrintPart, status?: (s: string) => void): void {
+  window.api.print.open({ title: p.title, html: printPage(p) }).catch((err) => status?.(errMsg(err)));
+}
+
+// A mail as shown (with images if they were loaded)
+function printMail(msg: MailDetail, kicker: string, status?: (s: string) => void): void {
+  const who = (name: string, addr: string) => (name && name !== addr ? `${name} <${addr}>` : addr);
+  openPrint(
+    {
+      kicker,
+      title: msg.subject || t('mail.noSubject'),
+      fields: [
+        [t('compose.from'), who(msg.fromName, msg.fromAddress)],
+        [t('print.to'), msg.toList.join(', ') || msg.to],
+        [t('compose.ccAria'), msg.ccList.join(', ')],
+        [t('print.date'), fmtLong(msg.date)],
+        [t('compose.attachments'), msg.attachments.map((a) => `${a.filename} (${fmtSize(a.size)})`).join(', ')],
+      ],
+      ...(msg.html ? { html: msg.html } : { text: msg.text }),
+    },
+    status,
+  );
 }
 
 function priorityBadge(p?: Priority): string {

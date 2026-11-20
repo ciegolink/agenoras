@@ -199,6 +199,10 @@ interface MailRule {
   stop: boolean;
 }
 
+interface PrintOpts {
+  pageSize: 'A4' | 'Letter';
+  landscape: boolean;
+}
 interface SavedSearch {
   id: string;
   name: string;
@@ -599,6 +603,13 @@ interface Window {
       onChanged(cb: (items: OutboxItem[]) => void): void;
     };
     onStatus(cb: (text: string) => void): void;
+    print: {
+      open(job: { title: string; html: string }): Promise<void>;
+      init(): Promise<{ title: string } | null>;
+      pdf(opts: PrintOpts): Promise<string>;
+      print(opts: PrintOpts): Promise<boolean>;
+      save(opts: PrintOpts): Promise<string | null>;
+    };
     compose: {
       open(opts: ComposeOpts): Promise<void>;
       init(): Promise<ComposeOpts>;

@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { listDavAccounts, getDavAccount } from './davaccounts';
 import { anyObject, calEntry, davError, getConn, hasTodos, registerTz } from './caldav';
 import { getKv, setKv } from './cache';
+import { LOCAL_URL } from './localdav';
 import { t } from './i18n';
 import { log, resolved } from './log';
 
@@ -246,7 +247,8 @@ export async function saveTask(input: TaskInput): Promise<{ id: string; tasks: T
   applyInput(v, input);
   cal.addSubcomponent(v);
   await check(await client.createCalendarObject({ calendar: entry.cal, filename: `${uid}.ics`, iCalString: cal.toString() }));
-  const url = new URL(`${uid}.ics`, entry.cal.url).href;
+  // local lists ("local:cal/…/") are no base for new URL(); localdav stores the object under collection + file name
+  const url = entry.cal.url.startsWith(LOCAL_URL) ? `${entry.cal.url}${uid}.ics` : new URL(`${uid}.ics`, entry.cal.url).href;
   return { id: url, tasks: await refetchTask(client, entry.cal, url) };
 }
 

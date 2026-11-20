@@ -110,6 +110,8 @@ The buttons at the bottom of the sidebar switch between **Mail**, **Calendar**, 
 - **Search**: the field in the title bar searches everything, see [Search](#search) below.
 - **Pins**: the pin button next to the *My day* button shows the pin sidebar, see [Pin sidebar](#pin-sidebar) below.
 - **Offline**: without an internet connection, an **Offline** sign appears in the title bar; emails in the outbox are sent once the connection is back.
+- **Printing**: the printer button prints the open email (also in its own window), task, feed article or contact (with photo, all addresses and numbers, birthday and note); for an event it is the printer button at the top right of the event dialog. **Ctrl+P** does the same.
+- **Printing an overview**: in Calendar, Tasks and Contacts, the printer button in the title bar (left of the gear) prints an overview: the shown calendar week as a list, day by day with times, places and calendars (hidden calendars are left out), the task list exactly as shown – same list, filter and groups, with a box to tick off on paper – or the contacts as shown (address book, filter) from A to Z with company, email and phone. If several contacts are selected, only those are printed; an open distribution list prints its members. **Ctrl+Shift+P** does the same; in the calendar **Ctrl+P** prints the week too. A preview shows the pages first: choose **A4** or **Letter** and **Portrait** or **Landscape**, then **Print …** opens the system print dialog (printer, copies, pages) or **Save as PDF** saves the pages as a file. The printout has a heading with the important details (sender, recipients and date of an email; due date and progress of a task; time, place and attendees of an event) and page numbers at the bottom. External images are only printed if you loaded them in the email; nothing is fetched from the internet for printing.
 - **Problems**: when a connection to a mail, calendar or contacts server fails, a warning sign appears in the title bar, with the number of new problems. Click it to see what went wrong. The log contains errors only, and only lasting ones: once the account works again, its entries disappear by themselves (and the sign too, if nothing else is left). You can **Copy** it (e.g. for a bug report) or **Clear** it. See also [Troubleshooting](#14-troubleshooting).
 
 ### Pin sidebar
@@ -553,6 +555,9 @@ On macOS, use **Cmd** instead of **Ctrl**.
 | Mail | Right-click on a folder | Mark all as read, empty trash, move spam to trash |
 | Translation panel | **Esc** | Close |
 | Mail window | **Esc** | Close window |
+| Mail, mail window, Tasks, Feeds, Contacts, event dialog | **Ctrl+P** | Print preview of the open email, task, article, contact or event |
+| Calendar, Tasks, Contacts | **Ctrl+Shift+P** | Print preview of the overview: the week as a list, the task list, the contacts |
+| Print preview | **Ctrl+P** / **Esc** | Print / close |
 
 ## 13. Your data and privacy
 
