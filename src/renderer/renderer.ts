@@ -19,6 +19,7 @@ let searchMore = false; // accounts with a local copy were not asked on the serv
 let searchSeq = 0;
 type SearchKind = 'all' | 'mail' | 'event' | 'contact' | 'task' | 'feed';
 let searchKind: SearchKind = 'all'; // search: which kind of hits is shown
+let searchYear: number | null = null; // search: only hits of this year (tags in the sidebar)
 let eventHits: CalEvent[] = []; // search hits from the calendars
 let contactHits: Contact[] = []; // search hits from the address books
 let taskHits: Task[] = []; // search hits from the task lists
@@ -238,6 +239,7 @@ function openSavedSearch(id: string): void {
   el('#search-clear').hidden = false;
   searchAccount = s.account && accounts.some((a) => a.id === s.account) ? s.account : null;
   searchKind = 'all';
+  searchYear = null;
   searchResults = null;
   openSearchPage();
   renderSearchSide(s.query);
@@ -754,7 +756,7 @@ function mailRowHtml(m: MailSummary, o: { showTo: boolean; listFolder: string; a
         <span class="from">${esc(who)}</span>${threadBtn}
         ${!showTo && isExternal(m.fromAddress) ? `<span class="ext-tag sm" title="${esc(t('ext.banner'))}">${esc(t('ext.tag'))}</span>` : ''}${prio}${m.hasAttachments ? `<span class="clip" title="${esc(t('mail.attachmentTag'))}">${svgIco('<path d="m21 12-8.5 8.5a5 5 0 0 1-7-7L14 5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4L15.5 8"/>', 12)}</span>` : ''}
         ${m.answered ? `<span class="ans" title="${esc(t('mail.answered'))}">${svgIco('<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>', 12)}</span>` : ''}${m.forwarded ? `<span class="ans" title="${esc(t('mail.forwarded'))}">${svgIco('<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>', 12)}</span>` : ''}
-        <span class="time">${fmtShort(m.date)}</span>
+        <span class="time">${isSearchView() ? fmtWithYear(m.date) : fmtShort(m.date)}</span>
         <span class="star${m.flagged ? ' on' : ''}" data-star role="button" title="${esc(t(m.flagged ? 'mail.unflag' : 'mail.flag'))}">${m.flagged ? '★' : '☆'}</span>
       </span>
       <span class="subject">${unread ? '<span class="new-dot"></span>' : ''}${esc(m.subject || t('mail.noSubject'))}</span>
@@ -774,6 +776,7 @@ function renderList(): void {
   const qf = searchPage ? '' : el<HTMLInputElement>('#quick-filter').value.trim().toLowerCase();
   if (searchPage) renderSearchSide(q);
   if (searchPage && q.length < 2) {
+    paintSearchYears(new Map());
     shownKeys = [];
     el('#mail-list').innerHTML = `<div class="list-empty">${esc(t('search.enterTerm'))}</div>`;
     return;
@@ -793,10 +796,28 @@ function renderList(): void {
 
   // Search also finds appointments and contacts (not with the mail-only filters)
   const others = !!q && listFilter === 'all' && !labelFilter;
-  const evs = others ? eventHits : [];
+  let evs = others ? eventHits : [];
   const cts = others ? contactHits : [];
-  const tks = others ? taskHits : [];
-  const fds = others ? feedHits : [];
+  let tks = others ? taskHits : [];
+  let fds = others ? feedHits : [];
+  // Years of the hits as tags in the sidebar; one chosen: only that year (contacts have no date and stay)
+  if (searchPage && q) {
+    const inKind = (k: SearchKind) => searchKind === 'all' || searchKind === k;
+    const years = new Map<number, number>();
+    const add = (y: number) => Number.isFinite(y) && years.set(y, (years.get(y) ?? 0) + 1);
+    if (inKind('mail')) shown.forEach((m) => add(mailYear(m)));
+    if (inKind('event')) evs.forEach((e) => add(eventYear(e)));
+    if (inKind('task')) tks.forEach((x) => add(taskYear(x)));
+    if (inKind('feed')) fds.forEach((i) => add(feedYear(i)));
+    paintSearchYears(years);
+    if (searchYear !== null) {
+      const y = searchYear;
+      shown = shown.filter((m) => mailYear(m) === y);
+      evs = evs.filter((e) => eventYear(e) === y);
+      tks = tks.filter((x) => taskYear(x) === y);
+      fds = fds.filter((i) => feedYear(i) === y);
+    }
+  }
   // counts only once the search is finished – the interim numbers would jump around
   const phase = q ? searchPhase : 'idle';
   const busy = phase !== 'idle';
@@ -1957,7 +1978,8 @@ function searchHitsHtml(evs: CalEvent[], cts: Contact[], tks: Task[], fds: RssIt
   const taskRows = limit(tks).map((task, i) => {
     const list = tlistOf(task.listId);
     const due = dueLabel(task);
-    const sub = [due.text, list?.name].filter(Boolean).join(' · ');
+    const dueText = task.due ? new Date(`${dayOf(task.due)}T12:00`).toLocaleDateString(LOCALE, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : '';
+    const sub = [dueText, list?.name].filter(Boolean).join(' · ');
     return `<button type="button" class="hit hit-task${task.done ? ' done' : ''}" data-hit-task="${i}" style="--ec:${list?.color ?? '#969993'}">
       <span class="hit-cal">${svgIco(task.done ? '<rect x="4" y="4" width="16" height="16" rx="4"/><path d="m8 12 3 3 5-6"/>' : '<rect x="4" y="4" width="16" height="16" rx="4"/>', 16)}</span>
       <span class="hit-body"><b>${esc(task.title)}</b><span class="${due.cls}">${esc(sub)}</span></span>
@@ -1966,7 +1988,7 @@ function searchHitsHtml(evs: CalEvent[], cts: Contact[], tks: Task[], fds: RssIt
   });
   const feedRows = limit(fds).map((item) => {
     const feed = feedOf(item.feedId);
-    const sub = [item.date ? fmtShort(item.date) : '', feed?.name].filter(Boolean).join(' · ');
+    const sub = [item.date ? fmtWithYear(item.date) : '', feed?.name].filter(Boolean).join(' · ');
     return `<button type="button" class="hit hit-feed${item.read ? ' read' : ''}" data-hit-feed="${esc(item.key)}" style="--ec:${feedColor(item.feedId)}">
       <span class="hit-cal">${svgIco('<path d="M5 11a8 8 0 0 1 8 8M5 5a14 14 0 0 1 14 14"/><circle cx="6" cy="18" r="1.5"/>', 16)}</span>
       <span class="hit-body"><b>${esc(item.title || t('rss.untitled'))}</b><span>${esc(sub)}</span></span>
@@ -1980,6 +2002,7 @@ function searchHitsHtml(evs: CalEvent[], cts: Contact[], tks: Task[], fds: RssIt
 
 el('#search').addEventListener('input', () => {
   el('#search-clear').hidden = !el<HTMLInputElement>('#search').value;
+  searchYear = null; // another search: all years again
   openSearchPage();
   searchResults = null;
   searchSeq++;
@@ -2063,6 +2086,24 @@ function renderSearchSide(q: string): void {
   ].join('');
 }
 
+// The year of a hit (NaN = none: a task without dates, an article without a date)
+const mailYear = (m: MailSummary) => new Date(m.date).getFullYear();
+const eventYear = (e: CalEvent) => (e.allDay ? Number(e.start.slice(0, 4)) : new Date(e.start).getFullYear());
+const taskYear = (x: Task) => (x.due ? Number(dayOf(x.due).slice(0, 4)) : x.start ? Number(dayOf(x.start).slice(0, 4)) : NaN);
+const feedYear = (i: RssItem) => (i.date ? new Date(i.date).getFullYear() : NaN);
+
+function paintSearchYears(years: Map<number, number>): void {
+  if (searchYear !== null && !years.has(searchYear)) years.set(searchYear, 0); // stays visible to switch it off
+  const list = [...years].sort((a, b) => b[0] - a[0]);
+  el('#search-years-label').hidden = el('#search-years').hidden = !list.length;
+  el('#search-years').innerHTML = list.length
+    ? [
+        `<button class="box${searchYear === null ? ' active' : ''}" data-syear=""><span class="name">${esc(t('search.allYears'))}</span></button>`,
+        ...list.map(([y, n]) => `<button class="box${searchYear === y ? ' active' : ''}" data-syear="${y}"><span class="name">${y}</span><span class="count">${n || ''}</span></button>`),
+      ].join('')
+    : '';
+}
+
 // null while still searching
 function paintSearchCounts(n: Record<'mail' | 'event' | 'contact' | 'task' | 'feed', number | null>): void {
   const known = Object.values(n).every((v) => v !== null);
@@ -2079,6 +2120,14 @@ el('#side-search').addEventListener('click', (e) => {
   const kind = tgt.closest<HTMLElement>('[data-skind]')?.dataset.skind as SearchKind | undefined;
   if (kind) return setSearchKind(kind);
   if (tgt.closest('#search-save')) return void saveCurrentSearch();
+  const yr = tgt.closest<HTMLElement>('[data-syear]')?.dataset.syear;
+  if (yr !== undefined) {
+    searchYear = yr ? Number(yr) : null;
+    searchShown = SEARCH_STEP;
+    renderList();
+    el('#mail-list').scrollTop = 0;
+    return;
+  }
   const acc = tgt.closest<HTMLElement>('[data-sacc]')?.dataset.sacc;
   if (acc === undefined || (acc || null) === searchAccount) return;
   searchAccount = acc || null;

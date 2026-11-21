@@ -628,6 +628,45 @@ function pickIdentity(accountId?: string, addresses: string[] = []): Identity | 
   );
 }
 
+// Dynamic aliases (Settings → Senders): an address fitting an identity's pattern (whole address, case ignored)
+function aliasFits(idn: Identity, address: string): boolean {
+  if (!idn.aliasPattern || !EMAIL_RE.test(address)) return false;
+  try {
+    return new RegExp(`^(?:${idn.aliasPattern})$`, 'i').test(address);
+  } catch {
+    return false;
+  }
+}
+const addrOf = (a: string) => (a.match(/<([^>]+)>/)?.[1] ?? a).trim();
+
+// Sender for a reply or forward:
+// 1. To/Cc of the original in their order: the first own address wins – a set-up sender or a dynamic alias
+// 2. otherwise where the server delivered it (Delivered-To …): a dynamic alias before the plain mailbox address
+// 3. otherwise the account's main sender
+function pickSender(accountId?: string, addresses: string[] = [], delivered: string[] = []): { identity?: Identity; alias: string } {
+  const pool = accountId ? [...identities.filter((i) => i.accountId === accountId), ...identities.filter((i) => i.accountId !== accountId)] : identities;
+  const exact = (a: string) => pool.find((i) => i.email.toLowerCase() === a.toLowerCase());
+  const byPattern = (a: string) => pool.find((i) => aliasFits(i, a));
+  for (const a of addresses.map(addrOf)) {
+    const idn = exact(a);
+    if (idn) return { identity: idn, alias: '' };
+    const dyn = byPattern(a);
+    if (dyn) return { identity: dyn, alias: a };
+  }
+  const dl = delivered.map(addrOf);
+  for (const a of dl) {
+    const dyn = !exact(a) && byPattern(a);
+    if (dyn) return { identity: dyn, alias: a };
+  }
+  return { identity: pickIdentity(accountId, [...addresses, ...dl].map(addrOf)), alias: '' };
+}
+
+// The dynamic alias found in the original mail, the identity it belongs to and whether it is chosen
+let fromAlias = '';
+let fromAliasOf = '';
+let aliasOn = false;
+const activeAlias = () => (aliasOn && fromAlias && fromSelect().value === fromAliasOf ? fromAlias : '');
+
 function fillFromSelect(selected?: string): void {
   fromSelect().innerHTML = cAccounts
     .map((acc) => {
@@ -665,7 +704,7 @@ function paintFromDot(): void {
   const acc = cAccounts.find((a) => a.id === idn?.accountId);
   el('#from-dot').style.background = acc?.color ?? 'transparent';
   el('#btn-from .fb-name').textContent = idn ? idn.name || acc?.name || idn.email : '';
-  el('#btn-from .fb-mail').textContent = idn ? `<${idn.email}>` : '';
+  el('#btn-from .fb-mail').textContent = idn ? `<${activeAlias() || idn.email}>` : '';
 }
 
 // Sender picker as its own menu (like templates/priority) – the hidden <select> holds the value
@@ -676,11 +715,17 @@ el('#btn-from').addEventListener('click', () => {
     const ids = identities.filter((i) => i.accountId === acc.id);
     if (!ids.length) continue;
     if (cAccounts.length > 1) items.push({ value: '', label: acc.email, cls: 'grp', dot: acc.color });
-    for (const i of ids) items.push({ value: i.id, label: i.name || acc.name, hint: i.primary ? i.email : `${i.email} · ${t('identity.alias')}`, checked: i.id === cur });
+    for (const i of ids) {
+      items.push({ value: i.id, label: i.name || acc.name, hint: i.primary ? i.email : `${i.email} · ${t('identity.alias')}`, checked: i.id === cur && !activeAlias() });
+      // the dynamic alias of the original mail as its own choice under its identity
+      if (fromAlias && fromAliasOf === i.id) items.push({ value: `alias:${i.id}`, label: i.name || acc.name, hint: `${fromAlias} · ${t('identity.dynamicAlias')}`, checked: !!activeAlias() });
+    }
   }
   openTbMenu(el('#btn-from'), items, (v) => {
-    if (v === fromSelect().value) return;
-    fromSelect().value = v;
+    aliasOn = v.startsWith('alias:');
+    const id = aliasOn ? v.slice(6) : v;
+    if (id === fromSelect().value) return paintFromDot();
+    fromSelect().value = id;
     fromSelect().dispatchEvent(new Event('change'));
   });
   tbMenu.classList.add('from-menu');
@@ -985,14 +1030,17 @@ el('#send-menu').addEventListener('click', (e) => {
 
 // Fill the window
 function initCompose(o: ComposeOpts): void {
-  const identity = pickIdentity(o.accountId, o.matchAddresses);
+  const { identity, alias } = pickSender(o.accountId, o.matchAddresses, o.deliveredTo);
+  fromAlias = alias;
+  fromAliasOf = alias && identity ? identity.id : '';
+  aliasOn = !!fromAliasOf;
   fillFromSelect(identity?.id);
   paintFromDot();
   fillTemplateSelect();
 
   // Never take over own addresses (account + aliases) as recipients
   const own = new Set([...cAccounts.map((a) => a.email), ...identities.map((i) => i.email)].map((a) => a.toLowerCase()));
-  const notOwn = (r: Recipient) => !own.has(r.address.toLowerCase());
+  const notOwn = (r: Recipient) => !own.has(r.address.toLowerCase()) && !identities.some((i) => aliasFits(i, r.address));
   // Blocked addresses are left out (e.g. on "Reply all")
   const refused: string[] = [];
   const allowed = (r: Recipient) => !isBlocked(r.address) || (refused.push(r.address), false);
@@ -1122,6 +1170,7 @@ cform.addEventListener('submit', async (e) => {
     const main = build(single);
     await window.api.outbox.send({
       identityId: fromSelect().value,
+      ...(activeAlias() ? { fromAlias: activeAlias() } : {}),
       to: recipients.to.map(fmt),
       cc: each ? [] : recipients.cc.map(fmt),
       bcc: each ? [] : recipients.bcc.map(fmt),

@@ -127,6 +127,13 @@ function fmtShort(iso: string): string {
   return d.toLocaleDateString(LOCALE, { day: '2-digit', month: '2-digit' });
 }
 
+// Search hits: like fmtShort, but with the year (hits come from any year)
+function fmtWithYear(iso: string): string {
+  const d = new Date(iso);
+  if (d.toDateString() === new Date().toDateString()) return d.toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleDateString(LOCALE, { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
 function fmtLong(iso: string): string {
   return new Date(iso).toLocaleString(LOCALE, { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }

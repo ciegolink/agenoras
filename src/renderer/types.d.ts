@@ -114,6 +114,7 @@ interface Identity {
   signature: string;
   signatureHtml?: string;
   primary: boolean;
+  aliasPattern?: string; // dynamic aliases: regex for the whole address
 }
 
 interface Template {
@@ -143,6 +144,7 @@ interface PickedFile {
 interface ComposeOpts {
   accountId?: string;
   matchAddresses?: string[]; // addresses of the original mail → pick the matching sender (alias)
+  deliveredTo?: string[]; // where the server delivered the original (checked after To/Cc, for dynamic aliases)
   to?: string | string[];
   cc?: string | string[];
   bcc?: string | string[];
@@ -238,6 +240,7 @@ interface MailDetail {
   to: string;
   toList: string[];
   ccList: string[];
+  deliveredTo?: string[]; // Delivered-To / X-Original-To (dynamic aliases)
   replyTo: string;
   messageId: string;
   references: string[];

@@ -46,6 +46,7 @@ export interface MailDetail {
   to: string;
   toList: string[];
   ccList: string[];
+  deliveredTo?: string[]; // Delivered-To / X-Original-To: where the server delivered it (dynamic aliases)
   replyTo: string;
   messageId: string;
   references: string[];

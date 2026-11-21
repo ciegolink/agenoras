@@ -618,6 +618,7 @@ function identityCard(idn: Identity, i: number, acc: Account): string {
       <span class="idn-who"><b>${esc(idn.name || acc.name)}</b><span>${esc(idn.email || '–')}</span></span>
       <span class="idn-sig${sig ? '' : ' none'}">${esc(sig || t('settings.noSignature'))}</span>
       ${idn.signatureHtml ? '<span class="idn-tag">HTML</span>' : ''}
+      ${idn.aliasPattern ? `<span class="idn-tag" title="${esc(idn.aliasPattern)}">${esc(t('identity.dynamicAlias'))}</span>` : ''}
       <span class="idn-tag${idn.primary ? ' main' : ''}">${esc(idn.primary ? t('settings.mainTag') : t('identity.alias'))}</span>
     </button>`;
   if (!open) return `<div class="set-card idn-card" data-idn="${i}">${head}</div>`;
@@ -627,6 +628,8 @@ function identityCard(idn: Identity, i: number, acc: Account): string {
         <label class="grow">${esc(t('settings.senderAddress'))}<input data-list="id" data-i="${i}" data-k="email" value="${esc(idn.email)}" ${idn.primary ? 'disabled' : 'placeholder="info@example.com"'}></label>
       </div>
       ${signatureBlock(idn, i, acc)}
+      <label>${esc(t('identity.aliasPattern'))}<input data-list="id" data-i="${i}" data-k="aliasPattern" value="${esc(idn.aliasPattern ?? '')}" placeholder="shop-.*@example\.com" spellcheck="false" autocomplete="off"></label>
+      <p class="hint">${esc(t('identity.aliasPatternHint'))}</p>
       <div class="set-card-foot">${
         idn.primary
           ? `<span class="hint">${esc(t('settings.primary'))}</span>`

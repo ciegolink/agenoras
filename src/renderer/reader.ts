@@ -509,6 +509,7 @@ function replyOpts(msg: MailDetail, all: boolean): ComposeOpts {
   return {
     accountId: msg.accountId,
     matchAddresses: [...msg.toList, ...msg.ccList],
+    deliveredTo: msg.deliveredTo ?? [],
     to: [to],
     cc,
     subject: withPrefix('Re', msg.subject),
@@ -534,6 +535,7 @@ function forwardOpts(msg: MailDetail): ComposeOpts {
     accountId: msg.accountId,
     source: { accountId: msg.accountId, folder: msg.folder, uid: msg.uid, messageId: msg.messageId },
     matchAddresses: [...msg.toList, ...msg.ccList],
+    deliveredTo: msg.deliveredTo ?? [],
     subject: withPrefix('Fwd', msg.subject),
     quoteHtml: `<p>${header}</p>${quotedBody(msg)}`,
     mode: 'forward',

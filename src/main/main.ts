@@ -72,7 +72,7 @@ import { mailtoArg, parseMailto } from './mailto';
 import { closeStore as closePopStore, forgetAccount as forgetPopAccount, vacuumStore as vacuumPop, isPop } from './pop3';
 import { closeLocal, forgetLocal, isLocalDav, renameLocal } from './localdav';
 import { aiState, cancelAiDownload, deleteAiModel, downloadAiModel, proofread, setAiEnabled, setAiLang, setAiModel, setAiTranslateLang, stopWorker as stopAi, suggestSubjects, writeText, translate } from './ai';
-import { allowImages, blockRecipient, getIdentity, getSettings, Identity, imagesAllowed, isTrustedSender, MailLabel, MailRule, NotifySettings, saveRules, SCALE_FACTOR, saveIdentities, saveLabels, saveSearches, SavedSearch, saveNotify, savePrefs, saveTemplates, saveTheme, savedLanguage, setMailLabel, Template, Theme, trustSender, UiScale } from './settings';
+import { aliasFits, allowImages, blockRecipient, getIdentity, withAlias, getSettings, Identity, imagesAllowed, isTrustedSender, MailLabel, MailRule, NotifySettings, saveRules, SCALE_FACTOR, saveIdentities, saveLabels, saveSearches, SavedSearch, saveNotify, savePrefs, saveTemplates, saveTheme, savedLanguage, setMailLabel, Template, Theme, trustSender, UiScale } from './settings';
 import { listSounds, openSoundFolder, soundData } from './sounds';
 import { flushWinState, loadWinState, trackWinState } from './winstate';
 import { addPin, listPins, PinItem, removePin, togglePin, updatePins } from './pins';
@@ -1356,7 +1356,7 @@ async function sendOutboxItem(id: string): Promise<void> {
   updateOutbox(id, { status: 'sending', error: '', done: 0 });
   sendOutbox();
   try {
-    const res = await sendMail(identity, acc, item.mail, (done, total) => {
+    const res = await sendMail(withAlias(identity, item.mail.fromAlias), acc, item.mail, (done, total) => {
       updateOutbox(id, { done, total });
       sendOutbox();
     });
@@ -1405,7 +1405,8 @@ ipcMain.handle('outbox:send', (_e, mail: OutgoingMail) => {
   if (!identity || !acc) throw new Error(t('err.senderNotFound'));
   const notApproved = (mail.files ?? []).find((f) => !approvedFiles.has(f));
   if (notApproved) throw new Error(t('err.fileNotApproved', { name: path.basename(notApproved) }));
-  const item = addOutbox(acc.id, identity.email, mail);
+  if (mail.fromAlias && !aliasFits(identity, mail.fromAlias)) throw new Error(t('err.senderNotFound'));
+  const item = addOutbox(acc.id, withAlias(identity, mail.fromAlias).email, mail);
   void runOutbox(item.id);
   return item.id;
 });

@@ -55,6 +55,18 @@ export function inviteIcs(parsed: ParsedMail): string | null {
   return cal ? cal.content.toString('utf8') : null;
 }
 
+// Addresses the server delivered the mail to (Delivered-To, X-Original-To, Envelope-To): the alias
+// also when it is not in To/Cc (Bcc, mailing lists, catch-all)
+const DELIVERY_HEADERS = new Set(['delivered-to', 'x-original-to', 'envelope-to', 'x-envelope-to']);
+export function deliveredTo(parsed: ParsedMail): string[] {
+  const out = new Set<string>();
+  for (const h of parsed.headerLines ?? []) {
+    if (!DELIVERY_HEADERS.has(h.key.toLowerCase())) continue;
+    for (const m of h.line.slice(h.line.indexOf(':') + 1).matchAll(/[^\s<>,;"]+@[^\s<>,;"]+\.[^\s<>,;"]+/g)) out.add(m[0].toLowerCase());
+  }
+  return [...out].slice(0, 10);
+}
+
 export function buildDetail(acc: Account, folder: string, uid: number, parsed: ParsedMail): MailDetail {
   const { html, files } = splitAttachments(parsed);
   const ics = inviteIcs(parsed);
@@ -70,6 +82,7 @@ export function buildDetail(acc: Account, folder: string, uid: number, parsed: P
     to,
     toList: addressList(parsed.to),
     ccList: addressList(parsed.cc),
+    deliveredTo: deliveredTo(parsed),
     replyTo: parsed.replyTo?.value[0]?.address || '',
     messageId: parsed.messageId || '',
     references: Array.isArray(parsed.references) ? parsed.references : parsed.references ? [parsed.references] : [],

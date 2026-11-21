@@ -13,6 +13,7 @@ export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024; // limit of most mail serv
 
 export interface OutgoingMail {
   identityId: string; // sender: main address or alias of an account
+  fromAlias?: string; // a dynamic alias of that identity as sender (only used if it fits its pattern)
   to: string[];
   cc: string[];
   bcc: string[];

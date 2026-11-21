@@ -136,6 +136,8 @@ The search field in the title bar searches everything: emails (full text on the 
 - Many hits: all are listed; the list shows 300 at a time and adds more as you scroll down.
 - **Search by date**: type a date such as **12.3.2024**, **12.3.** (this year), **2024-03-12** or **12/3/2024**, or a month such as **March 2024** or **Mar 24**. You get the emails of that day or month, plus emails that contain the text.
 
+**Years**: the hits show their date with the year. Under **Year** on the left of the search page, the years of the hits are listed with their number; click one to see only the hits of that year (emails, events, tasks and feed articles; contacts have no date and stay). **All years** shows everything again; a new search starts with all years.
+
 **Search folders**: click **Save as search folder** on the left of the search page to keep the search (with the account chosen under **Mails from**) in the sidebar of the mail view, below the categories. Clicking it runs the search again, so it always shows the current hits; nothing is copied. Right-click a search folder to **Rename** or delete it.
 
 Click **×** in the search field or press **Esc** to close the search and return to where you were.
@@ -268,7 +270,7 @@ Right-click a recipient for **Add as contact** (only for addresses not yet in yo
 
 ### Sender
 
-Choose the sender address under **From**. When you reply, Agenoras automatically picks the address the email was sent to. Aliases are set up under **Settings → Senders & signatures**.
+Choose the sender address under **From**. When you reply, Agenoras automatically picks the address the email was sent to – also a [dynamic alias](#senders--signatures) that matches a pattern you set. Aliases are set up under **Settings → Senders & signatures**.
 
 ### Text and formatting
 
@@ -478,6 +480,8 @@ For each account you can set the sender name, add **aliases** (other addresses y
 With many senders the list stays compact: only one signature is open for editing at a time, each account can be collapsed, and from five senders on a search field finds a sender or signature quickly.
 
 Your mail server must allow you to send from an alias address.
+
+**Dynamic aliases**: if you give every shop or service its own address (e.g. *shop-name@your-domain* with a catch-all, or *you+name@gmail.com*), you don't have to add each one. Open a sender and enter a pattern under **Dynamic aliases (pattern)**: a regular expression for the whole address, e.g. `shop-.*@example\.com` or `max\+.*@gmail\.com` (case is ignored). When you reply to an email that was sent to a matching address, Agenoras sends from exactly that address, with the name and signature of this sender. Agenoras looks at **To** and **Cc** first; if your alias isn't there (Bcc, mailing lists, some newsletters), it uses the address the server delivered the email to (*Delivered-To*, *X-Original-To*). This works for emails loaded with this version or later. The address appears in **From** as *dynamic alias*; you can still pick another sender there. With **Reply all**, addresses that match your patterns are not added as recipients. Only enter patterns that match your own addresses, and check that your mail server lets you send from them.
 
 ### Writing & reading
 

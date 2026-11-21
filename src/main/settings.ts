@@ -16,6 +16,23 @@ export interface Identity {
   signature: string; // plain-text signature
   signatureHtml?: string; // HTML signature (takes precedence), images embedded as data: URLs
   primary: boolean;
+  aliasPattern?: string; // dynamic aliases: a reply to an address matching this (regex, whole address) is sent from it
+}
+
+// Dynamic alias: does the address fit the identity's pattern? (whole address, case ignored)
+export function aliasFits(idn: Pick<Identity, 'aliasPattern'>, address: string): boolean {
+  if (!idn.aliasPattern || !EMAIL_RE.test(address)) return false;
+  try {
+    return new RegExp(`^(?:${idn.aliasPattern})$`, 'i').test(address);
+  } catch {
+    return false;
+  }
+}
+
+// The identity as sender, with the dynamic alias as address if it fits its pattern
+export function withAlias(idn: Identity, alias?: string): Identity {
+  const a = String(alias ?? '').trim();
+  return a && aliasFits(idn, a) ? { ...idn, email: a } : idn;
 }
 
 export interface Template {
@@ -187,6 +204,18 @@ export function getIdentity(id: string): Identity | undefined {
   return getSettings().identities.find((i) => i.id === id);
 }
 
+function cleanPattern(v: unknown): { aliasPattern?: string } {
+  const p = String(v ?? '').trim();
+  if (!p) return {};
+  if (p.length > 300) throw new Error(t('err.invalidAliasPattern', { pattern: `${p.slice(0, 40)}…` }));
+  try {
+    new RegExp(`^(?:${p})$`, 'i');
+  } catch {
+    throw new Error(t('err.invalidAliasPattern', { pattern: p }));
+  }
+  return { aliasPattern: p };
+}
+
 export function saveIdentities(list: Identity[]): Identity[] {
   const accounts = new Set(listAccounts().map((a) => a.id));
   const seen = new Set<string>();
@@ -206,6 +235,7 @@ export function saveIdentities(list: Identity[]): Identity[] {
       signature: String(i.signature ?? ''),
       ...(i.signatureHtml && String(i.signatureHtml).trim() ? { signatureHtml: String(i.signatureHtml) } : {}),
       primary: !!i.primary,
+      ...cleanPattern(i.aliasPattern),
     });
   }
   const s = read();
