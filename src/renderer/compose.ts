@@ -580,7 +580,7 @@ el('#compose-atts').addEventListener('contextmenu', (e) => {
   const a = composeAtts[attCtxIdx];
   const ico = (p: string) => `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
   attCtx.innerHTML = [
-    canPreview(a.name, a.kind === 'data' ? a.contentType : '') ? `<button type="button" role="menuitem" data-catt="view">${ico('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>')}<span>${esc(t('att.view'))}</span></button>` : '',
+    previewable(a.name, a.kind === 'data' ? a.contentType : '') ? `<button type="button" role="menuitem" data-catt="view">${ico('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>')}<span>${esc(t('att.view'))}</span></button>` : '',
     `<button type="button" role="menuitem" data-catt="open">${ico('<path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>')}<span>${esc(t('viewer.open'))}</span></button>`,
     `<hr><button type="button" role="menuitem" class="danger" data-catt="remove">${ico('<path d="M18 6 6 18M6 6l12 12"/>')}<span>${esc(t('common.remove'))}</span></button>`,
   ].join('');
@@ -612,7 +612,8 @@ el('#compose-atts').addEventListener('click', (e) => {
   const v = (e.target as HTMLElement).closest<HTMLElement>('[data-view-att]')?.dataset.viewAtt;
   if (v !== undefined) {
     const a = composeAtts[Number(v)];
-    if (a) void viewComposeAtt(a);
+    // preview column switched off (Settings): open with the app like before
+    if (a) void (previewOn ? viewComposeAtt(a) : openComposeAtt(a));
     return;
   }
   const i = (e.target as HTMLElement).closest<HTMLElement>('[data-rm-att]')?.dataset.rmAtt;

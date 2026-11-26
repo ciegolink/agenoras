@@ -226,10 +226,10 @@ function attachmentsHtml(msg: MailDetail): string {
   return `${all}<div class="tiles">${msg.attachments
     .map(
       (a, i) => `<div class="tile">
-        <button class="tile-main" data-att-${canPreview(a.filename, a.contentType) ? 'view' : 'open'}="${i}" title="${esc(t(canPreview(a.filename, a.contentType) ? 'att.viewTip' : 'att.openTip', { name: a.filename, size: fmtSize(a.size) }))}">
+        <button class="tile-main" data-att-${previewable(a.filename, a.contentType) ? 'view' : 'open'}="${i}" title="${esc(t(previewable(a.filename, a.contentType) ? 'att.viewTip' : 'att.openTip', { name: a.filename, size: fmtSize(a.size) }))}">
           ${fileIcon(a.filename)}<span class="tname">${esc(a.filename)}</span><span class="tsize">${fmtSize(a.size)}</span>
         </button>
-        ${canPreview(a.filename, a.contentType) ? `<button class="tile-act tile-view" data-att-view="${i}" aria-label="${esc(t('att.viewAria', { name: a.filename }))}" title="${esc(t('att.view'))}">${EYE_ICO}</button>` : ''}
+        ${previewable(a.filename, a.contentType) ? `<button class="tile-act tile-view" data-att-view="${i}" aria-label="${esc(t('att.viewAria', { name: a.filename }))}" title="${esc(t('att.view'))}">${EYE_ICO}</button>` : ''}
         <button class="tile-act" data-att-save="${i}" aria-label="${esc(t('att.saveAria', { name: a.filename }))}" title="${esc(t('att.save'))}">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12"></path><path d="m7 11 5 5 5-5"></path><path d="M5 20h14"></path></svg>
         </button>
@@ -533,7 +533,7 @@ document.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   const item = (attr: string, ico: string, label: string) => `<button type="button" role="menuitem" ${attr}>${ico}<span>${esc(label)}</span></button>`;
   attMenu.innerHTML = [
-    canPreview(a.filename, a.contentType) ? item(`data-att-view="${i}"`, EYE_ICO, t('att.view')) : '',
+    previewable(a.filename, a.contentType) ? item(`data-att-view="${i}"`, EYE_ICO, t('att.view')) : '',
     item(`data-att-save="${i}"`, svgIco('<path d="M12 4v12"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/>'), t('viewer.save')),
     item(`data-att-open="${i}"`, svgIco('<path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>'), t('viewer.open')),
     msg.attachments.length > 1 ? `<hr>${item('data-att-saveall', svgIco('<path d="M12 4v12"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/>'), t('att.saveAll', { n: msg.attachments.length }))}` : '',

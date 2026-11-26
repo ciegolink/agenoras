@@ -511,6 +511,14 @@ async function showPreview(load: () => Promise<PreviewData>, status: (s: string)
   } else body.innerHTML = `<div class="empty">${esc(t('viewer.noPreview'))}</div>`;
 }
 
+// Preview column on or off (Settings → Writing & reading); off: attachments open with their app
+let previewOn = true;
+window.api.settings
+  .get()
+  .then((s) => (previewOn = s.attPreview !== false))
+  .catch(() => {});
+const previewable = (name: string, type = '') => previewOn && canPreview(name, type);
+
 // Attachments the preview can show (the same rules as preview.ts in the main process)
 const canPreview = (name: string, type = '') =>
   /^(application\/pdf|text\/plain|text\/csv|application\/json)/i.test(type) ||

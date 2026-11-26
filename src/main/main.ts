@@ -1764,7 +1764,7 @@ ipcMain.handle('web:external', (_e, url: string) => {
 
 ipcMain.handle('spell:languages', () => (process.platform === 'darwin' ? [] : session.defaultSession.availableSpellCheckerLanguages));
 
-ipcMain.handle('settings:prefs', (_e, p: { uiScale?: UiScale; language?: string; weekStart?: number; sendDelay?: number; readDelay?: number; composeMode?: 'window' | 'popup'; externalMark?: boolean; internalDomains?: string[]; blockedRecipients?: string[]; accountLabel?: 'name' | 'email'; spellcheck?: string; linkOpen?: 'browser' | 'agenoras'; offline?: Record<string, number>; autoUpdate?: boolean; skipVersion?: string }) => {
+ipcMain.handle('settings:prefs', (_e, p: { uiScale?: UiScale; language?: string; weekStart?: number; sendDelay?: number; readDelay?: number; composeMode?: 'window' | 'popup'; externalMark?: boolean; attPreview?: boolean; internalDomains?: string[]; blockedRecipients?: string[]; accountLabel?: 'name' | 'email'; spellcheck?: string; linkOpen?: 'browser' | 'agenoras'; offline?: Record<string, number>; autoUpdate?: boolean; skipVersion?: string }) => {
   const before = getSettings().language;
   const offlineBefore = JSON.stringify(getSettings().offline);
   savePrefs(p ?? {});

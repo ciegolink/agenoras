@@ -264,7 +264,7 @@ Categories are colored labels for your emails, such as "Customer" or "Invoice".
 
 ### Attachments
 
-Click a PDF, image or text file to see it in a **preview panel** on the right of the window (also in an email opened in its own window); the eye on the attachment does the same. The panel has buttons to **open it with an app** and **save** it; **Esc** or **×** closes it. Click an image in the panel to switch between fitted and original size. Other files open with their app.
+Click a PDF, image or text file to see it in a **preview panel** on the right of the window (also in an email opened in its own window); the eye on the attachment does the same. The panel has buttons to **open it with an app** and **save** it; **Esc** or **×** closes it. Click an image in the panel to switch between fitted and original size. Other files open with their app. If you prefer to open every attachment with its app, switch the preview off under **Settings → Writing & reading → Attachments**.
 
 Right-click an attachment for **View**, **Save …**, **Open with app** and, with several attachments, **Save all**. **Save all** (also above the attachments) stores every attachment in a folder you choose. For your safety, executable files (such as `.exe` or scripts) are never opened directly; save them instead.
 
@@ -514,6 +514,7 @@ Your mail server must allow you to send from an alias address.
 - **Mark as read**: when an opened email counts as read (immediately, after 1–10 seconds, or only by hand)
 - **Spell check**: red underlines while writing and the dictionary part of proofreading – **Off**, **System language** or one language of your choice (on macOS the system's spell checker chooses the language itself)
 - **External emails**: mark external senders, additional internal domains
+- **Attachments**: show PDFs, images and text files in the preview column (on by default) or open every attachment with its app
 - **Addresses not to use**: addresses that are no longer suggested or accepted as recipients, one per line
 
 ### Notifications

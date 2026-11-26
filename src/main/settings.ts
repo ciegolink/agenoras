@@ -62,6 +62,7 @@ interface Settings {
   composeMode: 'window' | 'popup'; // writing: own window or a popup over the main window
   accountLabel: 'name' | 'email'; // mailboxes in the sidebar/list by name or address
   externalMark: boolean; // mark mails from outside the own domains
+  attPreview: boolean; // attachments: PDFs, images and text in the preview column (default on)
   internalDomains: string[]; // additional domains that count as internal
   blockedRecipients: string[]; // addresses that are no longer suggested or accepted as recipients (lower case)
   rules: MailRule[]; // mail rules
@@ -157,6 +158,7 @@ function read(): Settings {
       composeMode: s.composeMode === 'popup' ? 'popup' : 'window',
       accountLabel: s.accountLabel === 'name' ? 'name' : 'email',
       externalMark: s.externalMark === true,
+      attPreview: s.attPreview !== false,
       internalDomains: Array.isArray(s.internalDomains) ? s.internalDomains.filter((d: unknown) => typeof d === 'string') : [],
       blockedRecipients: cleanBlocked(s.blockedRecipients),
       rules: Array.isArray(s.rules) ? s.rules : [],
@@ -170,7 +172,7 @@ function read(): Settings {
       notify: { ...DEFAULT_NOTIFY, ...(s.notify ?? {}), perAccount: { ...(s.notify?.perAccount ?? {}) }, desktopOff: [...(s.notify?.desktopOff ?? [])] },
     };
   } catch {
-    return { identities: [], templates: [], theme: 'dark', trustedSenders: [], imageMails: [], labels: [], mailLabels: {}, uiScale: 'medium', language: 'system', weekStart: -1, sendDelay: 2, readDelay: 3, composeMode: 'window', accountLabel: 'email', externalMark: false, internalDomains: [], blockedRecipients: [], rules: [], spellcheck: 'system', linkOpen: 'browser', offline: {}, savedSearches: [], autoUpdate: true, skipVersion: '', notify: { ...DEFAULT_NOTIFY, perAccount: {}, desktopOff: [] } };
+    return { identities: [], templates: [], theme: 'dark', trustedSenders: [], imageMails: [], labels: [], mailLabels: {}, uiScale: 'medium', language: 'system', weekStart: -1, sendDelay: 2, readDelay: 3, composeMode: 'window', accountLabel: 'email', externalMark: false, attPreview: true, internalDomains: [], blockedRecipients: [], rules: [], spellcheck: 'system', linkOpen: 'browser', offline: {}, savedSearches: [], autoUpdate: true, skipVersion: '', notify: { ...DEFAULT_NOTIFY, perAccount: {}, desktopOff: [] } };
   }
 }
 
@@ -346,7 +348,7 @@ export function setMailLabel(keys: string[], labelId: string, on: boolean): Reco
 // Appearance / language / week start (saved individually)
 export const READ_DELAYS = [0, 1, 3, 5, 10, -1];
 
-export function savePrefs(p: { uiScale?: UiScale; language?: string; weekStart?: number; sendDelay?: number; readDelay?: number; composeMode?: 'window' | 'popup'; externalMark?: boolean; internalDomains?: string[]; blockedRecipients?: string[]; accountLabel?: 'name' | 'email'; spellcheck?: string; linkOpen?: 'browser' | 'agenoras'; offline?: Record<string, number>; autoUpdate?: boolean; skipVersion?: string }): void {
+export function savePrefs(p: { uiScale?: UiScale; language?: string; weekStart?: number; sendDelay?: number; readDelay?: number; composeMode?: 'window' | 'popup'; externalMark?: boolean; attPreview?: boolean; internalDomains?: string[]; blockedRecipients?: string[]; accountLabel?: 'name' | 'email'; spellcheck?: string; linkOpen?: 'browser' | 'agenoras'; offline?: Record<string, number>; autoUpdate?: boolean; skipVersion?: string }): void {
   const s = read();
   write({
     ...s,
@@ -357,6 +359,7 @@ export function savePrefs(p: { uiScale?: UiScale; language?: string; weekStart?:
     ...(READ_DELAYS.includes(Number(p.readDelay)) && p.readDelay !== undefined ? { readDelay: Number(p.readDelay) } : {}),
     ...(p.composeMode === 'popup' || p.composeMode === 'window' ? { composeMode: p.composeMode } : {}),
     ...(typeof p.externalMark === 'boolean' ? { externalMark: p.externalMark } : {}),
+    ...(typeof p.attPreview === 'boolean' ? { attPreview: p.attPreview } : {}),
     ...(p.accountLabel === 'name' || p.accountLabel === 'email' ? { accountLabel: p.accountLabel } : {}),
     ...(p.linkOpen === 'browser' || p.linkOpen === 'agenoras' ? { linkOpen: p.linkOpen } : {}),
     ...(typeof p.autoUpdate === 'boolean' ? { autoUpdate: p.autoUpdate } : {}),

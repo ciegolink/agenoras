@@ -14,7 +14,7 @@ let cardAccs: CalAccount[] = [];
 let rssAccs: RssFeed[] = [];
 let curTheme: ThemeChoice = 'dark';
 let soundList: { id: string; name: string }[] = [];
-let prefs: { uiScale: 'small' | 'medium' | 'large'; language: string; weekStart: number; sendDelay: number; composeMode: 'window' | 'popup'; spellcheck: string; linkOpen: 'browser' | 'agenoras'; offline: Record<string, number>; autoUpdate: boolean } = { uiScale: 'medium', language: 'system', weekStart: 1, sendDelay: 2, composeMode: 'window', spellcheck: 'system', linkOpen: 'browser', offline: {}, autoUpdate: true };
+let prefs: { uiScale: 'small' | 'medium' | 'large'; language: string; weekStart: number; sendDelay: number; composeMode: 'window' | 'popup'; spellcheck: string; linkOpen: 'browser' | 'agenoras'; offline: Record<string, number>; autoUpdate: boolean; attPreview: boolean } = { uiScale: 'medium', language: 'system', weekStart: 1, sendDelay: 2, composeMode: 'window', spellcheck: 'system', linkOpen: 'browser', offline: {}, autoUpdate: true, attPreview: true };
 let spellLangs: string[] = []; // dictionaries Chromium offers (none on macOS: the system checker picks the language)
 let langList: string[] = ['de', 'en'];
 let editLabels: MailLabel[] = [];
@@ -33,7 +33,7 @@ async function openSettings(tab: SettingsTab = setTab): Promise<void> {
     curTheme = s.theme ?? 'dark';
     if (s.notify) notify = s.notify;
     soundList = await window.api.sounds.list().catch(() => []);
-    prefs = { uiScale: s.uiScale ?? 'medium', language: s.language ?? 'system', weekStart: s.weekStart ?? -1, sendDelay: s.sendDelay ?? 2, composeMode: s.composeMode ?? 'window', spellcheck: s.spellcheck ?? 'system', linkOpen: s.linkOpen ?? 'browser', offline: s.offline ?? {}, autoUpdate: s.autoUpdate !== false };
+    prefs = { uiScale: s.uiScale ?? 'medium', language: s.language ?? 'system', weekStart: s.weekStart ?? -1, sendDelay: s.sendDelay ?? 2, composeMode: s.composeMode ?? 'window', spellcheck: s.spellcheck ?? 'system', linkOpen: s.linkOpen ?? 'browser', offline: s.offline ?? {}, autoUpdate: s.autoUpdate !== false, attPreview: s.attPreview !== false };
     spellLangs = await window.api.spell.languages().catch(() => [] as string[]);
     langList = await window.api.settings.languages().catch(() => ['de', 'en']);
     autostart = await window.api.autostart.get().catch(() => ({ on: false, hidden: false, available: false }));
@@ -371,6 +371,12 @@ el('#settings-body').addEventListener('change', async (e) => {
   } else if (tgt.dataset.prefDelay !== undefined) {
     prefs.sendDelay = Number(tgt.value);
     await window.api.settings.savePrefs({ sendDelay: prefs.sendDelay }).catch(() => {});
+  } else if (tgt.dataset.prefAttprev !== undefined) {
+    prefs.attPreview = (tgt as unknown as HTMLInputElement).checked;
+    previewOn = prefs.attPreview;
+    await window.api.settings.savePrefs({ attPreview: prefs.attPreview }).catch(() => {});
+    if (!previewOn) closePreview();
+    if (currentMsg) openMail(mailKey(currentMsg)); // the open mail: tiles with or without the eye
   } else if (tgt.dataset.prefExt !== undefined) {
     const on = (tgt as unknown as HTMLInputElement).checked;
     await window.api.settings.savePrefs({ externalMark: on }).catch(() => {});
@@ -739,6 +745,11 @@ function writingHtml(): string {
         .map((l) => `<option value="${esc(l)}"${l === prefs.spellcheck ? ' selected' : ''}>${esc(l === 'off' ? t('settings.spellOff') : l === 'system' ? t('settings.spellSystem') : spellLangName(l))}</option>`)
         .join('')}</select></div>
     </div>
+  </div>
+  <div class="set-card">
+    <span class="mono">${esc(t('settings.attPreview').toUpperCase())}</span>
+    <label class="check"><input type="checkbox" data-pref-attprev${prefs.attPreview ? ' checked' : ''}> ${esc(t('settings.attPreviewOn'))}</label>
+    <p class="hint">${esc(t('settings.attPreviewHint'))}</p>
   </div>
   <div class="set-card">
     <span class="mono">${esc(t('ext.title').toUpperCase())}</span>
