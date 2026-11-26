@@ -263,6 +263,16 @@ export function maxUid(acc: Account, folder = 'INBOX'): number {
   return r.m ?? 0;
 }
 
+// Export as .eml: the stored source
+export function getRaw(acc: Account, uid: number): Buffer {
+  return rawOf(acc, uid);
+}
+
+// Import of an .eml file into a local folder
+export async function importRaw(acc: Account, folder: string, raw: Buffer): Promise<void> {
+  await store(acc, folder, raw, null, true);
+}
+
 // Sent mails have no server copy with POP3 → keep them locally
 export async function appendToSent(acc: Account, raw: Buffer): Promise<void> {
   await store(acc, 'Sent', raw, null, true);

@@ -410,3 +410,109 @@ document.addEventListener('keydown', (e) => {
 }, true);
 window.addEventListener('blur', hideTextMenu);
 document.addEventListener('scroll', hideTextMenu, true);
+
+// Attachment preview in a side column on the right (main window: a column of the grid like the browser
+// column; mail and compose window: the content moves aside).
+// PDFs in a locked-down <webview> (the main process allows only PDFs of its preview folder there),
+// images and text directly. Esc or × closes it.
+let apEl: HTMLElement | null = null;
+let apToken = '';
+let apStatus: (s: string) => void = () => {};
+let apTurn = 0;
+
+function apPanel(): HTMLElement {
+  if (apEl) return apEl;
+  const ico = (p: string) => `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
+  apEl = document.createElement('aside');
+  const grid = document.querySelector('.app');
+  apEl.className = `att-panel ${grid ? 'in-grid' : 'in-page'}`;
+  apEl.hidden = true;
+  apEl.setAttribute('aria-label', t('att.preview'));
+  apEl.innerHTML = `<div class="ap-head">
+      <div class="ap-who"><b class="ap-name"></b><span class="ap-size"></span></div>
+      <button type="button" class="icon-btn sm" data-ap="open" title="${esc(t('viewer.open'))}" aria-label="${esc(t('viewer.open'))}">${ico('<path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>')}</button>
+      <button type="button" class="icon-btn sm" data-ap="save" title="${esc(t('viewer.save'))}" aria-label="${esc(t('viewer.save'))}">${ico('<path d="M12 4v12"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/>')}</button>
+      <button type="button" class="icon-btn sm" data-ap="close" title="${esc(t('win.close'))}" aria-label="${esc(t('win.close'))}">✕</button>
+    </div>
+    <div class="ap-body"></div>`;
+  (grid ?? document.body).appendChild(apEl);
+  apEl.addEventListener('click', async (e) => {
+    const act = (e.target as HTMLElement).closest<HTMLElement>('[data-ap]')?.dataset.ap;
+    if (act === 'close') return closePreview();
+    if (!apToken || !act) return;
+    try {
+      if (act === 'save') {
+        const file = await window.api.preview.save(apToken);
+        if (file) apStatus(t('att.saved', { path: file }));
+      } else if (act === 'open') await window.api.preview.open(apToken);
+    } catch (err) {
+      apStatus(errMsg(err));
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && apEl && !apEl.hidden && !document.querySelector('dialog[open]')) {
+      e.stopPropagation();
+      closePreview();
+    }
+  }, true);
+  return apEl;
+}
+
+function closePreview(): void {
+  apTurn++;
+  document.body.classList.remove('att-on');
+  document.dispatchEvent(new Event('attpanel'));
+  if (!apEl) return;
+  apEl.hidden = true;
+  apEl.querySelector('.ap-body')!.replaceChildren();
+  if (apToken) void window.api.preview.release(apToken).catch(() => {});
+  apToken = '';
+}
+
+async function showPreview(load: () => Promise<PreviewData>, status: (s: string) => void): Promise<void> {
+  const turn = ++apTurn;
+  apStatus = status;
+  const panel = apPanel();
+  const body = panel.querySelector<HTMLElement>('.ap-body')!;
+  panel.hidden = false;
+  document.body.classList.add('att-on');
+  document.dispatchEvent(new Event('attpanel'));
+  body.innerHTML = `<div class="empty">${esc(t('status.loading'))}</div>`;
+  let p: PreviewData;
+  try {
+    p = await load();
+  } catch (err) {
+    if (turn === apTurn) closePreview();
+    status(errMsg(err));
+    return;
+  }
+  if (turn !== apTurn) return void window.api.preview.release(p.token).catch(() => {}); // another one was clicked meanwhile
+  if (apToken) void window.api.preview.release(apToken).catch(() => {});
+  apToken = p.token;
+  panel.querySelector('.ap-name')!.textContent = p.name;
+  panel.querySelector('.ap-size')!.textContent = fmtSize(p.size);
+  panel.querySelector<HTMLElement>('[data-ap="open"]')!.hidden = !p.canOpen;
+  body.dataset.kind = p.kind;
+  if (p.kind === 'pdf' && p.url) {
+    const wv = document.createElement('webview');
+    wv.setAttribute('plugins', '');
+    wv.setAttribute('src', `${p.url}#navpanes=0&view=FitH`);
+    body.replaceChildren(wv);
+  } else if (p.kind === 'image' && p.url) {
+    const img = document.createElement('img');
+    img.alt = p.name;
+    img.src = p.url;
+    img.addEventListener('click', () => body.classList.toggle('ap-full')); // click: original size / fit
+    body.replaceChildren(img);
+  } else if (p.kind === 'text') {
+    const pre = document.createElement('pre');
+    pre.textContent = (p.text ?? '') + (p.cut ? `\n\n${t('viewer.cut')}` : '');
+    body.replaceChildren(pre);
+  } else body.innerHTML = `<div class="empty">${esc(t('viewer.noPreview'))}</div>`;
+}
+
+// Attachments the preview can show (the same rules as preview.ts in the main process)
+const canPreview = (name: string, type = '') =>
+  /^(application\/pdf|text\/plain|text\/csv|application\/json)/i.test(type) ||
+  (/^image\//i.test(type) && !/tiff/i.test(type)) ||
+  /\.(pdf|png|jpe?g|gif|webp|bmp|svg|ico|avif|txt|csv|tsv|log|md|json|xml|ics|vcf|ya?ml|ini|conf)$/i.test(name);

@@ -3,6 +3,7 @@
 let viewMsg: MailDetail | null = null;
 let viewKicker = '';
 const setViewStatus = (s: string) => (el('#status').textContent = s);
+readerStatus = setViewStatus; // right-click menu on attachments (reader.ts)
 
 async function showMail(ref: MailRef, loadImages = false): Promise<void> {
   const reader = el('#reader');
@@ -17,10 +18,11 @@ async function showMail(ref: MailRef, loadImages = false): Promise<void> {
   document.title = `${msg.subject || t('mail.noSubject')} – Agenoras`;
   const acc = (await window.api.listAccounts().catch(() => [] as Account[])).find((a) => a.id === ref.accountId);
   const folderName = ref.folder === 'INBOX' ? t('folder.inbox') : ref.folder.split(/[/.]/).pop() || ref.folder;
-  viewKicker = `${accLabel(acc).toUpperCase()} · ${folderName.toUpperCase()}`;
+  // an .eml file: its name instead of account and folder
+  viewKicker = msg.fileName ? `${t('eml.file').toUpperCase()} · ${msg.fileName}` : `${accLabel(acc).toUpperCase()} · ${folderName.toUpperCase()}`;
   reader.innerHTML = `
     <div class="reader-actions">${replyButtonsHtml()}<span class="spacer"></span><button class="icon-btn sm" data-action="print" aria-label="${esc(t('print.button'))}" title="${esc(t('print.buttonTip'))}">${ACT_ICONS.print}</button></div>
-    ${metaHtml(msg, `${accLabel(acc).toUpperCase()} · ${folderName.toUpperCase()}`, readable(acc?.color ?? '#969993'))}
+    ${metaHtml(msg, viewKicker, readable(acc?.color ?? '#969993'))}
     ${inviteCardHtml(msg)}
     <div id="body"></div>
     ${attachmentsHtml(msg)}`;
@@ -42,6 +44,15 @@ el('#reader').addEventListener('click', async (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
+  // Ctrl+R reply, Ctrl+Shift+R reply all, Ctrl+Shift+F forward (as in the main window)
+  const k = e.key.toLowerCase();
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && (k === 'r' || (k === 'f' && e.shiftKey))) {
+    e.preventDefault();
+    if (!viewMsg) return;
+    if (k === 'r') window.api.compose.open(replyOpts(viewMsg, e.shiftKey));
+    else window.api.compose.open(forwardOpts(viewMsg));
+    return;
+  }
   if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'p') {
     e.preventDefault();
     if (viewMsg) printMail(bodyMsg ?? viewMsg, viewKicker, setViewStatus);
@@ -49,6 +60,10 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.key === 'Escape') window.api.win.close();
 });
+
+// .eml files dropped on the window open in a mail window of their own
+dropEmlFiles();
+document.addEventListener('emlstatus', (e) => setViewStatus((e as CustomEvent<string>).detail));
 
 window.api.mailview.init().then((ref) => {
   if (ref) showMail(ref);

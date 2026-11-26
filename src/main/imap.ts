@@ -316,6 +316,83 @@ export async function listFolders(acc: Account): Promise<FolderInfo[]> {
   return out;
 }
 
+// Folder management (IMAP only): create, rename, delete. INBOX and special folders stay as they are.
+const FOLDER_NAME_MAX = 100;
+async function folderParts(c: ImapFlow, path: string) {
+  const boxes = await c.list();
+  const box = boxes.find((b) => b.path === path);
+  const delimiter = box?.delimiter || c.namespace?.delimiter || '/';
+  return { boxes, box, delimiter };
+}
+
+function checkName(name: string, delimiter: string): string {
+  const n = String(name ?? '').trim();
+  if (!n || n.length > FOLDER_NAME_MAX || n.includes(delimiter) || /[\x00-\x1f*%]/.test(n)) throw new Error(t('err.folderName'));
+  return n;
+}
+
+function guardFolder(box: { path: string; specialUse?: string } | undefined, path: string): void {
+  if (!box) throw new Error(t('err.folderNotFound'));
+  if (path.toUpperCase() === 'INBOX' || box.specialUse) throw new Error(t('err.folderProtected'));
+}
+
+// in INBOX while changing: some servers refuse to rename or delete the selected folder
+async function onInbox<T>(c: ImapFlow, fn: () => Promise<T>): Promise<T> {
+  const lock = await c.getMailboxLock('INBOX');
+  try {
+    return await fn();
+  } finally {
+    lock.release();
+  }
+}
+
+export async function createFolder(acc: Account, parent: string, name: string): Promise<string> {
+  if (pop.isPop(acc)) throw new Error(t('err.folderPop'));
+  const c = await getClient(acc);
+  const { boxes, delimiter } = await folderParts(c, parent || 'INBOX');
+  const n = checkName(name, delimiter);
+  if (parent && !boxes.some((b) => b.path === parent)) throw new Error(t('err.folderNotFound'));
+  const wanted = parent ? `${parent}${delimiter}${n}` : n; // top level: imapflow adds the namespace prefix (e.g. "INBOX.")
+  if (boxes.some((b) => b.path.toLowerCase() === wanted.toLowerCase() || b.path.toLowerCase() === `${c.namespace?.prefix ?? ''}${wanted}`.toLowerCase())) throw new Error(t('err.folderExists', { name: n }));
+  const res = await c.mailboxCreate(wanted);
+  await c.mailboxSubscribe(res.path).catch(() => {});
+  return res.path;
+}
+
+// Returns the new path; subfolders move along on the server
+export async function renameFolder(acc: Account, path: string, name: string): Promise<string> {
+  if (pop.isPop(acc)) throw new Error(t('err.folderPop'));
+  const c = await getClient(acc);
+  const { boxes, box, delimiter } = await folderParts(c, path);
+  guardFolder(box, path);
+  const n = checkName(name, delimiter);
+  const cut = path.lastIndexOf(delimiter);
+  const target = cut >= 0 ? `${path.slice(0, cut + 1)}${n}` : n;
+  if (target === path) return path;
+  if (boxes.some((b) => b.path.toLowerCase() === target.toLowerCase() && b.path !== path)) throw new Error(t('err.folderExists', { name: n }));
+  const res = await onInbox(c, () => c.mailboxRename(path, target));
+  await c.mailboxSubscribe(res.newPath).catch(() => {});
+  return res.newPath;
+}
+
+// Number of emails in a folder (for the question before deleting)
+export async function folderCount(acc: Account, path: string): Promise<number> {
+  if (pop.isPop(acc)) return 0;
+  const c = await getClient(acc);
+  const st = await c.status(path, { messages: true });
+  return st ? (st.messages ?? 0) : 0;
+}
+
+// Deletes the folder with its emails; only without subfolders
+export async function deleteFolder(acc: Account, path: string): Promise<void> {
+  if (pop.isPop(acc)) throw new Error(t('err.folderPop'));
+  const c = await getClient(acc);
+  const { boxes, box, delimiter } = await folderParts(c, path);
+  guardFolder(box, path);
+  if (boxes.some((b) => b.path.startsWith(`${path}${delimiter}`))) throw new Error(t('err.folderHasChildren'));
+  await onInbox(c, () => c.mailboxDelete(path));
+}
+
 async function findSpecial(c: ImapFlow, use: '\\Sent' | '\\Trash' | '\\Archive' | '\\Junk', names: RegExp): Promise<string | null> {
   const boxes = await c.list();
   const box = boxes.find((b) => b.specialUse === use) ?? boxes.find((b) => names.test(b.name));
@@ -654,6 +731,20 @@ async function fetchSource(c: ImapFlow, uid: number): Promise<Buffer> {
   const msg = await c.fetchOne(String(uid), { source: true }, { uid: true });
   if (!msg || !msg.source) throw new Error(t('err.messageNotFound'));
   return msg.source;
+}
+
+// Export as .eml: the mail exactly as the server has it
+export async function getRawMessage(acc: Account, folder: string, uid: number): Promise<Buffer> {
+  if (pop.isPop(acc)) return pop.getRaw(acc, uid);
+  return inFolder(acc, folder, (c) => fetchSource(c, uid));
+}
+
+// Import of an .eml file: into the folder on the server, as read, with the date of the mail
+export async function importRaw(acc: Account, folder: string, raw: Buffer, date?: Date): Promise<void> {
+  if (pop.isPop(acc)) return pop.importRaw(acc, folder, raw);
+  const c = await getClient(acc);
+  const res = await c.append(folder, raw, ['\\Seen'], date && !isNaN(date.getTime()) ? date : undefined);
+  if (!res) throw new Error(t('emlio.appendFailed'));
 }
 
 export async function getMessage(acc: Account, folder: string, uid: number, markRead = true): Promise<MailDetail> {

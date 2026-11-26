@@ -22,6 +22,7 @@ const ACT_ICONS = {
   newMail: svgIco('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>', 16),
   newEvent: svgIco('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M12 13v5M9.5 15.5h5"/>', 16),
   newTask: svgIco('<rect x="3" y="3" width="18" height="18" rx="4"/><path d="m8 12 3 3 5-6"/>', 16),
+  move: svgIco('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M10 13h6"/><path d="m13.5 10.5 2.5 2.5-2.5 2.5"/>'),
   print: svgIco('<path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 14h12v7H6z"/>'),
   newContact: svgIco('<circle cx="10" cy="8" r="4"/><path d="M3 20a7 7 0 0 1 12.5-4.3"/><path d="M19 14v6M16 17h6"/>', 16),
 };
@@ -89,6 +90,25 @@ function wrapHtml(html: string): string {
   return `<!doctype html><html><head><meta charset="utf-8"><base target="_blank">
 <style>body{margin:18px;font-family:Manrope,system-ui,sans-serif;font-size:14px;line-height:1.5;color:#1F2126;background:#fff;overflow-wrap:anywhere}img{max-width:100%;height:auto}</style>
 </head><body>${html}</body></html>`;
+}
+
+// .eml files dragged onto the window (main window, mail window): each opens in a mail window.
+// Internal drags (mails onto folders, contacts onto lists) are not files and stay untouched.
+function dropEmlFiles(): void {
+  const hasFiles = (e: DragEvent) => !!e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+  document.addEventListener('dragover', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer!.dropEffect = 'copy';
+  });
+  document.addEventListener('drop', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    const files = [...(e.dataTransfer?.files ?? [])];
+    const emls = files.filter((f) => /\.eml$/i.test(f.name));
+    if (!emls.length) return void document.dispatchEvent(new CustomEvent('emlstatus', { detail: t('eml.onlyEml') }));
+    for (const f of emls) window.api.eml.openDropped(f).catch((err) => document.dispatchEvent(new CustomEvent('emlstatus', { detail: errMsg(err) })));
+  });
 }
 
 // Printing: a self-contained page (heading, fields, content) for the print preview.
@@ -194,14 +214,22 @@ function priorityBadge(p?: Priority): string {
   return '';
 }
 
+// Attachments: a click shows PDFs, images and text in the side panel (canPreview, common.ts),
+// other files open with their app; right-click for view, save, open, save all
+const EYE_ICO = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
+
 function attachmentsHtml(msg: MailDetail): string {
   if (!msg.attachments.length) return '';
-  return `<div class="tiles">${msg.attachments
+  const all = msg.attachments.length > 1
+    ? `<div class="tiles-head"><button type="button" class="btn ghost sm with-ico" data-att-saveall>${svgIco('<path d="M12 4v12"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/>', 13)}${esc(t('att.saveAll', { n: msg.attachments.length }))}</button></div>`
+    : '';
+  return `${all}<div class="tiles">${msg.attachments
     .map(
       (a, i) => `<div class="tile">
-        <button class="tile-main" data-att-open="${i}" title="${esc(t('att.openTip', { name: a.filename, size: fmtSize(a.size) }))}">
+        <button class="tile-main" data-att-${canPreview(a.filename, a.contentType) ? 'view' : 'open'}="${i}" title="${esc(t(canPreview(a.filename, a.contentType) ? 'att.viewTip' : 'att.openTip', { name: a.filename, size: fmtSize(a.size) }))}">
           ${fileIcon(a.filename)}<span class="tname">${esc(a.filename)}</span><span class="tsize">${fmtSize(a.size)}</span>
         </button>
+        ${canPreview(a.filename, a.contentType) ? `<button class="tile-act tile-view" data-att-view="${i}" aria-label="${esc(t('att.viewAria', { name: a.filename }))}" title="${esc(t('att.view'))}">${EYE_ICO}</button>` : ''}
         <button class="tile-act" data-att-save="${i}" aria-label="${esc(t('att.saveAria', { name: a.filename }))}" title="${esc(t('att.save'))}">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12"></path><path d="m7 11 5 5 5-5"></path><path d="M5 20h14"></path></svg>
         </button>
@@ -463,9 +491,17 @@ function mountMailBody(box: HTMLElement, msg: MailDetail, reload: () => void): v
 async function attachmentAction(msg: MailDetail, target: HTMLElement, status: (s: string) => void): Promise<boolean> {
   const openI = target.closest<HTMLElement>('[data-att-open]')?.dataset.attOpen;
   const saveI = target.closest<HTMLElement>('[data-att-save]')?.dataset.attSave;
-  if (openI === undefined && saveI === undefined) return false;
+  const viewI = target.closest<HTMLElement>('[data-att-view]')?.dataset.attView;
+  const saveAll = !!target.closest('[data-att-saveall]');
+  if (openI === undefined && saveI === undefined && viewI === undefined && !saveAll) return false;
   try {
-    if (openI !== undefined) {
+    if (viewI !== undefined) {
+      status('');
+      await showPreview(() => window.api.preview.attachment(msg.accountId, msg.folder, msg.uid, Number(viewI)), status);
+    } else if (saveAll) {
+      const res = await window.api.saveAllAttachments(msg.accountId, msg.folder, msg.uid);
+      if (res) status(t('att.savedAll', { n: res.n, path: res.dir }));
+    } else if (openI !== undefined) {
       status(t('att.opening'));
       await window.api.openAttachment(msg.accountId, msg.folder, msg.uid, Number(openI));
       status('');
@@ -478,6 +514,44 @@ async function attachmentAction(msg: MailDetail, target: HTMLElement, status: (s
   }
   return true;
 }
+
+// Right-click on an attachment: view (if it can be shown), save, open with app, save all.
+// The menu items carry the same data-att-* attributes as the tile, attachmentAction does the rest.
+let readerStatus: (s: string) => void = () => {}; // set by the window (status line)
+const attMenu = document.createElement('div');
+attMenu.className = 'ctx-menu';
+attMenu.setAttribute('role', 'menu');
+attMenu.hidden = true;
+document.body.appendChild(attMenu);
+document.addEventListener('contextmenu', (e) => {
+  const tile = (e.target as HTMLElement).closest<HTMLElement>('.reader .tiles .tile');
+  const msg = bodyMsg;
+  if (!tile || !msg) return;
+  const i = [...tile.parentElement!.children].indexOf(tile);
+  const a = msg.attachments[i];
+  if (!a) return;
+  e.preventDefault();
+  const item = (attr: string, ico: string, label: string) => `<button type="button" role="menuitem" ${attr}>${ico}<span>${esc(label)}</span></button>`;
+  attMenu.innerHTML = [
+    canPreview(a.filename, a.contentType) ? item(`data-att-view="${i}"`, EYE_ICO, t('att.view')) : '',
+    item(`data-att-save="${i}"`, svgIco('<path d="M12 4v12"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/>'), t('viewer.save')),
+    item(`data-att-open="${i}"`, svgIco('<path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>'), t('viewer.open')),
+    msg.attachments.length > 1 ? `<hr>${item('data-att-saveall', svgIco('<path d="M12 4v12"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/>'), t('att.saveAll', { n: msg.attachments.length }))}` : '',
+  ].join('');
+  attMenu.hidden = false;
+  const r = attMenu.getBoundingClientRect();
+  attMenu.style.left = `${Math.min(e.clientX, innerWidth - r.width - 6)}px`;
+  attMenu.style.top = `${Math.min(e.clientY, innerHeight - r.height - 6)}px`;
+});
+attMenu.addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest<HTMLElement>('button');
+  attMenu.hidden = true;
+  if (btn && bodyMsg) void attachmentAction(bodyMsg, btn, readerStatus);
+});
+document.addEventListener('mousedown', (e) => {
+  if (!attMenu.hidden && !attMenu.contains(e.target as Node)) attMenu.hidden = true;
+});
+document.addEventListener('keydown', (e) => e.key === 'Escape' && (attMenu.hidden = true));
 
 // Reply / forward
 function plainText(msg: MailDetail): string {
@@ -546,9 +620,9 @@ function forwardOpts(msg: MailDetail): ComposeOpts {
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🎉'];
 
 const replyButtonsHtml = () => `
-  <button class="btn primary with-ico" data-action="reply">${ACT_ICONS.reply}${esc(t('mail.reply'))}</button>
-  <button class="btn ghost with-ico" data-action="replyAll">${ACT_ICONS.replyAll}${esc(t('mail.replyAll'))}</button>
-  <button class="btn ghost with-ico" data-action="forward">${ACT_ICONS.forward}${esc(t('mail.forward'))}</button>
+  <button class="btn primary with-ico" data-action="reply" title="${esc(t('mail.replyTip'))}">${ACT_ICONS.reply}${esc(t('mail.reply'))}</button>
+  <button class="btn ghost with-ico" data-action="replyAll" title="${esc(t('mail.replyAllTip'))}">${ACT_ICONS.replyAll}${esc(t('mail.replyAll'))}</button>
+  <button class="btn ghost with-ico" data-action="forward" title="${esc(t('mail.forwardTip'))}">${ACT_ICONS.forward}${esc(t('mail.forward'))}</button>
   <span class="react-wrap">
     <button type="button" class="btn ghost react-btn" data-react-menu title="${esc(t('react.tip'))}" aria-label="${esc(t('react.tip'))}" aria-haspopup="true">😊</button>
     <span class="react-pop" role="menu" hidden>${REACTIONS.map((r) => `<button type="button" role="menuitem" data-react="${r}">${r}</button>`).join('')}</span>

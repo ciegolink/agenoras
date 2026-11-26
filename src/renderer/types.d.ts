@@ -201,6 +201,16 @@ interface MailRule {
   stop: boolean;
 }
 
+interface PreviewData {
+  token: string;
+  name: string;
+  size: number;
+  kind: 'pdf' | 'image' | 'text' | 'none';
+  canOpen: boolean;
+  url?: string;
+  text?: string;
+  cut?: boolean;
+}
 interface PrintOpts {
   pageSize: 'A4' | 'Letter';
   landscape: boolean;
@@ -241,6 +251,7 @@ interface MailDetail {
   toList: string[];
   ccList: string[];
   deliveredTo?: string[]; // Delivered-To / X-Original-To (dynamic aliases)
+  fileName?: string; // opened from an .eml file (accountId "eml:…")
   replyTo: string;
   messageId: string;
   references: string[];
@@ -526,6 +537,12 @@ interface Window {
     };
     listFolders(accountId: string): Promise<FolderInfo[]>;
     cachedFolders(accountId: string): Promise<FolderInfo[]>;
+    folders: {
+      create(accountId: string, parent: string, name: string): Promise<string>;
+      rename(accountId: string, path: string, name: string): Promise<string>;
+      count(accountId: string, path: string): Promise<number>;
+      remove(accountId: string, path: string): Promise<void>;
+    };
     moveMails(accountId: string, folder: string, uids: number[], target: string): Promise<{ target: string; uids: number[] }>;
     deleteMails(accountId: string, folder: string, uids: number[]): Promise<{ result: 'trash' | 'deleted'; target?: string; uids?: number[] }>;
     emptyTrash(accountId: string): Promise<number>;
@@ -641,8 +658,27 @@ interface Window {
       saveIdentities(list: Identity[]): Promise<Identity[]>;
       saveTemplates(list: Template[]): Promise<Template[]>;
     };
+    preview: {
+      attachment(accountId: string, folder: string, uid: number, index: number): Promise<PreviewData>;
+      file(file: string): Promise<PreviewData>;
+      data(filename: string, base64: string, contentType: string): Promise<PreviewData>;
+      save(token: string): Promise<string | null>;
+      open(token: string): Promise<void>;
+      release(token: string): Promise<void>;
+    };
+    saveAllAttachments(accountId: string, folder: string, uid: number): Promise<{ dir: string; n: number } | null>;
     saveAttachment(accountId: string, folder: string, uid: number, index: number): Promise<string | null>;
     openAttachment(accountId: string, folder: string, uid: number, index: number): Promise<void>;
+    eml: {
+      openDropped(file: File): Promise<void>;
+    };
+    emlio: {
+      pickDir(): Promise<string | null>;
+      pickFiles(): Promise<{ path: string; name: string; size: number }[]>;
+      exportMails(refs: MailRef[], dir: string): Promise<{ written: number; failed: string[] }>;
+      importFiles(accountId: string, folder: string, files: string[]): Promise<{ imported: number; failed: string[] }>;
+      onProgress(cb: (done: number, total: number) => void): void;
+    };
     files: {
       pick(): Promise<PickedFile[]>;
       dropped(file: File): Promise<PickedFile>;

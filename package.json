@@ -59,6 +59,9 @@
     "node": ">=22"
   },
   "build": {
+    "fileAssociations": [
+      { "ext": "eml", "name": "Email message", "description": "Email message", "mimeType": "message/rfc822", "role": "Viewer" }
+    ],
     "appId": "ch.ciegolink.agenoras",
     "productName": "Agenoras",
     "copyright": "Copyright © 2026 CiegoLink GmbH",

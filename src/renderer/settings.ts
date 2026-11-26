@@ -982,6 +982,7 @@ el('#btn-settings').addEventListener('click', (e) => {
   if (!setMenu.hidden) return void (setMenu.hidden = true);
   setMenu.innerHTML =
     SET_TABS.map(([tab, key, ico]) => `<button type="button" role="menuitem" data-set-tab="${tab}">${svgIco(ico)}<span>${esc(t(key))}</span></button>`).join('') +
+    `<hr><button type="button" role="menuitem" data-emlio>${svgIco('<path d="M7 4v12"/><path d="m3 12 4 4 4-4"/><path d="M17 20V8"/><path d="m13 12 4-4 4 4"/>')}<span>${esc(t('emlio.menu'))}</span></button>` +
     `<hr><button type="button" role="menuitem" data-about>${svgIco('<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>')}<span>${esc(t('about.menu'))}</span></button>`;
   setMenu.hidden = false;
   const r = el('#btn-settings').getBoundingClientRect();
@@ -990,6 +991,10 @@ el('#btn-settings').addEventListener('click', (e) => {
   setMenu.querySelector<HTMLElement>('button')?.focus();
 });
 setMenu.addEventListener('click', (e) => {
+  if ((e.target as HTMLElement).closest('[data-emlio]')) {
+    setMenu.hidden = true;
+    return void openEmlio('export', actionKeys());
+  }
   if ((e.target as HTMLElement).closest('[data-about]')) {
     setMenu.hidden = true;
     return void openAbout();

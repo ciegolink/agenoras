@@ -148,13 +148,18 @@ Click **×** in the search field or press **Esc** to close the search and return
 
 The sidebar shows **All inboxes** (a unified inbox for all accounts) and below it a folder tree for each account, with unread counts. Click the arrow next to a folder to expand or collapse it; Agenoras remembers your choice.
 
-New mail arrives live without refreshing. To check manually, press **F5** or **Ctrl+R**. A folder first shows its newest 50 emails; scroll to the end of the list and the next older ones load (from the offline copy at once, if the account has one, otherwise from the server). They stay in the list until you open another folder.
+New mail arrives live without refreshing. To check manually, press **F5**. A folder first shows its newest 50 emails; scroll to the end of the list and the next older ones load (from the offline copy at once, if the account has one, otherwise from the server). They stay in the list until you open another folder.
 
 Right-click a folder for:
 
 - **Mark all as read** – every folder
 - **Empty trash** – the trash folder, after you confirm; this deletes the mails permanently
 - **Move all to trash** – the spam folder, after you confirm
+- **New subfolder** – creates a folder inside this one on the server (IMAP accounts)
+- **Rename** – renames the folder on the server; its subfolders move along, and mail rules that move into it are updated
+- **Delete folder** – deletes the folder with its emails on the server, after you confirm (the question tells you how many emails it holds). Folders with subfolders can't be deleted; delete or move the subfolders first.
+
+Right-click the account name for **New folder** at the top level. Type the name and press **Enter** (**Esc** cancels). The inbox and special folders like Sent, Drafts, Trash, Spam and Archive can't be renamed or deleted. POP3 accounts have no folders on the server.
 
 ### Reading mail
 
@@ -167,6 +172,19 @@ In the list, an arrow next to the date shows emails you have **replied to** (↩
 **Links**: hover over a link in an email or feed article and its real address appears at the bottom left, with the domain in bold, so you can check where it leads before clicking. If the visible text names a different domain than the link actually goes to (for example "www.bank.ch" that leads to bank-login.example), a red warning says so: a typical sign of phishing. Right-click an email address in the text (a link or just written out) for **Write to …** and **Copy address**, which opens a new email from the account the email came to; right-click a web link for **Copy link**.
 
 Buttons in the email header: **Reply**, **Reply all**, **Forward**, a reaction button (😊), **Archive**, **Delete**. Newsletters get an **Unsubscribe** button in the bar above the email, next to **Load images** (or in a bar of its own): it opens the newsletter's unsubscribe page (in your browser or the browser column, as set under **Open links**), or prepares the unsubscribe email if the newsletter only offers that. Agenoras takes the address from the newsletter's standard unsubscribe header, otherwise from a link in the text such as "unsubscribe" or "abmelden".
+
+### Email files (.eml)
+
+Double-click an `.eml` file on the desktop or in your file manager, or choose **Open with → Agenoras**: it opens in a mail window, also when Agenoras is already running. You can also drag `.eml` files onto the main window or a mail window (other files dropped on the main window still start a new email with them as attachments). An email attached to an email opens in Agenoras as well when you click it.
+
+The email is shown like any other, with attachments, **Reply**, **Forward** (with its attachments) and **Print**. It isn't added to any account. To make Agenoras the default app for `.eml` files, choose it in your system's settings or in the file manager's **Open with** dialog (installed app; on Linux, Windows and macOS Agenoras registers itself for `.eml`).
+
+### Import and export (.eml)
+
+Emails can be saved to your disk as `.eml` files and `.eml` files can be added to a folder – both in the **Import / export** window. Open it from the gear menu (**Import / export emails**), by right-clicking selected emails (**Export as .eml …**) or by right-clicking a folder (**Import .eml files …**).
+
+- **Export**: select the emails in the list first (Ctrl+click, Shift+click, Ctrl+A), choose a folder on your disk and click **Export**. Each email becomes its own file named by date and subject, exactly as the server has it, with attachments.
+- **Import**: choose the target folder (any account and folder), click **Choose .eml files …**, pick one or more files and click **Import**. The emails are added as read, with their original date; on IMAP accounts they are stored on the server.
 
 ### Right-click inside an email
 
@@ -193,6 +211,8 @@ Click on a sender or recipient name for more options: write an email, copy the a
 - **Esc**: clear the selection
 
 Selected emails are highlighted, unread ones too. You can then drag them onto a folder or category, or use the right-click menu.
+
+**Move to folder**: press **Ctrl+Shift+V**, click the folder button above the email or choose **Move to folder** in the right-click menu. Type a few letters of the folder name, pick it with the arrow keys and press **Enter**. This works for the selected emails or the open one, within one account.
 
 ### Right-click menu
 
@@ -244,7 +264,9 @@ Categories are colored labels for your emails, such as "Customer" or "Invoice".
 
 ### Attachments
 
-Click an attachment to open it, or use **Save** to store it. For your safety, executable files (such as `.exe`) are never opened directly; save them instead.
+Click a PDF, image or text file to see it in a **preview panel** on the right of the window (also in an email opened in its own window); the eye on the attachment does the same. The panel has buttons to **open it with an app** and **save** it; **Esc** or **×** closes it. Click an image in the panel to switch between fitted and original size. Other files open with their app.
+
+Right-click an attachment for **View**, **Save …**, **Open with app** and, with several attachments, **Save all**. **Save all** (also above the attachments) stores every attachment in a folder you choose. For your safety, executable files (such as `.exe` or scripts) are never opened directly; save them instead.
 
 ### External images
 
@@ -281,6 +303,8 @@ The editor works like a word processor: paragraph styles, **bold** (Ctrl+B), *it
 ### Attachments
 
 Click **Attach file** or simply drag files into the window. All attachments together can be up to 25 MB.
+
+Click an attachment to see it in the preview panel on the right (PDFs, images and text; other files show buttons to open or save them). Right-click an attachment for **View**, **Open with app** and **Remove**.
 
 ### Priority
 
@@ -535,7 +559,12 @@ On macOS, use **Cmd** instead of **Ctrl**.
 | Where | Shortcut | Action |
 |---|---|---|
 | Everywhere | **Ctrl+K** / **Ctrl+F** | Jump into the search field |
-| Mail | **F5** / **Ctrl+R** | Refresh |
+| Everywhere | **Ctrl+N** | New email, event, task or contact – depending on the view |
+| Mail, mail window | **Ctrl+R** | Reply |
+| Mail, mail window | **Ctrl+Shift+R** | Reply all |
+| Mail, mail window | **Ctrl+Shift+F** | Forward |
+| Mail | **Ctrl+Shift+V** | Move the selected or open emails to a folder |
+| Mail | **F5** | Refresh |
 | Mail | **Del** | Delete selected emails |
 | Mail | **Ctrl+Z** | Undo the last delete or move |
 | Mail | **Ctrl+A** | Select all emails in the list |

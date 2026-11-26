@@ -8,6 +8,8 @@ import { accessToken } from './oauth';
 import { appendToSent, getAttachmentFiles } from './imap';
 import { Identity } from './settings';
 import { i18nData, t } from './i18n';
+import { emlFiles, isEml } from './eml';
+import type { AttachmentFile } from './mailparse';
 
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024; // limit of most mail servers
 
@@ -93,9 +95,14 @@ async function collectAttachments(mail: OutgoingMail): Promise<Attachment[]> {
     attachments.push({ filename: String(x.filename || 'termin.ics'), content, contentType: String(x.contentType || 'application/octet-stream') });
   }
   if (mail.forward?.indexes.length) {
-    const src = getAccount(mail.forward.accountId);
-    if (!src) throw new Error(t('err.accountNotFound'));
-    const files = await getAttachmentFiles(src, mail.forward.folder || 'INBOX', mail.forward.uid);
+    // the original: from its server, or a forwarded .eml file (kept in memory)
+    let files: AttachmentFile[];
+    if (isEml(mail.forward.accountId)) files = emlFiles(mail.forward.accountId);
+    else {
+      const src = getAccount(mail.forward.accountId);
+      if (!src) throw new Error(t('err.accountNotFound'));
+      files = await getAttachmentFiles(src, mail.forward.folder || 'INBOX', mail.forward.uid);
+    }
     for (const i of mail.forward.indexes) {
       const f = files[i];
       if (!f) continue;

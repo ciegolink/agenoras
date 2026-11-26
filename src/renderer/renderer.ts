@@ -864,23 +864,40 @@ folderMenu.setAttribute('role', 'menu');
 folderMenu.hidden = true;
 document.body.appendChild(folderMenu);
 let folderMenuAcc = '';
+let folderMenuAt = { x: 0, y: 0 };
 let folderMenuPath = '';
 
 el('#account-list').addEventListener('contextmenu', (e) => {
+  const accRow = (e.target as HTMLElement).closest<HTMLElement>('.acc-row[data-account]');
   const row = (e.target as HTMLElement).closest<HTMLElement>('.folder[data-folder]');
-  const accId = row?.dataset.account;
-  if (!row || !accId) return;
+  const accId = (row ?? accRow)?.dataset.account;
+  if (!accId || (!row && !accRow)) return;
+  const imap = accountOf(accId)?.protocol !== 'pop3';
+  if (!row && !imap) return;
   e.preventDefault();
-  const use = folderInfo(accId, row.dataset.folder!)?.specialUse;
   folderMenuAcc = accId;
-  folderMenuPath = row.dataset.folder!;
-  folderMenu.innerHTML =
-    `<button type="button" role="menuitem" data-folder-act="allRead">${ACT_ICONS.read}<span>${esc(t('folder.markAllRead'))}</span></button>` +
-    (use === '\\Trash'
+  folderMenuAt = { x: e.clientX, y: e.clientY };
+  const fItem = (act: string, ico: string, label: string, cls = '') => `<button type="button" role="menuitem" class="${cls}" data-folder-act="${act}">${ico}<span>${esc(label)}</span></button>`;
+  const NEW_FOLDER_ICO = svgIco('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M12 11v5M9.5 13.5h5"/>');
+  if (!row) {
+    // account row: a new folder at the top level
+    folderMenuPath = '';
+    folderMenu.innerHTML = fItem('newFolder', NEW_FOLDER_ICO, t('folder.new'));
+  } else {
+    const use = folderInfo(accId, row.dataset.folder!)?.specialUse;
+    folderMenuPath = row.dataset.folder!;
+    const own = imap && folderMenuPath.toUpperCase() !== 'INBOX' && !use; // INBOX and special folders stay as they are
+    folderMenu.innerHTML =
+      fItem('allRead', ACT_ICONS.read, t('folder.markAllRead')) +
+      fItem('importEml', svgIco('<path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M5 21h14"/>'), t('emlio.importMenu')) +
+      (imap ? `<hr>${fItem('newSub', NEW_FOLDER_ICO, t('folder.newSub'))}` : '') +
+      (own ? fItem('rename', svgIco('<path d="M4 20h4L19 9l-4-4L4 16z"/>'), t('folder.rename')) + fItem('delete', ACT_ICONS.trash, t('folder.delete'), 'danger') : '') +
+      (use === '\\Trash'
       ? `<hr><button type="button" role="menuitem" class="danger" data-folder-act="emptyTrash">${ACT_ICONS.trash}<span>${esc(t('folder.emptyTrash'))}</span></button>`
       : use === '\\Junk'
         ? `<hr><button type="button" role="menuitem" data-folder-act="junkToTrash">${ACT_ICONS.trash}<span>${esc(t('folder.junkToTrash'))}</span></button>`
         : '');
+  }
   folderMenu.hidden = false;
   const r = folderMenu.getBoundingClientRect();
   folderMenu.style.left = `${Math.min(e.clientX, innerWidth - r.width - 6)}px`;
@@ -890,6 +907,92 @@ document.addEventListener('mousedown', (e) => {
   if (!folderMenu.contains(e.target as Node)) folderMenu.hidden = true;
 });
 document.addEventListener('scroll', () => (folderMenu.hidden = true), true); // e.g. the sidebar
+
+// Folder name: a small field where the menu was (Enter saves, Esc cancels)
+function askFolderName(title: string, value: string, at: { x: number; y: number }): Promise<string | null> {
+  return new Promise((resolve) => {
+    const box = document.createElement('div');
+    box.className = 'ctx-menu name-pick';
+    box.innerHTML = `<div class="ctx-head">${esc(title.toUpperCase())}</div><input type="text" maxlength="100" spellcheck="false" autocomplete="off" aria-label="${esc(title)}">`;
+    document.body.appendChild(box);
+    const input = box.querySelector('input')!;
+    input.value = value;
+    const r = box.getBoundingClientRect();
+    box.style.left = `${Math.max(6, Math.min(at.x, innerWidth - r.width - 6))}px`;
+    box.style.top = `${Math.max(6, Math.min(at.y, innerHeight - r.height - 6))}px`;
+    input.focus();
+    input.select();
+    let done = false;
+    const finish = (v: string | null) => {
+      if (done) return;
+      done = true;
+      box.remove();
+      document.removeEventListener('mousedown', outside, true);
+      resolve(v && v.trim() ? v.trim() : null);
+    };
+    const outside = (e: MouseEvent) => !box.contains(e.target as Node) && finish(null);
+    document.addEventListener('mousedown', outside, true);
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') finish(input.value);
+      else if (e.key === 'Escape') finish(null);
+    });
+  });
+}
+
+async function folderCreate(accountId: string, parent: string, at: { x: number; y: number }): Promise<void> {
+  const name = await askFolderName(t(parent ? 'folder.newSub' : 'folder.new'), '', at);
+  if (!name) return;
+  setStatus(t('status.updating'));
+  try {
+    await window.api.folders.create(accountId, parent, name);
+    expandedAccs.add(accountId);
+    await loadFolders(accountId);
+    renderAccounts();
+    setStatus(t('folder.created', { name }));
+  } catch (err) {
+    setStatus(errMsg(err));
+  }
+}
+
+async function folderRename(accountId: string, path: string, at: { x: number; y: number }): Promise<void> {
+  const f = folderInfo(accountId, path);
+  const name = await askFolderName(t('folder.rename'), f?.name ?? path, at);
+  if (!name || name === f?.name) return;
+  setStatus(t('status.updating'));
+  try {
+    const to = await window.api.folders.rename(accountId, path, name);
+    // the open folder (or one inside it) was renamed: follow it
+    if (currentAccount === accountId && currentFolder === path) currentFolder = to;
+    else if (currentAccount === accountId && currentFolder.startsWith(path) && currentFolder !== path) currentFolder = 'INBOX';
+    await loadFolders(accountId);
+    renderAccounts();
+    if (currentAccount === accountId) void loadMails();
+    setStatus(t('folder.renamed', { name }));
+  } catch (err) {
+    setStatus(errMsg(err));
+  }
+}
+
+async function folderDelete(accountId: string, path: string): Promise<void> {
+  const name = folderLabel(accountId, path);
+  const n = await window.api.folders.count(accountId, path);
+  if (!confirm(n > 0 ? t('folder.deleteConfirm', { name, n }) : t('folder.deleteEmptyConfirm', { name }))) return;
+  setStatus(t('status.updating'));
+  try {
+    await window.api.folders.remove(accountId, path);
+    if (currentAccount === accountId && currentFolder === path) {
+      currentFolder = 'INBOX';
+      clearReader();
+      void loadMails();
+    }
+    await loadFolders(accountId);
+    renderAccounts();
+    setStatus(t('folder.deleted', { name }));
+  } catch (err) {
+    setStatus(errMsg(err));
+  }
+}
 
 // No question: marking read can be undone mail by mail
 async function markFolderRead(accountId: string, folder: string): Promise<void> {
@@ -909,11 +1012,15 @@ async function markFolderRead(accountId: string, folder: string): Promise<void> 
 }
 
 folderMenu.addEventListener('click', async (e) => {
-  const act = (e.target as HTMLElement).closest<HTMLElement>('[data-folder-act]')?.dataset.folderAct as 'allRead' | 'emptyTrash' | 'junkToTrash' | undefined;
+  const act = (e.target as HTMLElement).closest<HTMLElement>('[data-folder-act]')?.dataset.folderAct as 'allRead' | 'emptyTrash' | 'junkToTrash' | 'newFolder' | 'newSub' | 'rename' | 'delete' | 'importEml' | undefined;
   const acc = accountOf(folderMenuAcc);
   folderMenu.hidden = true;
   if (!act || !acc) return;
   if (act === 'allRead') return void markFolderRead(acc.id, folderMenuPath);
+  if (act === 'importEml') return void openEmlio('import', [], { accountId: acc.id, folder: folderMenuPath });
+  if (act === 'newFolder' || act === 'newSub') return void folderCreate(acc.id, act === 'newSub' ? folderMenuPath : '', folderMenuAt);
+  if (act === 'rename') return void folderRename(acc.id, folderMenuPath, folderMenuAt);
+  if (act === 'delete') return void folderDelete(acc.id, folderMenuPath);
   if (!confirm(t(act === 'emptyTrash' ? 'folder.emptyTrashConfirm' : 'folder.junkToTrashConfirm', { email: acc.email }))) return;
   setStatus(t('status.updating'));
   try {
@@ -1006,6 +1113,7 @@ async function openMail(key: string, loadImages = false): Promise<void> {
       <button class="icon-btn sm" data-action="window" aria-label="${esc(t('mail.openWindow'))}" title="${esc(t('mail.openWindow'))}">${ACT_ICONS.window}</button>
       <button class="icon-btn sm" data-action="unread" aria-label="${esc(t('mail.markUnread'))}" title="${esc(t('mail.markUnread'))}">${ACT_ICONS.unread}</button>
       ${inJunk ? `<button class="icon-btn sm" data-action="notspam" aria-label="${esc(t('mail.notSpam'))}" title="${esc(t('mail.notSpam'))}">${ACT_ICONS.notSpam}</button>` : hasJunk ? `<button class="icon-btn sm" data-action="spam" aria-label="${esc(t('mail.spam'))}" title="${esc(t('mail.spam'))}">${ACT_ICONS.spam}</button>` : ''}
+      <button class="icon-btn sm" data-action="move" aria-label="${esc(t('move.title'))}" title="${esc(t('move.titleTip'))}">${ACT_ICONS.move}</button>
       ${hasArchive && !isArchive ? `<button class="icon-btn sm" data-action="archive" aria-label="${esc(t('mail.archive'))}" title="${esc(t('mail.archive'))}">${icon('\\Archive')}</button>` : ''}
       <button class="icon-btn sm danger" data-action="delete" aria-label="${esc(t(inTrash ? 'mail.deleteForever' : 'mail.delete'))}" title="${esc(t(inTrash ? 'mail.deleteForever' : 'mail.deleteTip'))}">${icon('\\Trash')}</button>
     </div>
@@ -1659,6 +1767,233 @@ function forward(): void {
 }
 
 el('#btn-compose').addEventListener('click', () => openCompose());
+readerStatus = setStatus; // right-click menu on attachments (reader.ts)
+
+
+// The mails an action is for: the selection, else the open mail
+const actionKeys = () => (selected.size ? [...selected] : currentMsg ? [mailKey(currentMsg)] : []);
+
+// Move to folder (Ctrl+Shift+V, right-click, button in the reader): type to filter, arrows, Enter moves.
+// Like drag & drop only within one account.
+const movePick = document.createElement('div');
+movePick.className = 'ctx-menu move-pick';
+movePick.setAttribute('role', 'dialog');
+movePick.hidden = true;
+document.body.appendChild(movePick);
+let moveKeys: string[] = [];
+let moveAccount = '';
+let moveIdx = 0;
+let moveShown: FolderInfo[] = [];
+
+async function openMovePicker(keys: string[], at?: { x: number; y: number }): Promise<void> {
+  if (!keys.length) return;
+  const accs = new Set(keys.map((k) => parseKey(k).accountId));
+  if (accs.size > 1) return setStatus(t('move.oneAccount'));
+  moveAccount = [...accs][0];
+  if (!folderCache.has(moveAccount)) await loadFolders(moveAccount);
+  moveKeys = keys;
+  moveIdx = 0;
+  movePick.innerHTML = `<div class="ctx-head">${esc(t('move.title').toUpperCase())}</div>
+    <input type="search" class="mp-filter" placeholder="${esc(t('move.filter'))}" aria-label="${esc(t('move.filter'))}" autocomplete="off" spellcheck="false">
+    <div class="mp-list" role="listbox"></div>`;
+  movePick.hidden = false;
+  renderMoveList();
+  const r = movePick.getBoundingClientRect();
+  const x = at ? at.x : (innerWidth - r.width) / 2;
+  const y = at ? at.y : Math.max(60, innerHeight / 5);
+  movePick.style.left = `${Math.max(6, Math.min(x, innerWidth - r.width - 6))}px`;
+  movePick.style.top = `${Math.max(6, Math.min(y, innerHeight - r.height - 6))}px`;
+  movePick.querySelector<HTMLInputElement>('.mp-filter')!.focus();
+}
+
+function renderMoveList(): void {
+  const q = movePick.querySelector<HTMLInputElement>('.mp-filter')?.value.trim().toLowerCase() ?? '';
+  const from = new Set(moveKeys.map((k) => parseKey(k).folder));
+  moveShown = (folderCache.get(moveAccount) ?? []).filter(
+    (f) => f.selectable && !(from.size === 1 && from.has(f.path)) && (!q || folderLabel(moveAccount, f.path).toLowerCase().includes(q) || f.path.toLowerCase().includes(q)),
+  );
+  moveIdx = Math.min(moveIdx, Math.max(0, moveShown.length - 1));
+  movePick.querySelector('.mp-list')!.innerHTML = moveShown.length
+    ? moveShown
+        .map(
+          (f, i) =>
+            `<button type="button" role="option" aria-selected="${i === moveIdx}" class="${i === moveIdx ? 'on' : ''}" data-move-to="${i}" style="padding-left:${10 + (q ? 0 : f.depth * 14)}px">${icon(f.specialUse)}<span>${esc(folderLabel(moveAccount, f.path))}</span></button>`,
+        )
+        .join('')
+    : `<div class="mp-none">${esc(t('move.none'))}</div>`;
+  movePick.querySelector('.mp-list .on')?.scrollIntoView({ block: 'nearest' });
+}
+
+const hideMovePicker = () => (movePick.hidden = true);
+
+function moveTo(i: number): void {
+  const f = moveShown[i];
+  hideMovePicker();
+  if (!f) return;
+  const keys = moveKeys.filter((k) => parseKey(k).folder !== f.path);
+  if (keys.length) void removeMails(keys, { move: f.path });
+}
+
+movePick.addEventListener('input', () => {
+  moveIdx = 0;
+  renderMoveList();
+});
+movePick.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (!moveShown.length) return;
+    moveIdx = (moveIdx + (e.key === 'ArrowDown' ? 1 : moveShown.length - 1)) % moveShown.length;
+    renderMoveList();
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    moveTo(moveIdx);
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
+    hideMovePicker();
+  }
+});
+movePick.addEventListener('click', (e) => {
+  const i = (e.target as HTMLElement).closest<HTMLElement>('[data-move-to]')?.dataset.moveTo;
+  if (i !== undefined) moveTo(Number(i));
+});
+document.addEventListener('mousedown', (e) => {
+  if (!movePick.hidden && !movePick.contains(e.target as Node)) hideMovePicker();
+});
+
+// Import / export window: selected emails as .eml files to a folder on the disk; .eml files into a mail folder
+const emlioDlg = el<HTMLDialogElement>('#dlg-emlio');
+let emlioTab: 'export' | 'import' = 'export';
+let emlioKeys: string[] = [];
+let emlioDir = '';
+let emlioPicked: { path: string; name: string; size: number }[] = [];
+let emlioBusy = false;
+const emlioSay = (text: string, error = false) => {
+  el('#emlio-progress').textContent = error ? '' : text;
+  el('#emlio-error').textContent = error ? text : '';
+};
+
+function paintEmlio(): void {
+  document.querySelectorAll<HTMLElement>('#emlio-tabs [data-emlio-tab]').forEach((b) => {
+    const on = b.dataset.emlioTab === emlioTab;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-selected', String(on));
+  });
+  el('#emlio-export').hidden = emlioTab !== 'export';
+  el('#emlio-import').hidden = emlioTab !== 'import';
+  el('#emlio-export-what').textContent = emlioKeys.length ? t('emlio.exportWhat', { n: emlioKeys.length }) : t('emlio.exportNone');
+  el('#emlio-dir').textContent = emlioDir || t('emlio.noDir');
+  el('#emlio-files').textContent = emlioPicked.length ? (emlioPicked.length === 1 ? emlioPicked[0].name : t('emlio.filesN', { n: emlioPicked.length })) : t('emlio.noFiles');
+  el('#emlio-files').title = emlioPicked.map((f) => f.name).join('\n');
+  const go = el<HTMLButtonElement>('#btn-emlio-go');
+  go.textContent = t(emlioTab === 'export' ? 'emlio.exportGo' : 'emlio.importGo');
+  go.disabled = emlioBusy || (emlioTab === 'export' ? !emlioKeys.length || !emlioDir : !emlioPicked.length || !el<HTMLSelectElement>('#emlio-target').value);
+  document.querySelectorAll<HTMLButtonElement>('#form-emlio button:not(#btn-emlio-go)').forEach((b) => (b.disabled = emlioBusy));
+}
+
+// Target folders of all accounts (POP3: its local folders). Option value: account id + ":" + encoded path
+const emlioValue = (accountId: string, folder: string) => `${accountId}:${encodeURIComponent(folder)}`;
+const emlioTarget = (v: string) => ({ accountId: v.slice(0, v.indexOf(':')), folder: decodeURIComponent(v.slice(v.indexOf(':') + 1)) });
+async function fillEmlioTargets(pre?: { accountId: string; folder: string }): Promise<void> {
+  await Promise.all(accounts.filter((a) => !folderCache.has(a.id)).map((a) => loadFolders(a.id).catch(() => {})));
+  const sel = el<HTMLSelectElement>('#emlio-target');
+  const keep = pre ? emlioValue(pre.accountId, pre.folder) : sel.value;
+  sel.innerHTML = accounts
+    .map((a) => `<optgroup label="${esc(accLabel(a))}">${(folderCache.get(a.id) ?? [])
+      .filter((f) => f.selectable)
+      .map((f) => `<option value="${esc(emlioValue(a.id, f.path))}">${'\u2003'.repeat(f.depth)}${esc(folderLabel(a.id, f.path))}</option>`)
+      .join('')}</optgroup>`)
+    .join('');
+  if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
+  else if (currentAccount && [...sel.options].some((o) => o.value === emlioValue(currentAccount!, currentFolder))) sel.value = emlioValue(currentAccount, currentFolder);
+}
+
+async function openEmlio(tab: 'export' | 'import', keys: string[] = [], target?: { accountId: string; folder: string }): Promise<void> {
+  emlioTab = tab;
+  emlioKeys = keys;
+  emlioPicked = [];
+  emlioBusy = false;
+  emlioSay('');
+  await fillEmlioTargets(target);
+  paintEmlio();
+  emlioDlg.showModal();
+}
+
+el('#emlio-tabs').addEventListener('click', (e) => {
+  const tab = (e.target as HTMLElement).closest<HTMLElement>('[data-emlio-tab]')?.dataset.emlioTab as 'export' | 'import' | undefined;
+  if (!tab || emlioBusy) return;
+  emlioTab = tab;
+  emlioSay('');
+  paintEmlio();
+});
+el('#emlio-target').addEventListener('change', paintEmlio);
+el('#btn-emlio-close').addEventListener('click', () => !emlioBusy && emlioDlg.close());
+emlioDlg.addEventListener('cancel', (e) => emlioBusy && e.preventDefault());
+el('#btn-emlio-dir').addEventListener('click', async () => {
+  const dir = await window.api.emlio.pickDir().catch((err) => (emlioSay(errMsg(err), true), null));
+  if (dir) emlioDir = dir;
+  paintEmlio();
+});
+el('#btn-emlio-files').addEventListener('click', async () => {
+  const files = await window.api.emlio.pickFiles().catch((err) => (emlioSay(errMsg(err), true), []));
+  if (files.length) emlioPicked = files;
+  paintEmlio();
+});
+window.api.emlio.onProgress((done, total) => emlioSay(t(emlioTab === 'export' ? 'emlio.exporting' : 'emlio.importing', { done, total })));
+
+el('#btn-emlio-go').addEventListener('click', async () => {
+  if (emlioBusy) return;
+  emlioBusy = true;
+  emlioSay(t(emlioTab === 'export' ? 'emlio.exporting' : 'emlio.importing', { done: 0, total: emlioTab === 'export' ? emlioKeys.length : emlioPicked.length }));
+  paintEmlio();
+  try {
+    if (emlioTab === 'export') {
+      const res = await window.api.emlio.exportMails(emlioKeys.map(parseKey), emlioDir);
+      emlioSay(t('emlio.exported', { n: res.written, dir: emlioDir }) + (res.failed.length ? ` ${t('emlio.failedN', { n: res.failed.length, list: res.failed.slice(0, 3).join('; ') })}` : ''), !res.written);
+    } else {
+      const { accountId, folder } = emlioTarget(el<HTMLSelectElement>('#emlio-target').value);
+      const res = await window.api.emlio.importFiles(accountId, folder, emlioPicked.map((f) => f.path));
+      emlioSay(t('emlio.imported', { n: res.imported, folder: folderLabel(accountId, folder) }) + (res.failed.length ? ` ${t('emlio.failedN', { n: res.failed.length, list: res.failed.slice(0, 3).join('; ') })}` : ''), !res.imported);
+      if (res.imported) {
+        emlioPicked = [];
+        loadFolders(accountId);
+        if (currentAccount === accountId && currentFolder === folder) void loadMails();
+      }
+    }
+  } catch (err) {
+    emlioSay(errMsg(err), true);
+  } finally {
+    emlioBusy = false;
+    paintEmlio();
+  }
+});
+
+// Ctrl+N: new item of the view (email, event, task, contact). In Mail and Search:
+// Ctrl+R reply, Ctrl+Shift+R reply all, Ctrl+Shift+F forward, Ctrl+Shift+V move to folder.
+// Ctrl+R / Ctrl+Shift+R are always taken here – otherwise the window would reload.
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (!['n', 'r', 'f', 'v'].includes(k)) return;
+  if (k === 'r') e.preventDefault();
+  if (document.querySelector('dialog[open]') || !movePick.hidden) return;
+  const view = el('.app').dataset.view;
+  if (k === 'n' && !e.shiftKey) {
+    e.preventDefault();
+    const btn = { cal: '#btn-new-event', tasks: '#btn-new-task', contacts: '#btn-new-contact' }[view ?? ''] ?? '#btn-compose';
+    el(btn).click();
+    return;
+  }
+  if (view !== 'mail' && view !== 'search') return;
+  if (k === 'r') reply(e.shiftKey);
+  else if (k === 'f' && e.shiftKey) {
+    e.preventDefault();
+    forward();
+  } else if (k === 'v' && e.shiftKey && !(e.target as HTMLElement).closest('input, textarea, [contenteditable="true"]')) {
+    e.preventDefault();
+    void openMovePicker(actionKeys());
+  }
+});
 
 // Reading pane: reply/forward/archive/delete and open/save attachments
 el('#reader').addEventListener('click', async (e) => {
@@ -1668,6 +2003,7 @@ el('#reader').addEventListener('click', async (e) => {
   if (action === 'replyAll') return reply(true);
   if (action === 'forward') return forward();
   if (action === 'print') return printCurrentMail();
+  if (action === 'move') return void openMovePicker(actionKeys());
   if (action === 'window' && currentMsg) return void window.api.mailview.open(parseKey(mailKey(currentMsg)));
   if (action === 'flag' && currentMsg) return toggleFlag([mailKey(currentMsg)]);
   if (action === 'spam' && currentMsg) return removeMails([mailKey(currentMsg)], { move: '\\Junk' });
@@ -1688,15 +2024,18 @@ el('#reader').addEventListener('click', async (e) => {
   if (currentMsg) await attachmentAction(currentMsg, tgt, setStatus);
 });
 
-// Drop files onto the main window → new mail with these attachments; never navigate away
+// Drop files onto the main window → new mail with these attachments; .eml files open to read
+// (to send an .eml as attachment, drop it into the compose window); never navigate away
 document.addEventListener('dragover', (e) => {
   if (e.dataTransfer?.types.includes('Files')) e.preventDefault();
 });
 document.addEventListener('drop', async (e) => {
   e.preventDefault();
   if (!e.dataTransfer?.files.length || document.querySelector('dialog[open]')) return;
+  const all = Array.from(e.dataTransfer.files);
+  for (const f of all.filter((x) => /\.eml$/i.test(x.name))) window.api.eml.openDropped(f).catch((err) => setStatus(errMsg(err)));
   const files: PickedFile[] = [];
-  for (const f of Array.from(e.dataTransfer.files)) {
+  for (const f of all.filter((x) => !/\.eml$/i.test(x.name))) {
     try {
       files.push(await window.api.files.dropped(f));
     } catch {
@@ -2233,12 +2572,14 @@ ctx.setAttribute('role', 'menu');
 document.body.appendChild(ctx);
 wireSubmenus(ctx);
 let ctxKeys: string[] = [];
+let ctxAt = { x: 0, y: 0 }; // where the menu was opened (the folder list opens there)
 
 function hideCtx(): void {
   ctx.hidden = true;
 }
 
 el('#mail-list').addEventListener('contextmenu', (e) => {
+  ctxAt = { x: e.clientX, y: e.clientY };
   const key = (e.target as HTMLElement).closest<HTMLElement>('[data-key]')?.dataset.key;
   if (!key) return;
   e.preventDefault();
@@ -2266,6 +2607,8 @@ el('#mail-list').addEventListener('contextmenu', (e) => {
     anyUnread ? item('seen', ACT_ICONS.read, t('mail.markRead')) : item('unseen', ACT_ICONS.unread, t('mail.markUnread')),
     item(allFlagged ? 'unflag' : 'flag', `<span class="ctx-star">${allFlagged ? '☆' : '★'}</span>`, t(allFlagged ? 'mail.unflag' : 'mail.flag')),
     '<hr>',
+    item('move', ACT_ICONS.move, t('move.title')),
+    item('exportEml', svgIco('<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>'), t('emlio.exportMenu')),
     canArchive ? item('archive', ACT_ICONS.archive, t('mail.archive')) : '',
     allJunk ? item('notspam', ACT_ICONS.notSpam, t('mail.notSpam')) : canSpam ? item('spam', ACT_ICONS.spam, t('mail.spam')) : '',
     item('delete', ACT_ICONS.trash, t('mail.delete'), 'danger'),
@@ -2309,6 +2652,8 @@ ctx.addEventListener('click', async (e) => {
   if (action === 'spam') return removeMails(keys, { move: '\\Junk' });
   if (action === 'notspam') return removeMails(keys, { move: 'INBOX' });
   if (action === 'archive' || action === 'delete') return removeMails(keys, action);
+  if (action === 'move') return openMovePicker(keys, ctxAt);
+  if (action === 'exportEml') return void openEmlio('export', keys);
   if (action === 'window') return void window.api.mailview.open(parseKey(keys[0]));
   if (action === 'pin') return pinMail(keys[0]);
   if (action.startsWith('label:')) return toggleLabel(keys, action.slice(6));
@@ -2449,8 +2794,9 @@ async function convertTo(kind: 'mail' | 'event' | 'task', title: string, text: s
 
 const mailAsText = (msg: MailDetail) => `${t('quote.header', { date: fmtLong(msg.date), name: msg.fromName, email: msg.fromAddress })}\n\n${plainText(msg).trim()}`;
 
+// F5 refreshes (Ctrl+R is "Reply", see below)
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r')) {
+  if (e.key === 'F5') {
     e.preventDefault();
     refreshAll();
   }
@@ -2670,8 +3016,17 @@ function applyCols(save = false): void {
   const agendaW = document.body.classList.contains('agenda-on') && app.dataset.view === 'mail' ? AGENDA_W : 0;
   const listMax = Math.max(COLS.list.min, Math.min(COLS.list.max, innerWidth - colWidth.side - READER_MIN - agendaW));
   colWidth.list = Math.min(listMax, Math.max(COLS.list.min, colWidth.list));
+  // attachment preview column: the reader keeps its minimum; the list gives way first (only while it is open)
+  let listW = colWidth.list;
+  if (document.body.classList.contains('att-on')) {
+    const others = (document.body.classList.contains('pins-on') ? 290 : 0) + (document.body.classList.contains('web-on') ? Math.min(560, innerWidth * 0.4) : 0);
+    const room = innerWidth - colWidth.side - READER_MIN - agendaW - others;
+    const want = 440;
+    if (room - listW < want) listW = Math.max(COLS.list.min, room - want);
+    app.style.setProperty('--att-col', `${Math.round(Math.max(320, Math.min(560, room - listW)))}px`);
+  } else app.style.removeProperty('--att-col');
   app.style.setProperty('--side-w', `${colWidth.side}px`);
-  app.style.setProperty('--list-w', `${colWidth.list}px`);
+  app.style.setProperty('--list-w', `${listW}px`);
   if (save) {
     try {
       localStorage.setItem('ciegolink.cols', JSON.stringify(colWidth));
@@ -2690,6 +3045,7 @@ try {
 }
 applyCols();
 window.addEventListener('resize', () => applyCols());
+document.addEventListener('attpanel', () => applyCols()); // preview column opened or closed (common.ts)
 
 document.querySelectorAll<HTMLElement>('.col-resizer').forEach((h) => {
   const col = h.dataset.col as ColName;

@@ -64,6 +64,12 @@ contextBridge.exposeInMainWorld('api', {
   },
   listFolders: (accountId: string) => ipcRenderer.invoke('mail:folders', accountId),
   cachedFolders: (accountId: string) => ipcRenderer.invoke('mail:folders:cached', accountId),
+  folders: {
+    create: (accountId: string, parent: string, name: string) => ipcRenderer.invoke('folder:create', accountId, parent, name),
+    rename: (accountId: string, path: string, name: string) => ipcRenderer.invoke('folder:rename', accountId, path, name),
+    count: (accountId: string, path: string) => ipcRenderer.invoke('folder:count', accountId, path),
+    remove: (accountId: string, path: string) => ipcRenderer.invoke('folder:delete', accountId, path),
+  },
   cachedMail: (accountId: string | null, folder?: string) => ipcRenderer.invoke('mail:cached', accountId, folder),
   listMail: (accountId: string | null, folder?: string) => ipcRenderer.invoke('mail:list', accountId, folder),
   olderMail: (accountId: string | null, folder: string, before: Record<string, number>) => ipcRenderer.invoke('mail:older', accountId, folder, before),
@@ -163,8 +169,34 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('outbox:changed', (_e, items) => cb(items));
     },
   },
+  preview: {
+    attachment: (accountId: string, folder: string, uid: number, index: number) => ipcRenderer.invoke('preview:attachment', accountId, folder, uid, index),
+    file: (file: string) => ipcRenderer.invoke('preview:file', file),
+    data: (filename: string, base64: string, contentType: string) => ipcRenderer.invoke('preview:data', filename, base64, contentType),
+    save: (token: string) => ipcRenderer.invoke('preview:save', token),
+    open: (token: string) => ipcRenderer.invoke('preview:open', token),
+    release: (token: string) => ipcRenderer.invoke('preview:release', token),
+  },
+  saveAllAttachments: (accountId: string, folder: string, uid: number) => ipcRenderer.invoke('mail:attachment:saveAll', accountId, folder, uid),
   saveAttachment: (accountId: string, folder: string, uid: number, index: number) => ipcRenderer.invoke('mail:attachment:save', accountId, folder, uid, index),
   openAttachment: (accountId: string, folder: string, uid: number, index: number) => ipcRenderer.invoke('mail:attachment:open', accountId, folder, uid, index),
+  emlio: {
+    pickDir: () => ipcRenderer.invoke('emlio:pickDir'),
+    pickFiles: () => ipcRenderer.invoke('emlio:pickFiles'),
+    exportMails: (refs: unknown[], dir: string) => ipcRenderer.invoke('emlio:export', refs, dir),
+    importFiles: (accountId: string, folder: string, files: string[]) => ipcRenderer.invoke('emlio:import', accountId, folder, files),
+    onProgress: (cb: (done: number, total: number) => void) => {
+      ipcRenderer.removeAllListeners('emlio:progress');
+      ipcRenderer.on('emlio:progress', (_e, done: number, total: number) => cb(done, total));
+    },
+  },
+  eml: {
+    // an .eml file dropped on a window: shown in the mail window
+    openDropped: (file: File) => {
+      const p = webUtils.getPathForFile(file);
+      return p ? ipcRenderer.invoke('eml:open', p) : Promise.reject(new Error('no path'));
+    },
+  },
   files: {
     pick: () => ipcRenderer.invoke('files:pick'),
     // Only real dropped files have a path

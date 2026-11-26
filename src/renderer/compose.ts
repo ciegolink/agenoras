@@ -522,7 +522,7 @@ function renderComposeAtts(): void {
   el('#compose-atts').innerHTML = composeAtts
     .map(
       (a, i) => `<div class="tile">
-        <div class="tile-main" title="${esc(a.name)} · ${fmtSize(a.size)}">${fileIcon(a.name)}<span class="tname">${esc(a.name)}</span><span class="tsize">${fmtSize(a.size)}</span></div>
+        <button type="button" class="tile-main" data-view-att="${i}" title="${esc(t('att.viewTip', { name: a.name, size: fmtSize(a.size) }))}">${fileIcon(a.name)}<span class="tname">${esc(a.name)}</span><span class="tsize">${fmtSize(a.size)}</span></button>
         <button type="button" class="tile-act" data-rm-att="${i}" aria-label="${esc(t('common.removeItem', { name: a.name }))}" title="${esc(t('common.remove'))}">×</button>
       </div>`,
     )
@@ -544,7 +544,77 @@ function addFiles(list: { path: string; name: string; size: number }[]): void {
   renderComposeAtts();
 }
 
+// Click on an attachment: shown in the side panel (file, attachment of the forwarded mail, attached data);
+// right-click: view, open with app, remove
+let forwardSrc: { accountId: string; folder: string; uid: number } | null = null;
+function loadComposeAtt(a: ComposeAttachment): () => Promise<PreviewData> {
+  if (a.kind === 'file') return () => window.api.preview.file(a.path);
+  if (a.kind === 'fwd' && forwardSrc) {
+    const src = forwardSrc;
+    return () => window.api.preview.attachment(src.accountId, src.folder, src.uid, a.index);
+  }
+  if (a.kind === 'data') return () => window.api.preview.data(a.name, a.content, a.contentType);
+  return () => Promise.reject(new Error(t('viewer.gone')));
+}
+const viewComposeAtt = (a: ComposeAttachment) => showPreview(loadComposeAtt(a), setInfo);
+async function openComposeAtt(a: ComposeAttachment): Promise<void> {
+  try {
+    const p = await loadComposeAtt(a)();
+    await window.api.preview.open(p.token).finally(() => window.api.preview.release(p.token));
+  } catch (err) {
+    setInfo(errMsg(err));
+  }
+}
+
+const attCtx = document.createElement('div');
+attCtx.className = 'ctx-menu';
+attCtx.setAttribute('role', 'menu');
+attCtx.hidden = true;
+document.body.appendChild(attCtx);
+let attCtxIdx = -1;
+el('#compose-atts').addEventListener('contextmenu', (e) => {
+  const v = (e.target as HTMLElement).closest('.tile')?.querySelector<HTMLElement>('[data-view-att]')?.dataset.viewAtt;
+  if (v === undefined) return;
+  e.preventDefault();
+  attCtxIdx = Number(v);
+  const a = composeAtts[attCtxIdx];
+  const ico = (p: string) => `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
+  attCtx.innerHTML = [
+    canPreview(a.name, a.kind === 'data' ? a.contentType : '') ? `<button type="button" role="menuitem" data-catt="view">${ico('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>')}<span>${esc(t('att.view'))}</span></button>` : '',
+    `<button type="button" role="menuitem" data-catt="open">${ico('<path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>')}<span>${esc(t('viewer.open'))}</span></button>`,
+    `<hr><button type="button" role="menuitem" class="danger" data-catt="remove">${ico('<path d="M18 6 6 18M6 6l12 12"/>')}<span>${esc(t('common.remove'))}</span></button>`,
+  ].join('');
+  attCtx.hidden = false;
+  const r = attCtx.getBoundingClientRect();
+  attCtx.style.left = `${Math.min(e.clientX, innerWidth - r.width - 6)}px`;
+  attCtx.style.top = `${Math.min(e.clientY, innerHeight - r.height - 6)}px`;
+});
+attCtx.addEventListener('click', (e) => {
+  const act = (e.target as HTMLElement).closest<HTMLElement>('[data-catt]')?.dataset.catt;
+  attCtx.hidden = true;
+  const a = composeAtts[attCtxIdx];
+  if (!act || !a) return;
+  if (act === 'view') void viewComposeAtt(a);
+  else if (act === 'open') void openComposeAtt(a);
+  else {
+    composeAtts.splice(attCtxIdx, 1);
+    dirty = true;
+    renderComposeAtts();
+    closePreview();
+  }
+});
+document.addEventListener('mousedown', (e) => {
+  if (!attCtx.hidden && !attCtx.contains(e.target as Node)) attCtx.hidden = true;
+});
+document.addEventListener('keydown', (e) => e.key === 'Escape' && (attCtx.hidden = true));
+
 el('#compose-atts').addEventListener('click', (e) => {
+  const v = (e.target as HTMLElement).closest<HTMLElement>('[data-view-att]')?.dataset.viewAtt;
+  if (v !== undefined) {
+    const a = composeAtts[Number(v)];
+    if (a) void viewComposeAtt(a);
+    return;
+  }
   const i = (e.target as HTMLElement).closest<HTMLElement>('[data-rm-att]')?.dataset.rmAtt;
   if (i === undefined) return;
   composeAtts.splice(Number(i), 1);
@@ -1061,6 +1131,7 @@ function initCompose(o: ComposeOpts): void {
   answerRef = o.source && (o.mode === 'reply' || o.mode === 'replyAll' || o.mode === 'forward') ? { ...o.source, kind: o.mode === 'forward' ? 'forward' : 'reply' } : undefined;
 
   const fw = o.forward;
+  forwardSrc = fw ? { accountId: fw.accountId, folder: fw.folder, uid: fw.uid } : null;
   fwdSource = fw ? { accountId: fw.accountId, folder: fw.folder ?? 'INBOX', uid: fw.uid } : null;
   composeAtts = fw ? fw.attachments.map((a, index) => ({ kind: 'fwd' as const, index, name: a.filename, size: a.size })) : [];
   for (const f of o.files ?? []) composeAtts.push({ kind: 'file', ...f });

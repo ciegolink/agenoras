@@ -44,7 +44,7 @@
   <nav class="side" data-i18n-aria="nav.aria">
 
     <div class="side-part" id="side-mail">
-      <button class="btn primary" id="btn-compose" data-i18n="mail.new"></button>
+      <button class="btn primary" id="btn-compose" data-i18n="mail.new" data-i18n-title="mail.newTip"></button>
       <div class="label" data-i18n="mail.mailboxes"></div>
       <button class="box all-box" data-account="">
         <span class="vico all-ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h10"/><path d="M5 6.5h14"/><path d="M22 14h-6l-2 3h-4l-2-3H2"/><path d="M5.5 10h13L22 14v5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-5Z"/></svg></span>
@@ -56,14 +56,14 @@
     </div>
 
     <div class="side-part" id="side-cal">
-      <button class="btn primary" id="btn-new-event" data-i18n="cal.newEvent"></button>
+      <button class="btn primary" id="btn-new-event" data-i18n="cal.newEvent" data-i18n-title="cal.newEventTip"></button>
       <div class="label" data-i18n="cal.calendars"></div>
       <div id="cal-list"></div>
       <div class="cal-mini" id="cal-mini"></div>
     </div>
 
     <div class="side-part" id="side-contacts">
-      <button class="btn primary" id="btn-new-contact" data-i18n="contacts.new"></button>
+      <button class="btn primary" id="btn-new-contact" data-i18n="contacts.new" data-i18n-title="contacts.newTip"></button>
       <div class="label" data-i18n="contacts.books"></div>
       <button class="box" data-book="">
         <span class="name" data-i18n="contacts.all"></span><span class="count" id="contacts-count"></span>
@@ -73,7 +73,7 @@
     </div>
 
     <div class="side-part" id="side-tasks">
-      <button class="btn primary" id="btn-new-task" data-i18n="tasks.new"></button>
+      <button class="btn primary" id="btn-new-task" data-i18n="tasks.new" data-i18n-title="tasks.newTip"></button>
       <div class="label" data-i18n="tasks.lists"></div>
       <button class="box" data-tlist="">
         <span class="name" data-i18n="tasks.all"></span><span class="count" id="tasks-count"></span>
@@ -485,6 +485,33 @@
       <button type="button" class="btn ghost danger" id="btn-label-delete" data-i18n="btn.delete"></button>
       <button type="button" class="btn ghost" id="btn-label-cancel" data-i18n="btn.cancel"></button>
       <button type="submit" class="btn primary" data-i18n="btn.save"></button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-emlio" class="emlio-dlg">
+  <form id="form-emlio" method="dialog">
+    <h2 data-i18n-html="emlio.title"></h2>
+    <div class="seg mini" role="tablist" id="emlio-tabs">
+      <button type="button" role="tab" data-emlio-tab="export" data-i18n="emlio.export"></button>
+      <button type="button" role="tab" data-emlio-tab="import" data-i18n="emlio.import"></button>
+    </div>
+    <section id="emlio-export">
+      <p class="emlio-what" id="emlio-export-what"></p>
+      <div class="emlio-row"><span class="emlio-path" id="emlio-dir"></span><button type="button" class="btn ghost" id="btn-emlio-dir" data-i18n="emlio.pickDir"></button></div>
+      <p class="hint" data-i18n="emlio.exportHint"></p>
+    </section>
+    <section id="emlio-import" hidden>
+      <label><span data-i18n="emlio.target"></span><select id="emlio-target"></select></label>
+      <div class="emlio-row"><span class="emlio-path" id="emlio-files"></span><button type="button" class="btn ghost" id="btn-emlio-files" data-i18n="emlio.pickFiles"></button></div>
+      <p class="hint" data-i18n="emlio.importHint"></p>
+    </section>
+    <p class="hint emlio-progress" id="emlio-progress" role="status"></p>
+    <p class="error" id="emlio-error"></p>
+    <div class="actions">
+      <span class="spacer"></span>
+      <button type="button" class="btn ghost" id="btn-emlio-close" data-i18n="btn.close"></button>
+      <button type="button" class="btn primary" id="btn-emlio-go"></button>
     </div>
   </form>
 </dialog>

@@ -37,6 +37,12 @@ import {
   fetchFolder,
   FolderInfo,
   listFolders,
+  getRawMessage,
+  importRaw,
+  createFolder,
+  renameFolder,
+  deleteFolder,
+  folderCount,
   moveMessages,
   friendlyError,
   getAttachmentFiles,
@@ -106,6 +112,8 @@ import { cachedByMessageIds, cachedReplies, hasOffline, offlineBody, offlineOlde
 import { availableLanguages, i18nData, initI18n, chromiumLocale, regionWeekStart, t } from './i18n';
 import { writeFileSafe } from './files';
 import { cleanPrintFiles, openPrintPreview, PrintJob, registerPrintIpc } from './print';
+import { cleanPreviewFiles, DANGEROUS, guardWebviews, makePreview, registerPreviewIpc, ViewFile } from './preview';
+import { emlArg, emlDetail, emlFileName, emlFiles, isEml, loadEml, loadEmlFile, mailMeta } from './eml';
 
 // Language: system language if lang/<code>.json exists – otherwise English.
 // The locale also drives date fields and formats (e.g. de-CH).
@@ -131,6 +139,14 @@ app.on('open-url', (e, url) => {
   e.preventDefault();
   if (app.isReady()) openMailto(url);
   else pendingMailto = url;
+});
+// .eml files: Windows/Linux on the command line ("Open with"), macOS with open-file
+let pendingEml: string | null = emlArg(process.argv) ?? null;
+app.on('open-file', (e, file) => {
+  if (!/\.eml$/i.test(file)) return;
+  e.preventDefault();
+  if (app.isReady()) void openEmlFile(file);
+  else pendingEml = file;
 });
 
 // Windows: without an app ID no notifications appear
@@ -236,11 +252,8 @@ function createWindow(): void {
   lockDown(win);
   // Browser column: web pages only, no preload, no Node, sandboxed, in their own session that is
   // forgotten when the app closes (no cookies mixed with anything else, nothing left behind)
-  win.webContents.on('will-attach-webview', (e, prefs, params) => {
-    delete (prefs as { preload?: string }).preload;
-    Object.assign(prefs, { nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, partition: WEB_PARTITION });
-    if (!/^https?:/i.test(params.src ?? '')) e.preventDefault();
-  });
+  // (plus PDF previews of attachments, see preview.ts)
+  guardWebviews(win, WEB_PARTITION);
   trackWinState(win, 'main', true);
   win.loadFile(path.join(__dirname, '../../src/renderer/index.html'));
   const hidden = startedHidden(); // started with the system "in the background": only the tray
@@ -286,8 +299,89 @@ function showWindow(): void {
 
 app.on('second-instance', (_e, argv) => {
   const url = mailtoArg(argv);
+  const eml = emlArg(argv);
   if (url) openMailto(url);
+  else if (eml) void openEmlFile(eml);
   else showWindow();
+});
+
+// An .eml file in the mail window; problems go to the status line of the main window
+async function openEmlFile(file: string): Promise<void> {
+  try {
+    openMailWindow({ accountId: await loadEmlFile(file), folder: '', uid: 0 });
+  } catch (err) {
+    showWindow();
+    whenMainReady(() => win?.webContents.send('mail:status', `${path.basename(file)}: ${err instanceof Error ? err.message : String(err)}`));
+  }
+}
+ipcMain.handle('eml:open', (_e, file: string) => openEmlFile(String(file)));
+
+// Import / export window: emails as .eml files. Only a folder or files chosen in the system dialog
+// are written to or read from (the page can't name other paths).
+const emlioDirs = new Set<string>();
+const emlioFiles = new Set<string>();
+const EML_MAX = 50 * 1024 * 1024;
+
+ipcMain.handle('emlio:pickDir', async (e) => {
+  const owner = BrowserWindow.fromWebContents(e.sender) ?? win!;
+  const res = await dialog.showOpenDialog(owner, { title: t('emlio.pickDir'), defaultPath: getKv<string>('emlio:lastDir') ?? app.getPath('documents'), properties: ['openDirectory', 'createDirectory'] });
+  if (res.canceled || !res.filePaths[0]) return null;
+  emlioDirs.add(res.filePaths[0]);
+  setKv('emlio:lastDir', res.filePaths[0]);
+  return res.filePaths[0];
+});
+
+ipcMain.handle('emlio:pickFiles', async (e) => {
+  const owner = BrowserWindow.fromWebContents(e.sender) ?? win!;
+  const res = await dialog.showOpenDialog(owner, { title: t('emlio.pickFiles'), defaultPath: getKv<string>('emlio:lastDir') ?? app.getPath('documents'), filters: [{ name: 'E-Mail (.eml)', extensions: ['eml'] }], properties: ['openFile', 'multiSelections'] });
+  if (res.canceled) return [];
+  return res.filePaths.map((f) => {
+    emlioFiles.add(f);
+    return { path: f, name: path.basename(f), size: fs.statSync(f, { throwIfNoEntry: false })?.size ?? 0 };
+  });
+});
+
+ipcMain.handle('emlio:export', async (e, refs: { accountId: string; folder: string; uid: number }[], dir: string) => {
+  if (!emlioDirs.has(dir)) throw new Error(t('emlio.pickDirFirst'));
+  const list = (Array.isArray(refs) ? refs : []).slice(0, 5000);
+  const failed: string[] = [];
+  let written = 0;
+  for (const [i, r] of list.entries()) {
+    try {
+      const acc = getAccount(String(r.accountId));
+      if (!acc) throw new Error(t('err.accountNotFound'));
+      const raw = await getRawMessage(acc, String(r.folder || 'INBOX'), Number(r.uid));
+      const meta = await mailMeta(raw).catch(() => ({ subject: '', date: undefined }));
+      await fs.promises.writeFile(path.join(dir, emlFileName(dir, meta.subject, meta.date)), raw);
+      written++;
+    } catch (err) {
+      failed.push(friendlyError(err));
+    }
+    if (!e.sender.isDestroyed()) e.sender.send('emlio:progress', i + 1, list.length);
+  }
+  return { written, failed };
+});
+
+ipcMain.handle('emlio:import', async (e, accountId: string, folder: string, files: string[]) => {
+  const acc = getAccount(String(accountId));
+  if (!acc) throw new Error(t('err.accountNotFound'));
+  const list = (Array.isArray(files) ? files : []).map(String).filter((f) => emlioFiles.has(f));
+  const failed: string[] = [];
+  let imported = 0;
+  for (const [i, f] of list.entries()) {
+    try {
+      const stat = await fs.promises.stat(f);
+      if (stat.size > EML_MAX) throw new Error(t('eml.tooBig'));
+      const raw = await fs.promises.readFile(f);
+      const meta = await mailMeta(raw);
+      await importRaw(acc, String(folder || 'INBOX'), raw, meta.date);
+      imported++;
+    } catch (err) {
+      failed.push(`${path.basename(f)}: ${friendlyError(err)}`);
+    }
+    if (!e.sender.isDestroyed()) e.sender.send('emlio:progress', i + 1, list.length);
+  }
+  return { imported, failed };
 });
 
 // Runs fn once the main window has loaded (messages sent earlier would get lost)
@@ -485,11 +579,12 @@ function openComposeWindow(opts: unknown): void {
     title: 'Agenoras',
     show: false,
     ...frameOpts,
-    webPreferences,
+    webPreferences: { ...webPreferences, webviewTag: true }, // webview only for PDF previews (preview.ts)
   });
   const id = cw.webContents.id;
   composeOpts.set(id, opts ?? {});
   lockDown(cw);
+  guardWebviews(cw);
   if (!popup) trackWinState(cw, 'compose', false);
   cw.loadFile(path.join(__dirname, '../../src/renderer/compose.html'), popup ? { query: { popup: '1' } } : undefined);
   cw.once('ready-to-show', () => {
@@ -537,11 +632,12 @@ function openMailWindow(ref: { accountId: string; folder: string; uid: number })
     title: 'Agenoras',
     show: false,
     ...frameOpts,
-    webPreferences,
+    webPreferences: { ...webPreferences, webviewTag: true }, // webview only for PDF previews (preview.ts)
   });
   const id = vw.webContents.id;
   viewerOpts.set(id, ref);
   lockDown(vw);
+  guardWebviews(vw);
   trackWinState(vw, 'mailview', false);
   vw.loadFile(path.join(__dirname, '../../src/renderer/mailview.html'));
   vw.once('ready-to-show', () => {
@@ -597,6 +693,50 @@ function makePrintWindow(parent: BrowserWindow | null): BrowserWindow {
   });
   return pv;
 }
+
+// Attachment preview (side panel of the window): an attachment of a mail (also of an opened .eml or the
+// original when forwarding), a file attached in the compose window (only picked/dropped paths), attached data
+ipcMain.handle('preview:attachment', async (e, accountId: string, folder: string, uid: number, index: number) => {
+  const f = await attachment(String(accountId), String(folder), Number(uid), Number(index));
+  return makePreview({ filename: f.filename, contentType: f.contentType, content: f.content }, e.sender.id);
+});
+ipcMain.handle('preview:file', async (e, file: string) => {
+  if (!approvedFiles.has(String(file))) throw new Error(t('err.fileNotApproved', { name: path.basename(String(file)) }));
+  const stat = await fs.promises.stat(file);
+  if (stat.size > 100 * 1024 * 1024) throw new Error(t('viewer.tooBig'));
+  return makePreview({ filename: path.basename(file), contentType: '', content: await fs.promises.readFile(file) }, e.sender.id);
+});
+ipcMain.handle('preview:data', (e, filename: string, base64: string, contentType: string) =>
+  makePreview({ filename: String(filename || 'attachment'), contentType: String(contentType || ''), content: Buffer.from(String(base64 ?? ''), 'base64') }, e.sender.id),
+);
+registerPreviewIpc();
+
+// All attachments of a mail into one folder (names made unique)
+ipcMain.handle('mail:attachment:saveAll', async (e, accountId: string, folder: string, uid: number) => {
+  const owner = BrowserWindow.fromWebContents(e.sender) ?? win!;
+  const res = await dialog.showOpenDialog(owner, { title: t('att.saveAllTitle'), defaultPath: app.getPath('downloads'), properties: ['openDirectory', 'createDirectory'] });
+  if (res.canceled || !res.filePaths[0]) return null;
+  const dir = res.filePaths[0];
+  let files;
+  try {
+    if (isEml(accountId)) files = emlFiles(accountId);
+    else {
+      const acc = getAccount(accountId);
+      if (!acc) throw new Error(t('err.accountNotFound'));
+      files = await getAttachmentFiles(acc, folder, uid);
+    }
+  } catch (err) {
+    throw new Error(friendlyError(err));
+  }
+  for (const f of files) {
+    const ext = path.extname(safeName(f.filename));
+    const stem = safeName(f.filename).slice(0, safeName(f.filename).length - ext.length);
+    let name = `${stem}${ext}`;
+    for (let i = 2; fs.existsSync(path.join(dir, name)); i++) name = `${stem} (${i})${ext}`;
+    await fs.promises.writeFile(path.join(dir, name), f.content);
+  }
+  return { dir, n: files.length };
+});
 
 ipcMain.handle('print:open', (e, job: PrintJob) => openPrintPreview(job, BrowserWindow.fromWebContents(e.sender), makePrintWindow));
 registerPrintIpc();
@@ -842,6 +982,47 @@ setOfflineBusy(outboxBusy); // sending first, the offline sync waits
 const accountsFor = (accountId: string | null) => listAccounts().filter((a) => !accountId || a.id === accountId);
 
 // Folder tree of an account (with unread counts); offline from the cache
+// Folder management: create, rename, delete (IMAP). Cache and rules follow a renamed folder.
+const accountOrThrow = (id: string) => {
+  const acc = getAccount(String(id));
+  if (!acc) throw new Error(t('err.accountNotFound'));
+  return acc;
+};
+ipcMain.handle('folder:create', async (_e, accountId: string, parent: string, name: string) => {
+  try {
+    return await createFolder(accountOrThrow(accountId), String(parent ?? ''), String(name ?? ''));
+  } catch (err) {
+    throw new Error(friendlyError(err));
+  }
+});
+ipcMain.handle('folder:rename', async (_e, accountId: string, path: string, name: string) => {
+  const acc = accountOrThrow(accountId);
+  let to: string;
+  try {
+    to = await renameFolder(acc, String(path), String(name ?? ''));
+  } catch (err) {
+    throw new Error(friendlyError(err));
+  }
+  if (to !== path) {
+    // the old folder and its subfolders: cached under their old names → load fresh
+    const old = String(path);
+    for (const f of getKv<FolderInfo[]>(`folders:${acc.id}`) ?? []) if (f.path === old || f.path.startsWith(`${old}/`) || f.path.startsWith(`${old}.`)) forgetFolder(folderKey(acc.id, f.path));
+    const rules = getSettings().rules;
+    if (rules.some((r) => r.accountId === acc.id && r.actions.move === old)) saveRules(rules.map((r) => (r.accountId === acc.id && r.actions.move === old ? { ...r, actions: { ...r.actions, move: to } } : r)));
+  }
+  return to;
+});
+ipcMain.handle('folder:count', (_e, accountId: string, path: string) => folderCount(accountOrThrow(accountId), String(path)).catch(() => -1));
+ipcMain.handle('folder:delete', async (_e, accountId: string, path: string) => {
+  const acc = accountOrThrow(accountId);
+  try {
+    await deleteFolder(acc, String(path));
+  } catch (err) {
+    throw new Error(friendlyError(err));
+  }
+  forgetFolder(folderKey(acc.id, String(path)));
+});
+
 ipcMain.handle('mail:folders', async (_e, accountId: string) => {
   const acc = getAccount(accountId);
   if (!acc) throw new Error(t('err.accountNotFound'));
@@ -947,6 +1128,11 @@ async function withImages(detail: MailDetail, loadImages: boolean) {
 
 // markRead = false: only show (the main window marks it read itself after the chosen delay)
 ipcMain.handle('mail:get', async (_e, accountId: string, folder: string, uid: number, loadImages = false, markRead = true) => {
+  if (isEml(accountId)) {
+    const d = emlDetail(accountId);
+    if (!d) throw new Error(t('eml.gone'));
+    return withImages({ ...d }, !!loadImages);
+  }
   const acc = getAccount(accountId);
   if (!acc) throw new Error(t('err.accountNotFound'));
   const key = folderKey(accountId, folder);
@@ -1282,9 +1468,14 @@ ipcMain.handle('files:pick', async () => {
 
 ipcMain.handle('files:dropped', (_e, p: string) => fileInfo(p));
 
-const DANGEROUS = /\.(exe|com|bat|cmd|msi|msp|scr|pif|vbs|vbe|js|jse|wsf|wsh|ps1|psm1|hta|cpl|jar|lnk|reg|dll|application|appref-ms|iso|img|vhd)$/i;
+// DANGEROUS (files never started from a mail) comes from viewer.ts
 
 async function attachment(accountId: string, folder: string, uid: number, index: number) {
+  if (isEml(accountId)) {
+    const f = emlFiles(accountId)[index];
+    if (!f) throw new Error(t('err.attachmentNotFound'));
+    return f;
+  }
   const acc = getAccount(accountId);
   if (!acc) throw new Error(t('err.accountNotFound'));
   try {
@@ -1308,6 +1499,11 @@ ipcMain.handle('mail:attachment:save', async (_e, accountId: string, folder: str
 
 ipcMain.handle('mail:attachment:open', async (_e, accountId: string, folder: string, uid: number, index: number) => {
   const f = await attachment(accountId, folder, uid, index);
+  // an attached email opens in Agenoras itself
+  if (/^message\/rfc822/i.test(f.contentType) || /\.eml$/i.test(f.filename)) {
+    openMailWindow({ accountId: await loadEml(f.content, f.filename), folder: '', uid: 0 });
+    return;
+  }
   if (DANGEROUS.test(f.filename)) throw new Error(t('err.dangerousFile'));
   const dir = path.join(app.getPath('temp'), 'agenoras', crypto.randomUUID());
   await fs.promises.mkdir(dir, { recursive: true });
@@ -1893,14 +2089,36 @@ ipcMain.handle('rules:run', async (_e, accountId: string | null) => {
   }
 });
 
+// macOS handles menu shortcuts before the page: the default menu's Cmd+R (reload) would take "Reply".
+// The same menu without reloading; Windows/Linux keep the default (the page takes the keys first there).
+function setMacMenu(): void {
+  if (process.platform !== 'darwin') return;
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      { role: 'appMenu' },
+      { role: 'fileMenu' },
+      { role: 'editMenu' },
+      { label: 'View', submenu: [{ role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }] },
+      { role: 'windowMenu' },
+    ]),
+  );
+}
+
 app.whenReady().then(() => {
+  setMacMenu();
   applySpellcheck();
   cleanPrintFiles();
+  cleanPreviewFiles();
   nativeTheme.themeSource = getSettings().theme;
   powerMonitor.on('resume', () => setTimeout(reconnectAll, 3000)); // give the network a moment to come back
   // Log out / shut down: quit on our own before the system takes the helper processes away
   // (otherwise Chromium tries to restart them, can't, and ends with a crash report)
   powerMonitor.on('shutdown', quitNow);
+  if (pendingEml) {
+    const file = pendingEml;
+    pendingEml = null;
+    void openEmlFile(file);
+  }
   if (pendingMailto) {
     const url = pendingMailto;
     pendingMailto = null;
